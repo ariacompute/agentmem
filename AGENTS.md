@@ -6,7 +6,9 @@ Read this before modifying the repository. Detailed docs live under `docs/`.
 
 A Go 1.27.3 service: OKF+Git canonical knowledge bodies, PostgreSQL/GORM for
 server-side structured state, pluggable RAG adapters, and a rule-first smart
-router with an AFM-D System One fallback.
+router with an AFM-D System One fallback. `web/` is a dependency-free ES module
+console (status + HTTP API docs) served as static files; the Go binary neither
+embeds nor serves it.
 
 ## Layering (single direction, no upward imports)
 
@@ -50,6 +52,12 @@ Attested Computation bodies live in OKF+Git; PostgreSQL stores only verdicts.
 - **Schema source is SQL migrations**, not `AutoMigrate`. Movement is versioned
   in `schema_migrations` with an advisory lock.
 - **Explicit plugin registry**, not Go `.so` plugins.
+- **Web is dependency-free, monochrome and fully localised.** `web/` ships plain
+  ES modules with no runtime framework, external CSS or CDN assets and is served
+  as static files. Every colour sits on the black/white/grey luminance axis
+  (`web/tests/style.test.mjs` enforces it). All 13 languages need real
+  translations in `web/src/lib/copy/`; methods, paths, field names, status codes
+  and JSON samples are machine data and are never translated.
 
 ## Commands
 
@@ -60,6 +68,8 @@ make build       # single binary
 make eval        # ranking metrics from testdata/eval.jsonl
 make validate    # strict validation of .env.example
 make check-boundaries  # SDK boundaries stay declarative; no inline annotations
+cd web && npm test  # offline node:test suites, zero extra dependencies
+cd web && npm run build  # optional Vite bundle of the same static page
 ```
 
 ## Where to look
@@ -80,6 +90,11 @@ make check-boundaries  # SDK boundaries stay declarative; no inline annotations
 | Write / read / migrate | `internal/router/write.go`, `read.go`, `migrate.go` |
 | Assembly | `internal/service/knowledge.go` |
 | API / CLI | `internal/handlers/http.go`, `internal/cli/root.go` |
+| Web shell / views | `web/index.html`, `web/src/main.js`, `web/src/views/` |
+| Web languages & copy | `web/src/lib/languages.js`, `i18n.js`, `copy/` |
+| Web themes | `web/src/lib/theme.js`, `web/src/style.css` |
+| API docs skeleton | `web/src/lib/api-content.js`, `internal/handlers/http.go` |
+| Web tests | `web/tests/` |
 
 Real third-party engine SDK wiring belongs in a sidecar, not in agentmem. Each
 compiled-in engine plugin declares that boundary as data in `plugin.yaml`
@@ -87,3 +102,11 @@ compiled-in engine plugin declares that boundary as data in `plugin.yaml`
 mapping, credential reference) and is validated by `make check-boundaries`.
 Do not "silently" replace a bridge with an untestable native client: the offline
 mock must stay reachable and observable, and every new capability needs a fake.
+
+The endpoint table in `web/src/lib/api-content.js` is the user-facing half of
+`internal/handlers/http.go`: a route change must be mirrored there.
+`web/tests/api-content.test.mjs` pins the 9 method+path combinations,
+`copy-fallback.test.mjs` demands a non-English translation for every key, and
+`style.test.mjs` keeps the console monochrome. The outbound sidecar wire
+protocol in `internal/bridges/` is not part of the public API; do not document
+`/put`, `/query` or `/delete` as agentmem endpoints.

@@ -24,8 +24,14 @@ and a rule-first smart router.
   fallback with 5000 ms timeout, 256-entry cache, low-score protection and
   fail-closed behaviour. Dual-path reads/writes plus resumable migration.
 - **Interfaces**: JSON HTTP API (including `/v1/computations`), ten CLI
-  commands (including `compute` / `computations`), pure-function ranking and
-  routing evaluation, minimal Vite status page.
+  commands (including `compute` / `computations`) and pure-function ranking
+  and routing evaluation.
+- **Web console**: a dependency-free ES module page with a status view and an
+  in-app HTTP API reference: 9 method+path combinations, request/response JSON
+  samples, conventions and error/status codes. Prose is fully translated into
+  13 languages (English fallback, Arabic RTL), and a monochrome black/white/
+  grey light/dark theme follows the OS until explicitly chosen. Offline
+  `node:test` suites guard copy coverage, endpoint drift and the palette.
 - **`.env` configuration**: a single gitignored `.env` file (template:
   `.env.example`) with a closed `AGENTMEM_*` key whitelist, process-env
   overrides and zero-dependency parsing. Docker Compose consumes the same file
@@ -39,6 +45,8 @@ and a rule-first smart router.
 - `postgres` is the only Attested Computation runtime that executes; the other
   four runtimes (`bigquery`, `dbt`, `python`, `looker`) are formal contract
   skeletons returning `Unsupported`.
-- The Vite page is template-level only (health + decisions).
+- The web console is a static page served by a reverse proxy or any file
+  server; the Go binary does not embed it. The API reference is read-only, with
+  no interactive request builder.
 - `002_pgvector.sql` is best-effort; the metadata layer starts without the
   extension and logs a warning.

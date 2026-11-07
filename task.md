@@ -39,7 +39,7 @@
 - [x] `internal/service` 装配、`internal/handlers` HTTP API、端到端 httptest。
 - [x] `cmd/agentmem` 入口与 CLI 命令。
 - [x] `internal/eval` 纯函数指标与路由准确率。
-- [x] 文档、CI、Docker、compose、最小 Vite 页面、示例 bundle 与评测数据集。
+- [x] 文档、CI、Docker、compose、最小 Vite 页面、示例 bundle 与评测数据集（Web 控制台后续升级见阶段 9）。
 
 ## 阶段 7 · 四引擎 Go 插件化
 
@@ -56,6 +56,16 @@
 - [x] `computation_runs` 审计：`003_computations.sql`、`MetaStore` 扩展、快照往返、幂等。
 - [x] HTTP `/v1/computations`、CLI `compute` / `computations`、`docs/computations.md`。
 
+## 阶段 9 · Web 控制台本地化与 API 文档
+
+- [x] `web/src/lib/languages.js` + `i18n.js`：13 语言目录、`?lang=` > localStorage > 浏览器语言 > 英文、英文浅合并兜底、`<html lang|dir>` 与 RTL。
+- [x] `web/src/lib/copy/shell-copy.js` / `api-copy.js`：界面文案与文档正文 13 语言完整译文。
+- [x] `web/src/lib/theme.js` + `web/src/style.css` + `index.html` 首屏脚本：纯黑白灰双主题、跟随系统、显式选择持久化、`prefers-reduced-motion`。
+- [x] 外壳重构：`web/src/main.js` 顶栏 / 导航 / 语言与主题切换器 / 页脚，`views/status.js` 状态视图、`views/docs.js` 文档视图。
+- [x] `web/src/lib/api-content.js`：9 个 method+path 组合、JSON 样例、通用约定与状态码，严格镜像 `internal/handlers/http.go`。
+- [x] `web/tests/` 六个零依赖 `node:test` 套件（语言、译文兜底、端点漂移、单色守卫、主题、DOM 冒烟）；`web/package.json` 的 `npm test` 与 CI web job 接入。
+- [x] `README.md` / `README_cn.md` Web 章节同步。
+
 ## 验收
 
 ```bash
@@ -65,6 +75,8 @@ go build -o bin/agentmem ./cmd/agentmem
 go run ./cmd/agentmem validate --env .env.example
 go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
 make check-boundaries
+cd web && npm test
+cd web && npm run build
 ```
 
-验收条件：以上命令全部成功；不启动 Postgres、不访问网络、不需要密钥；四个插件在离线 mock 下可装配、可写、可查、可启停；`postgres` 计算链路离线可执行且 attestation 失败拒绝展示。
+验收条件：以上命令全部成功；不启动 Postgres、不访问网络、不需要密钥；四个插件在离线 mock 下可装配、可写、可查、可启停；`postgres` 计算链路离线可执行且 attestation 失败拒绝展示；13 语言文案完整、端点表与 `http.go` 一致、单色守卫通过，web 仍可用任意静态服务器直接托管。

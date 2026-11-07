@@ -55,9 +55,19 @@
 - CLI：`serve` / `put` / `query` / `migrate` / `decisions` / `concepts` / `compute` / `computations` / `validate` / `eval`；命令用 `--env` 指定配置文件。
 - HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`。
 - 评测：Recall@k / Precision@k / nDCG / MRR / MAP / HitRate@k 纯函数；显式区分覆盖率 Recall 与二值 HitRate。
-- 文档、CI、Docker、compose、模板级最小 Vite 页面。
-- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries` 全绿，离线无外部服务。
+- 文档、CI、Docker、compose；`web/` 零运行时依赖原生 ES module 控制台（详见第 8 节）。
+- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`cd web && npm test`、`cd web && npm run build` 全绿，离线无外部服务。
 
-## 8. 非目标
+## 8. Web 控制台
 
-完整管理台；Go 二进制内直接链接四个 Python 引擎的原生 SDK（由 sidecar 承担 `sdk_boundary`）；非 `postgres` 计算执行器；自动 commit/push 源码仓库；跨组织知识同步协议。
+- 零运行时依赖的原生 ES module 单页（HTML + JS + 独立 `web/src/style.css`），可由任意静态服务器直接托管；Vite 6 仅作可选打包与开发代理；不引入框架、路由、CDN 或外部资源，Go 二进制不提供静态资源。
+- 两个视图：状态（`/healthz` 健康字段 + `/v1/decisions?limit=20` 最近决策，含刷新、加载与错误提示）与 API 文档；`?view=docs` 可直达文档视图。
+- 13 种语言与 agenthub 一致：`en / zh / zh-TW / es / fr / de / it / ru / ja / ko / pt / ar / hi`。优先级 `?lang=` > localStorage(`agentmem.lang`) > 浏览器语言 > 英文；英文浅合并兜底，阿拉伯语 RTL 镜像 `<html lang|dir>`；界面文案与文档正文在 13 语言下均有各自译文。
+- light / dark 双主题共用纯黑白灰灰阶，不含任何色相；`index.html` 首屏脚本写 `data-theme`，未选择时跟随系统，仅显式切换持久化到 `agentmem.theme`；状态差异由亮度、描边、字重、形状与克制动效表达。
+- API 文档覆盖 `internal/handlers/http.go` 的 9 个 method+path 组合，含章节索引、分组端点表、可展开的请求/响应 JSON 样例，以及 Base URL、Content-Type、4 MiB 上限、`{"error":...}` 错误体、405/422/502 状态码、`limit` 与 ACL、无鉴权/CORS 等通用约定；出站 sidecar 线协议不属于对外 API。方法、路径、字段名、状态码与 JSON 样例在所有语言下逐字呈现。
+- Node 内置 `node:test` 套件（零新增依赖）：语言目录、译文完整性与英文兜底、端点表与后端路由一致性、单色守卫、主题解析/持久化、DOM 冒烟（两视图切换、示例展开、RTL、主题切换）；CI 的 web job 执行 `npm test` 与 `npm run build`。
+- 页面不输出日志、不记录 API 响应正文；示例仅用占位值，不含正文、PII 或凭据。
+
+## 9. 非目标
+
+完整管理台；Go 二进制内直接链接四个 Python 引擎的原生 SDK（由 sidecar 承担 `sdk_boundary`）；非 `postgres` 计算执行器；自动 commit/push 源码仓库；跨组织知识同步协议；前端框架/组件库、CDN 资源与交互式 Try it。
