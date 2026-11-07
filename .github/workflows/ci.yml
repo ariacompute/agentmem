@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: Download dependencies
+        run: go mod download
+      - name: Vet
+        run: go vet ./...
+      - name: Test (offline, no services)
+        run: go test ./... -count=1
+      - name: Build
+        run: go build -o bin/agentmem ./cmd/agentmem
+      - name: Validate config
+        run: go run ./cmd/agentmem validate
+      - name: Evaluation smoke test
+        run: go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build minimal status page
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+  # Optional: only runs on manual dispatch; the default test suite never needs
+  # a database. Set AGENTMEM_TEST_PG_DSN to exercise the real GORM backend.
+  postgres-integration:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: agentmem_test
+          POSTGRES_USER: agentmem
+          POSTGRES_PASSWORD: agentmem_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agentmem -d agentmem_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: Integration test
+        env:
+          AGENTMEM_TEST_PG_DSN: postgres://agentmem:agentmem_test@localhost:5432/agentmem_test?sslmode=disable
+        run: go test ./internal/meta -run TestPostgresIntegration -v -count=1

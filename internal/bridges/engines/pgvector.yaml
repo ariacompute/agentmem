@@ -1,0 +1,11 @@
+name: pgvector
+kind: pgvector
+endpoint: ""
+timeout_ms: 3000
+offline_mock: true
+capabilities:
+  vector: true
+  semantic: true
+  graph: false
+  page_level: false
+notes: "Implemented natively by internal/adapter/pgvector.go over the meta.VectorStore port; no HTTP sidecar needed. Uses the in-memory fake when no DSN is configured."

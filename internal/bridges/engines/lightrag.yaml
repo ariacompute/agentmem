@@ -1,0 +1,11 @@
+name: lightrag
+kind: http
+endpoint: ""
+timeout_ms: 5000
+offline_mock: true
+capabilities:
+  vector: true
+  semantic: true
+  graph: true
+  page_level: false
+notes: "LightRAG often runs as an external server. Bridge protocol: POST /put, /query, /delete, GET /healthz. TODO(real): map to LightRAG Server endpoints."

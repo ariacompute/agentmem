@@ -1,0 +1,28 @@
+# Go
+/agentmem
+/agenthub-server
+/bin/
+operator/bin/
+*.test
+*.out
+
+# Local runtime data (OKF bundle + local config with secrets)
+/data/
+/config.yaml
+/index-cache/
+
+# Local env
+.env
+
+# Runtime snapshot
+*.snapshot.json
+
+# Frontend
+node_modules/
+web/dist/
+web/coverage/
+backend/static/
+*.local
+
+coverage.out
+.codebuddy/

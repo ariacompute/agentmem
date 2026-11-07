@@ -1,0 +1,47 @@
+# agentmem 需求规格 v0.1.0
+
+## 1. OKF+Git 存储知识数据
+
+- 实现 OKF v0.2 兼容读写：YAML frontmatter、必填 `type`、`sources` / `generated` / `verified` / `status` / `stale_after` 信任族、Attested Computation 契约建模。
+- 宽松 conformance：仅 `type` 非空为硬性要求；未知 `type`、未知 frontmatter 键、断链、缺 `index.md` 均不拒绝；`verified` bare mapping 视为单元素列表；未知键 round-trip 保留。
+- `index.md` 渐进式披露（按受影响目录增量重生成）、`log.md` 日期分组变更史、markdown 跨链接解析（断链合法）。
+- Git 为正文唯一权威：`go-git/v5` 纯 Go 后端，每次写入生成 `content_hash` 与 `commit_sha`，支持 Log / Show / Diff / 回放；批量文件合并为单次提交；原子写（临时文件 + rename）。
+- 路径安全：拒绝 `..`、绝对路径、反斜杠、保留名 `index` / `log`。
+- ACL 扩展字段 `visibility` / `owner` 写入 frontmatter 作为可移植副本。
+
+## 2. PostgreSQL + GORM 存储服务端结构化数据
+
+- 依赖 `gorm.io/gorm` + `gorm.io/driver/postgres` + `pgx/v5`，版本与 `agenthub/go.mod` 一致。
+- 库内只存：概念元数据、RAG 投影状态、`content_hash` 索引、embedding `Fingerprint`、路由决策审计、迁移游标/断点、ACL、引擎指纹与配置版本。**不存知识正文**。
+- 版本化迁移 `migrations/*.sql` 由 `db.Exec` 在事务内按序应用（advisory lock + `schema_migrations`）；`AutoMigrate` 不作为 schema 来源；pgvector 迁移为尽力而为。
+- GORM 仅出现在 `internal/meta`：`MetaStore` 端口签名不含 `*gorm.DB`，上层包不 import gorm；CRUD 使用模型、`clause.OnConflict` upsert 与事务；日志默认 `Warn` 且不打印 SQL 参数。
+- `pgvector` 的 `vector` 类型用自定义 `Scanner/Valuer` + 原生参数化 SQL，经 `VectorStore` 窄端口暴露。
+- 生产 `AGENTMEM_PG_DSN` 必填；dev/测试注入文件持久化 fake（`data/meta.fake.json`），保证 CLI 多进程共享 ACL、投影与审计状态。
+
+## 3. 插件化第三方 RAG
+
+- 统一 `Adapter` 端口：`Name` / `Capabilities` / `Put` / `Query` / `Delete` / `Fingerprint` / `Health`；显式注册表 + 配置驱动工厂，未知 kind 显式报错，未实现能力返回 `Unsupported`（禁止静默 no-op）。
+- 内置可用实现：`okf`、`memory`（倒排 + 哈希向量）、`pgvector`（含记录调用序列的 fake）。
+- 五个目标引擎：`LlamaIndex`、`PageIndex`、`GraphRAG`、`LightRAG`、`pgvector`；前四者经通用 HTTP/CLI 桥接（超时、重试上限、健康检查、参数白名单），各自有 YAML 声明与离线确定性 mock。
+- 所有外部依赖置于接口之后，`go test ./...` 离线全绿，不依赖外部服务与密钥。
+
+## 4. 智能路由（读写双程）
+
+- 有序确定性规则表优先短路，输出 `rule_id` / 理由 / 置信度；仅模糊样本进入 System One。
+- System One 对齐本机 `router/afm_d` 契约：`POST {endpoint}/v1/systemone` → choice + confidence；超时 5000ms、缓存 cap 256（命中 confidence 0.5、`cache:` 前缀）、候选上限 255、`min_confidence` 低分保护、fallback 必须在 eligible 池内、错误/超时 fail closed 回落到主干。
+- 写入分流：主干先提交 → GORM 事务落元数据 → 幂等投影；投影失败不回滚正文，记入 failed 投影由迁移补偿。支持 projection-only 模式（仅写 RAG，元数据标记、不写 Git 正文）。
+- 读取路由：OKF-only / 单 RAG / 双路并发（总延迟取 max）、OKF 优先合并、去重、引用保留、冲突显式标注、ACL 过滤。
+- 存量迁移：基于 `content_hash` 增量对账、指纹漂移重建、dry-run、幂等、断点续跑（游标存 PG）、双向失效标记。
+- 决策审计：`slog` 结构化输出 + PG 持久化，可查询可回放，不含正文/PII/凭据。
+
+## 5. 交付与验收
+
+- CLI：`serve` / `put` / `query` / `migrate` / `decisions` / `concepts` / `validate` / `eval`。
+- HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`。
+- 评测：Recall@k / Precision@k / nDCG / MRR / MAP / HitRate@k 纯函数；显式区分覆盖率 Recall 与二值 HitRate。
+- 文档、CI、Docker、compose、模板级最小 Vite 页面。
+- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem` 全绿，离线无外部服务。
+
+## 6. 非目标
+
+执行 Attested Computation；完整管理台；四个 Python 引擎的真实 SDK 对接（提供桥接契约与确定性 mock）；自动 commit/push 源码仓库；跨组织知识同步协议。

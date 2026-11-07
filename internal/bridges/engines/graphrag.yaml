@@ -1,0 +1,11 @@
+name: graphrag
+kind: http
+endpoint: ""
+timeout_ms: 5000
+offline_mock: true
+capabilities:
+  vector: false
+  semantic: false
+  graph: true
+  page_level: false
+notes: "Graph/community-summary retrieval. Bridge protocol: POST /put, /query, /delete, GET /healthz. TODO(real): adapt to the native GraphRAG query API."

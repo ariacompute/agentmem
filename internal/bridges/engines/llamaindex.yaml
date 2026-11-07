@@ -1,0 +1,11 @@
+name: llamaindex
+kind: http
+endpoint: ""
+timeout_ms: 3000
+offline_mock: true
+capabilities:
+  vector: true
+  semantic: true
+  graph: false
+  page_level: false
+notes: "Default hybrid vector + BM25 retrieval in DeepTutor. Bridge protocol: POST /put, /query, /delete, GET /healthz. TODO(real): point at a LlamaIndex service."

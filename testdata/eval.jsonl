@@ -1,0 +1,4 @@
+{"query":"define churn","ranked":["metrics/churn","metrics/growth"],"gold":["metrics/churn"]}
+{"query":"official gross margin definition","ranked":["metrics/gross-margin","metrics/churn"],"gold":["metrics/gross-margin"]}
+{"query":"similar discussions about retention","ranked":["notes/retention","notes/q3"],"gold":["notes/retention","notes/q3"]}
+{"query":"revenue year to date computation","ranked":["computations/revenue-ytd","metrics/growth"],"gold":["computations/revenue-ytd"]}

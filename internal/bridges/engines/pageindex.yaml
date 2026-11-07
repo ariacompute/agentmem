@@ -1,0 +1,11 @@
+name: pageindex
+kind: http
+endpoint: ""
+timeout_ms: 5000
+offline_mock: true
+capabilities:
+  vector: false
+  semantic: true
+  graph: false
+  page_level: true
+notes: "Reasoning-style retrieval with page-level citations and no ranked chunks. Bridge protocol: POST /put, /query, /delete, GET /healthz. TODO(real): adapt page citations."
