@@ -6,13 +6,14 @@ operator/bin/
 *.test
 *.out
 
-# Local runtime data (OKF bundle + local config with secrets)
+# Local runtime data (OKF bundle)
 /data/
-/config.yaml
 /index-cache/
 
-# Local env
+# Local env: .env holds secrets and is never committed; the template is.
 .env
+.env.*
+!.env.example
 
 # Runtime snapshot
 *.snapshot.json

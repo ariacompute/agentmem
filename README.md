@@ -1,11 +1,14 @@
 # agentmem
 
+[English](README.md) | [中文](README_cn.md)
+
 `agentmem` is a knowledge hub for AI agents. It keeps one authoritative,
 versioned knowledge body in **OKF + Git**, exposes pluggable **RAG channels**
 (LlamaIndex / PageIndex / GraphRAG / LightRAG / pgvector), and uses a
 **smart router** to decide where each piece of knowledge is written and where
 each query is answered from. Server-side structured data lives in
-**PostgreSQL via GORM**.
+**PostgreSQL via GORM**. Attested Computations turn sanctioned SQL kept in Git
+into verified, audited numbers.
 
 The design draws on [HKUDS/DeepTutor](https://github.com/HKUDS/DeepTutor)
 (pluggable retrievers, versioned indexes, offline retrieval evaluation) and
@@ -16,18 +19,18 @@ The design draws on [HKUDS/DeepTutor](https://github.com/HKUDS/DeepTutor)
 
 | Store | Holds | Authority |
 |---|---|---|
-| OKF bundle in Git | Knowledge bodies (Markdown + YAML frontmatter), `index.md`, `log.md` | Only canonical body |
-| PostgreSQL (GORM) | Concept metadata, projection state, `content_hash` index, embeddings fingerprints, routing decisions, migration cursors, ACL | Only structured state |
+| OKF bundle in Git | Knowledge bodies (Markdown + YAML frontmatter), `index.md`, `log.md`, sanctioned `.sql` computation bodies | Only canonical body |
+| PostgreSQL (GORM) | Concept metadata, projection state, `content_hash` index, embedding fingerprints, routing decisions, computation verdicts, migration cursors, ACL | Only structured state |
 | RAG adapters | Rebuildable projections | Never authoritative |
 
 The two stores are linked by `content_hash` + `commit_sha`. PostgreSQL never
 copies a knowledge body, so there is no dual-body consistency problem.
 Conflicts are resolved **OKF-first** and explicitly surfaced.
 
-## Quick start (fully offline)
+## Quick start
 
 ```bash
-go test ./...                    # all tests, no services required
+go test ./...
 go run ./cmd/agentmem validate
 go run ./cmd/agentmem put --id metrics/churn --type Metric \
   --title "Monthly churn" --description "Churn definition" \
@@ -41,16 +44,86 @@ Without `AGENTMEM_PG_DSN`, the service uses a file-backed `MetaStore` fake
 (snapshot at `data/meta.fake.json`, so separate CLI processes share state), an
 in-memory vector store, and a deterministic System One stub. No network,
 Postgres, or API keys are needed. The snapshot is only an offline fallback;
-the production path is entirely PostgreSQL.
+the production path is entirely PostgreSQL. No `.env` is required here:
+`config.Load` falls back to `Default()` when the file is absent.
+
+The example bundle under `testdata/bundle/` contains a runnable Attested
+Computation; copy it into `git.root` before using the `compute` command.
+
+## CLI commands
+
+| Command | Purpose |
+|---|---|
+| `serve` | Start the HTTP API |
+| `put` | Write a knowledge concept |
+| `query` | Route and execute a query |
+| `migrate` | Reconcile canonical bodies with RAG projections |
+| `decisions` | Show the routing audit trail |
+| `concepts` | List canonical concept ids |
+| `compute` | Execute an Attested Computation (repeat `--param name=value`) |
+| `computations` | Show the Attested Computation verdict audit |
+| `validate` | Validate configuration |
+| `eval` | Run ranking/routing evaluation on a JSONL dataset |
+
+`serve`, `put`, `query`, `migrate`, `decisions`, `concepts`, `compute`,
+`computations` and `validate` all accept `--env`; `AGENTMEM_ENV_FILE` selects
+the default env file.
+
+## Configuration
+
+Copy `.env.example` to `.env` and adjust it. `config.Load` reads that file
+(default `.env`, overridable by `--env` or `AGENTMEM_ENV_FILE`) and layers
+process environment variables on top; a missing file falls back to
+`Default()`. A closed whitelist of `AGENTMEM_*` keys is enforced: unknown
+keys, malformed values and unimplemented capabilities are hard errors (the
+`.env` equivalent of `KnownFields(true)`). Non-`AGENTMEM_*` keys such as
+`POSTGRES_*` are left for Docker Compose. Secrets live only in the
+gitignored `.env`, never in versioned files or logs.
+
+| Variable | Effect |
+|---|---|
+| `AGENTMEM_ENV_FILE` | Path to the `.env` file (default `.env`) |
+| `AGENTMEM_ADDR` | HTTP listen address |
+| `AGENTMEM_MODE` | `dev` or `production` (production requires a DSN) |
+| `AGENTMEM_GIT_ROOT` | Root of the OKF bundle |
+| `AGENTMEM_GIT_AUTHOR_NAME` | Git commit author name |
+| `AGENTMEM_GIT_AUTHOR_EMAIL` | Git commit author email |
+| `AGENTMEM_PG_DSN` | PostgreSQL DSN |
+| `AGENTMEM_VECTOR_DSN` | pgvector DSN; empty reuses `AGENTMEM_PG_DSN` |
+| `AGENTMEM_PG_MAX_OPEN_CONNS` | Max open connections |
+| `AGENTMEM_PG_MAX_IDLE_CONNS` | Max idle connections |
+| `AGENTMEM_PG_CONN_MAX_LIFETIME` | Connection lifetime (e.g. `30m`) |
+| `AGENTMEM_PG_LOG_LEVEL` | GORM log level (`warn` by default) |
+| `AGENTMEM_CONFLICT_POLICY` | Fixed to `okf_wins` |
+| `AGENTMEM_SYSTEMONE_ENDPOINT` | AFM-D System One service endpoint |
+| `AGENTMEM_SYSTEMONE_TIMEOUT_MS` | System One timeout |
+| `AGENTMEM_SYSTEMONE_CACHE_CAPACITY` | Decision cache size |
+| `AGENTMEM_SYSTEMONE_MAX_CHOICES` | Max candidate count |
+| `AGENTMEM_SYSTEMONE_MIN_CONFIDENCE` | Low-score protection threshold |
+| `AGENTMEM_SYSTEMONE_FALLBACK` | Eligible fallback target |
+| `AGENTMEM_SYSTEMONE_FAIL_CLOSED` | Fail closed on timeout/error |
+| `AGENTMEM_COMPUTE_TIMEOUT_MS` | Computation timeout (`0` = default 5000 ms) |
+| `AGENTMEM_COMPUTE_MAX_ROWS` | Max result rows (`0` = default 100) |
+| `AGENTMEM_ADAPTERS` | JSON array of adapter entries |
+| `AGENTMEM_ACL_DEFAULT_VISIBILITY` | `private` / `team` / `public` |
+| `AGENTMEM_ACL_DEFAULT_OWNER` | Default owner |
+
+`AGENTMEM_COMPUTE_TIMEOUT_MS` / `AGENTMEM_COMPUTE_MAX_ROWS` bound execution;
+`0` selects the built-in defaults (5000 ms / 100 rows). `AGENTMEM_ADAPTERS`
+takes a JSON array such as `[{"name":"okf","kind":"okf","enabled":true}]`;
+only entries with `"enabled":true` are assembled.
 
 ## With PostgreSQL
 
+Edit `.env` first: set `AGENTMEM_MODE=production`, `AGENTMEM_PG_DSN` and
+`POSTGRES_PASSWORD`. Compose reads `.env` both for `${POSTGRES_DB}`
+interpolation and as `env_file`, so no credentials live in a versioned file.
+For a local (non-Docker) run use `go run ./cmd/agentmem serve --env .env`.
+
 ```bash
-cp config.example.yaml config.yaml
-export AGENTMEM_PG_DSN='postgres://user:pass@localhost:5432/agentmem?sslmode=disable'
-export AGENTMEM_MODE=production
-docker compose up -d postgres
-go run ./cmd/agentmem serve --config config.yaml
+cp .env.example .env
+docker compose up -d --build
+go run ./cmd/agentmem validate --env .env
 ```
 
 `internal/meta/migrations/001_init.sql` creates the metadata tables;
@@ -63,7 +136,7 @@ with an advisory lock. `AutoMigrate` is never the schema source.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/healthz` | Health of all adapters and stores |
+| GET | `/healthz` | Health of all adapters, plugins and stores |
 | POST | `/v1/knowledge` | Routed write (`concept_id`, `subject`, `document`) |
 | GET | `/v1/knowledge?id=&subject=` | Canonical read with ACL check |
 | POST | `/v1/query` | Routed read with dual-path merge |
@@ -72,6 +145,11 @@ with an advisory lock. `AutoMigrate` is never the schema source.
 | GET | `/v1/concepts` | Canonical concept ids |
 | POST | `/v1/computations` | Execute and attest a sanctioned computation |
 | GET | `/v1/computations?concept_id=&limit=` | Attested Computation verdict audit |
+
+`POST /v1/computations` returns `200` for a verified value, `422` for an
+attestation failure or an unsupported runtime, `400` for an invalid contract or
+parameters, and `502` for an executor failure. Failed responses never carry
+`display_value`.
 
 ## Smart routing
 
@@ -85,29 +163,50 @@ protection, and fail-closed fallback to the canonical body.
 Routing is **dual-path**: writes decide projections, reads decide query
 channels, and migration reconciles existing knowledge in both directions.
 
-## Plugins
+## Engine plugins
 
-`internal/adapter` defines the `Adapter` port. Built-ins: `okf`, `memory`,
-`pgvector`. The four Python-ecosystem engines are first-class Go plugin packages
-under `internal/plugins/<engine>/`, each with a validated `plugin.yaml`, an
-`Adapter` + `Lifecycle` implementation, health checks and a versioned protocol
-fingerprint. The real SDK boundary is the `sdk_boundary` field in each manifest
-(sidecar, wire protocol, endpoints, capability mapping, credential reference),
-not a code comment. See [docs/plugins.md](docs/plugins.md) and
+`internal/adapter` defines the `Adapter` port. Built-ins cover the canonical
+body and local projections; the four Python-ecosystem engines are first-class
+Go plugin packages under `internal/plugins/<engine>/`.
+
+| Engine | kind | Wire protocol | Capabilities |
+|---|---|---|---|
+| OKF (built-in) | `okf` | in-process | canonical lookup, query only |
+| Memory (built-in) | `memory` | in-process | vector / semantic |
+| pgvector (built-in) | `pgvector` | parameterized SQL | vector / semantic |
+| LlamaIndex | `llamaindex` | HTTP | vector / semantic |
+| PageIndex | `pageindex` | HTTP | semantic / page_level |
+| GraphRAG | `graphrag` | CLI stdio | graph |
+| LightRAG | `lightrag` | HTTP | vector / semantic / graph |
+
+Each plugin owns a validated `plugin.yaml` with a declarative `sdk_boundary`
+(sidecar, `agentmem-bridge/v1` wire protocol, endpoints, capability mapping,
+credential reference), an `Adapter` + `Lifecycle` implementation, health checks
+and a versioned protocol fingerprint. The real SDK connection lives behind that
+boundary — a sidecar implements the line protocol — rather than in a code
+comment. Go `.so` plugins are deliberately avoided; the registry is explicit
+and configuration-driven. An empty `endpoint` selects the deterministic
+offline mock, and `make check-boundaries` keeps the boundary declarative. The
+generic `http` and `cli` kinds remain available for custom engines. See
+[docs/plugins.md](docs/plugins.md) and
 [docs/adapters.md](docs/adapters.md).
-
-Go `.so` plugins are deliberately avoided; the registry is explicit and
-configuration-driven. `make check-boundaries` verifies the boundary stays
-declarative.
 
 ## Attested Computations
 
-`POST /v1/computations` / `agentmem compute` load a sanctioned computation from
-OKF+Git, bind only declared parameter values, execute it through the `postgres`
-runtime, and return a value **only after** a deterministic Go attester verifies
-SQL provenance and display-value fidelity. `bigquery`, `dbt`, `python` and
-`looker` are formal contract skeletons returning `Unsupported`. Every outcome
-is audited in `computation_runs` (offline: `data/meta.fake.json`). See
+`POST /v1/computations` and `agentmem compute` load a sanctioned computation
+from OKF+Git, bind only declared parameter values, execute it through the
+`postgres` runtime, and return a value **only after** a deterministic Go
+attester verifies SQL provenance and display-value fidelity. `bigquery`, `dbt`,
+`python` and `looker` are formal contract skeletons returning `Unsupported`.
+Every outcome (pass, rejection, error) is audited in `computation_runs`
+(offline: `data/meta.fake.json`).
+
+```bash
+go run ./cmd/agentmem compute --id computations/revenue-postgres --param year=2026
+go run ./cmd/agentmem computations --limit 10
+```
+
+`testdata/bundle/computations/revenue-postgres.md` is a runnable example; see
 [docs/computations.md](docs/computations.md).
 
 ## Evaluation
@@ -124,6 +223,21 @@ be served directly by any static file server, or bundled with Vite when Node is
 available (`cd web && npm install && npm run build`). No runtime framework is
 required, and the Go binary does not depend on Node.
 
+## Development commands
+
+| Target | Effect |
+|---|---|
+| `make test` | `go test ./... -count=1` |
+| `make vet` | `go vet ./...` |
+| `make build` | single binary at `bin/agentmem` |
+| `make validate` | strict validation of `.env.example` |
+| `make eval` | ranking metrics from `testdata/eval.jsonl` |
+| `make check-boundaries` | enforce declarative SDK boundary + plugin tests |
+
+`go test ./...` passes without Postgres, network or credentials. Set
+`AGENTMEM_TEST_PG_DSN` to enable the optional real-PostgreSQL integration
+test.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)
@@ -134,12 +248,14 @@ required, and the Go binary does not depend on Node.
 - [Attested Computation](docs/computations.md)
 - [Routing and System One](docs/routing.md)
 
-## Non-goals
-
-A full admin UI, native Python SDK clients inside the Go binary (sidecars own
-that boundary), non-`postgres` computation executors, and any automatic
-`git commit`/`push` of the source repository.
-
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT.
+
+## Engineering Conventions
+
+This repository follows the Harness Engineering philosophy:
+
+- [`AGENTS.md`](AGENTS.md): Agent engineering context entry and directory index
+- [`requirements.md`](requirements.md): Requirements spec (feature boundaries/exceptions/acceptance criteria, human-review-gated)
+- [`task.md`](task.md): Implementation task checklist

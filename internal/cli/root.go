@@ -78,12 +78,12 @@ func newFlags(name string) *flag.FlagSet {
 	return fs
 }
 
-func mustLoad(configPath string) (*config.Config, error) {
-	return config.Load(configPath)
+func mustLoad(envPath string) (*config.Config, error) {
+	return config.Load(envPath)
 }
 
-func mustAssemble(configPath string) (*service.KnowledgeService, error) {
-	cfg, err := mustLoad(configPath)
+func mustAssemble(envPath string) (*service.KnowledgeService, error) {
+	cfg, err := mustLoad(envPath)
 	if err != nil {
 		return nil, err
 	}
@@ -98,12 +98,12 @@ func printJSON(out io.Writer, v any) error {
 
 func cmdServe(args []string, out io.Writer) error {
 	fs := newFlags("serve")
-	configPath := fs.String("config", "", "configuration file")
+	envPath := fs.String("env", "", "path to .env file (default .env)")
 	addr := fs.String("addr", "", "override listen address")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := mustLoad(*configPath)
+	cfg, err := mustLoad(*envPath)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func postgresMode(cfg *config.Config) string {
 
 func cmdPut(args []string, out io.Writer) error {
 	fs := newFlags("put")
-	configPath := fs.String("config", "", "configuration file")
+	envPath := fs.String("env", "", "path to .env file (default .env)")
 	id := fs.String("id", "", "concept id")
 	subject := fs.String("subject", "", "requesting subject")
 	typ := fs.String("type", "Concept", "OKF type")
@@ -143,7 +143,7 @@ func cmdPut(args []string, out io.Writer) error {
 	if *id == "" {
 		return fmt.Errorf("put: --id is required")
 	}
-	svc, err := mustAssemble(*configPath)
+	svc, err := mustAssemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -164,7 +164,7 @@ func cmdPut(args []string, out io.Writer) error {
 
 func cmdQuery(args []string, out io.Writer) error {
 	fs := newFlags("query")
-	configPath := fs.String("config", "", "configuration file")
+	envPath := fs.String("env", "", "path to .env file (default .env)")
 	q := fs.String("q", "", "query text")
 	subject := fs.String("subject", "", "requesting subject")
 	topK := fs.Int("top-k", 5, "result limit")
@@ -174,7 +174,7 @@ func cmdQuery(args []string, out io.Writer) error {
 	if *q == "" {
 		return fmt.Errorf("query: --q is required")
 	}
-	svc, err := mustAssemble(*configPath)
+	svc, err := mustAssemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func cmdQuery(args []string, out io.Writer) error {
 
 func cmdMigrate(args []string, out io.Writer) error {
 	fs := newFlags("migrate")
-	configPath := fs.String("config", "", "configuration file")
+	envPath := fs.String("env", "", "path to .env file (default .env)")
 	job := fs.String("job", "", "job name (resumable)")
 	direction := fs.String("direction", router.DirectionToRAG, "canonical_to_rag|rag_to_canonical")
 	target := fs.String("target", "memory", "RAG adapter name")
@@ -197,7 +197,7 @@ func cmdMigrate(args []string, out io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	svc, err := mustAssemble(*configPath)
+	svc, err := mustAssemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -213,13 +213,13 @@ func cmdMigrate(args []string, out io.Writer) error {
 
 func cmdDecisions(args []string, out io.Writer) error {
 	fs := newFlags("decisions")
-	configPath := fs.String("config", "", "configuration file")
+	envPath := fs.String("env", "", "path to .env file (default .env)")
 	id := fs.String("id", "", "filter by concept id")
 	limit := fs.Int("limit", 20, "max records")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	svc, err := mustAssemble(*configPath)
+	svc, err := mustAssemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -233,11 +233,11 @@ func cmdDecisions(args []string, out io.Writer) error {
 
 func cmdConcepts(args []string, out io.Writer) error {
 	fs := newFlags("concepts")
-	configPath := fs.String("config", "", "configuration file")
+	envPath := fs.String("env", "", "path to .env file (default .env)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	svc, err := mustAssemble(*configPath)
+	svc, err := mustAssemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -278,7 +278,7 @@ func (p *paramFlags) Set(s string) error {
 
 func cmdCompute(args []string, out io.Writer) error {
 	fs := newFlags("compute")
-	configPath := fs.String("config", "", "configuration file")
+	envPath := fs.String("env", "", "path to .env file (default .env)")
 	id := fs.String("id", "", "Attested Computation concept id")
 	subject := fs.String("subject", "", "requesting subject")
 	params := &paramFlags{values: map[string]any{}}
@@ -289,7 +289,7 @@ func cmdCompute(args []string, out io.Writer) error {
 	if *id == "" {
 		return fmt.Errorf("compute: --id is required")
 	}
-	svc, err := mustAssemble(*configPath)
+	svc, err := mustAssemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -305,13 +305,13 @@ func cmdCompute(args []string, out io.Writer) error {
 
 func cmdComputations(args []string, out io.Writer) error {
 	fs := newFlags("computations")
-	configPath := fs.String("config", "", "configuration file")
+	envPath := fs.String("env", "", "path to .env file (default .env)")
 	id := fs.String("id", "", "filter by concept id")
 	limit := fs.Int("limit", 20, "max records")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	svc, err := mustAssemble(*configPath)
+	svc, err := mustAssemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -325,11 +325,11 @@ func cmdComputations(args []string, out io.Writer) error {
 
 func cmdValidate(args []string, out io.Writer) error {
 	fs := newFlags("validate")
-	configPath := fs.String("config", "", "configuration file")
+	envPath := fs.String("env", "", "path to .env file (default .env)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := mustLoad(*configPath)
+	cfg, err := mustLoad(*envPath)
 	if err != nil {
 		return err
 	}

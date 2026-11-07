@@ -56,7 +56,7 @@ func TestComputeCommandOffline(t *testing.T) {
 	cliComputeRoot(t)
 	var buf bytes.Buffer
 	if err := Run([]string{
-		"compute", "--config", "../../nonexistent.yaml",
+		"compute", "--env", "../../nonexistent.env",
 		"--id", "computations/revenue", "--subject", "analyst:1",
 		"--param", "year=2026",
 	}, &buf); err != nil {
@@ -76,7 +76,7 @@ func TestComputeCommandOffline(t *testing.T) {
 
 	buf.Reset()
 	if err := Run([]string{
-		"computations", "--config", "../../nonexistent.yaml",
+		"computations", "--env", "../../nonexistent.env",
 		"--id", "computations/revenue", "--limit", "10",
 	}, &buf); err != nil {
 		t.Fatalf("computations: %v / %s", err, buf.String())
@@ -93,10 +93,10 @@ func TestComputeCommandOffline(t *testing.T) {
 func TestComputeCommandRejectsInvalidInput(t *testing.T) {
 	cliComputeRoot(t)
 	cases := [][]string{
-		{"compute", "--config", "../../nonexistent.yaml", "--id", "computations/revenue", "--param", "year=oops"},
-		{"compute", "--config", "../../nonexistent.yaml", "--id", "computations/bigquery", "--param", "year=2026"},
-		{"compute", "--config", "../../nonexistent.yaml", "--id", "computations/revenue", "--param", "bad"},
-		{"compute", "--config", "../../nonexistent.yaml"},
+		{"compute", "--env", "../../nonexistent.env", "--id", "computations/revenue", "--param", "year=oops"},
+		{"compute", "--env", "../../nonexistent.env", "--id", "computations/bigquery", "--param", "year=2026"},
+		{"compute", "--env", "../../nonexistent.env", "--id", "computations/revenue", "--param", "bad"},
+		{"compute", "--env", "../../nonexistent.env"},
 	}
 	for i, args := range cases {
 		if err := Run(args, &bytes.Buffer{}); err == nil {

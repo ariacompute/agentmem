@@ -25,6 +25,11 @@ RAG adapters and a rule-first smart router.
 - **Interfaces**: JSON HTTP API (including `/v1/computations`), ten CLI
   commands (including `compute` / `computations`), pure-function ranking and
   routing evaluation, minimal Vite status page.
+- **`.env` configuration**: a single gitignored `.env` file (template:
+  `.env.example`) with a closed `AGENTMEM_*` key whitelist, process-env
+  overrides and zero-dependency parsing. Docker Compose consumes the same file
+  via `env_file` and `${...}` interpolation, with no credentials in versioned
+  files.
 
 ## Verification
 

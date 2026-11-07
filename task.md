@@ -2,7 +2,7 @@
 
 ## 阶段 1 · 骨架与 OKF+Git 内核
 
-- [x] `go.mod` / `Makefile` / `config.example.yaml`；严格配置校验（`KnownFields(true)`、`AGENTMEM_*` 覆盖、生产 DSN 必填）。
+- [x] `go.mod` / `Makefile` / `.env.example`；`.env` 单一配置源（`--env` / `AGENTMEM_ENV_FILE`、进程环境覆盖、封闭 `AGENTMEM_*` 键白名单、生产 DSN 必填），Docker Compose 用 `env_file` 与 `${...}` 插值读取同一文件。
 - [x] `internal/okf`：frontmatter 解析与 round-trip、文档模型、信任派生、Attested 契约、Bundle 读写、渐进索引、变更日志、路径安全。
 - [x] `internal/vcs`：Repository 端口、go-git 实现、内存 fake、Log/Show/Diff。
 - [x] `internal/meta`：MetaStore 端口、GORM 模型、PostgresStore、版本化迁移、内存 fake、VectorStore（含 `Scanner/Valuer`）。
@@ -62,7 +62,7 @@
 go test ./... -count=1
 go vet ./...
 go build -o bin/agentmem ./cmd/agentmem
-go run ./cmd/agentmem validate
+go run ./cmd/agentmem validate --env .env.example
 go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
 make check-boundaries
 ```

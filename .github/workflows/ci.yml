@@ -23,8 +23,8 @@ jobs:
         run: go test ./... -count=1
       - name: Build
         run: go build -o bin/agentmem ./cmd/agentmem
-      - name: Validate config
-        run: go run ./cmd/agentmem validate
+      - name: Validate .env.example
+        run: go run ./cmd/agentmem validate --env .env.example
       - name: Declarative SDK boundaries
         run: make check-boundaries
       - name: Computation smoke test (offline)

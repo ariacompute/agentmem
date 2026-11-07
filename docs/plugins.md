@@ -81,7 +81,7 @@ type Lifecycle interface {
 1. 新建 `internal/plugins/<name>/plugin.yaml` 并填齐全部字段。
 2. 在包内实现 `Descriptor()`、`New(cfg, deps)`、`Register(r)`。
 3. 登记到 `internal/plugins/plugins.go` 的 `All()`，并把 kind 加入 `config.Validate()` 白名单。
-4. 在 `config.yaml` 启用条目；`endpoint` 为空即离线可测。
+4. 在 `.env` 的 `AGENTMEM_ADAPTERS` JSON 数组中启用条目；`endpoint` 为空即离线可测。
 5. 补清单校验、契约、生命周期测试，并运行 `make check-boundaries`。
 
 禁止以「不可测的原生客户端」替换桥接：每个外部依赖都必须有 fake，且 `go test ./...` 在无 Postgres、无网络、无凭据下全绿。

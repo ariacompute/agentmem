@@ -19,7 +19,8 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=backend /out/agentmem /usr/local/bin/agentmem
 COPY --from=frontend /web/dist /app/web/dist
-COPY config.example.yaml /app/config.example.yaml
+# Configuration comes from the environment (compose env_file: .env). The image
+# deliberately contains no config file and no credentials.
 ENV AGENTMEM_ADDR=0.0.0.0:8080
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \

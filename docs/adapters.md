@@ -81,5 +81,5 @@ adapters:
 1. 新建 `internal/plugins/<name>/plugin.yaml`，填齐 `name/kind/engine/version/bridge/protocol_version/timeout_ms/offline_mock/citation_scheme/capabilities/sdk_boundary`。清单采用严格解析，未知键报错。
 2. 在同一个包中实现 `Descriptor()`、`New(cfg, deps)`、`Register(r)`，用 `pluginbase.New` 组合泛型桥接。
 3. 在 `internal/plugins/plugins.go` 的 `All()` 中登记，并在 `config.Validate()` 的 kind 白名单中加入同名 kind。
-4. 在 `config.yaml` 的 `adapters` 中启用条目并填 `endpoint`（为空即确定性离线 mock）。
+4. 在 `.env` 的 `AGENTMEM_ADAPTERS` JSON 数组中加入条目并把 `enabled` 置为 `true`；`endpoint` 为空即确定性离线 mock（`config.Validate()` 的 kind 白名单决定合法 kind）。
 5. 补清单校验、契约与生命周期测试；完整说明见 [`plugins.md`](plugins.md)。

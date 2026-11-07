@@ -1,17 +1,17 @@
 // Package config loads and strictly validates agentmem runtime configuration.
+//
+// The single configuration source is a .env file (see .env.example) plus
+// process environment overrides. YAML is deliberately not a config format:
+// compose consumes the same .env through env_file and ${...} interpolation.
 package config
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
-// EnvPrefix is the prefix of every runtime environment override.
+// EnvPrefix is the prefix of every agentmem configuration variable.
 const EnvPrefix = "AGENTMEM_"
 
 // ErrUnsupported reports a configured capability that has no implementation.
@@ -19,70 +19,70 @@ var ErrUnsupported = errors.New("config: unsupported capability")
 
 // Config is the root runtime configuration.
 type Config struct {
-	Server   ServerConfig    `yaml:"server"`
-	Git      GitConfig       `yaml:"git"`
-	Postgres PostgresConfig  `yaml:"postgres"`
-	Router   RouterConfig    `yaml:"router"`
-	Compute  ComputeConfig   `yaml:"compute"`
-	Adapters []AdapterConfig `yaml:"adapters"`
-	ACL      ACLConfig       `yaml:"acl"`
+	Server   ServerConfig    `json:"server" yaml:"server"`
+	Git      GitConfig       `json:"git" yaml:"git"`
+	Postgres PostgresConfig  `json:"postgres" yaml:"postgres"`
+	Router   RouterConfig    `json:"router" yaml:"router"`
+	Compute  ComputeConfig   `json:"compute" yaml:"compute"`
+	Adapters []AdapterConfig `json:"adapters" yaml:"adapters"`
+	ACL      ACLConfig       `json:"acl" yaml:"acl"`
 }
 
 // ComputeConfig bounds the Attested Computation executor. Zero values are
 // normalised to DefaultCompute() by the service layer.
 type ComputeConfig struct {
-	TimeoutMS int `yaml:"timeout_ms"`
-	MaxRows   int `yaml:"max_rows"`
+	TimeoutMS int `json:"timeout_ms" yaml:"timeout_ms"`
+	MaxRows   int `json:"max_rows" yaml:"max_rows"`
 }
 
 func DefaultCompute() ComputeConfig { return ComputeConfig{TimeoutMS: 5000, MaxRows: 100} }
 
 type ServerConfig struct {
-	Addr string `yaml:"addr"`
-	Mode string `yaml:"mode"`
+	Addr string `json:"addr" yaml:"addr"`
+	Mode string `json:"mode" yaml:"mode"`
 }
 
 type GitConfig struct {
-	Root        string `yaml:"root"`
-	AuthorName  string `yaml:"author_name"`
-	AuthorEmail string `yaml:"author_email"`
+	Root        string `json:"root" yaml:"root"`
+	AuthorName  string `json:"author_name" yaml:"author_name"`
+	AuthorEmail string `json:"author_email" yaml:"author_email"`
 }
 
 type PostgresConfig struct {
-	DSN             string `yaml:"dsn"`
-	MaxOpenConns    int    `yaml:"max_open_conns"`
-	MaxIdleConns    int    `yaml:"max_idle_conns"`
-	ConnMaxLifetime string `yaml:"conn_max_lifetime"`
-	LogLevel        string `yaml:"log_level"`
-	VectorDSN       string `yaml:"vector_dsn"`
+	DSN             string `json:"dsn" yaml:"dsn"`
+	MaxOpenConns    int    `json:"max_open_conns" yaml:"max_open_conns"`
+	MaxIdleConns    int    `json:"max_idle_conns" yaml:"max_idle_conns"`
+	ConnMaxLifetime string `json:"conn_max_lifetime" yaml:"conn_max_lifetime"`
+	LogLevel        string `json:"log_level" yaml:"log_level"`
+	VectorDSN       string `json:"vector_dsn" yaml:"vector_dsn"`
 }
 
 type RouterConfig struct {
-	SystemOne      SystemOneConfig `yaml:"systemone"`
-	ConflictPolicy string          `yaml:"conflict_policy"`
+	SystemOne      SystemOneConfig `json:"systemone" yaml:"systemone"`
+	ConflictPolicy string          `json:"conflict_policy" yaml:"conflict_policy"`
 }
 
 type SystemOneConfig struct {
-	Endpoint      string  `yaml:"endpoint"`
-	TimeoutMS     int     `yaml:"timeout_ms"`
-	CacheCapacity int     `yaml:"cache_capacity"`
-	MaxChoices    int     `yaml:"max_choices"`
-	MinConfidence float64 `yaml:"min_confidence"`
-	Fallback      string  `yaml:"fallback"`
-	FailClosed    bool    `yaml:"fail_closed"`
+	Endpoint      string  `json:"endpoint" yaml:"endpoint"`
+	TimeoutMS     int     `json:"timeout_ms" yaml:"timeout_ms"`
+	CacheCapacity int     `json:"cache_capacity" yaml:"cache_capacity"`
+	MaxChoices    int     `json:"max_choices" yaml:"max_choices"`
+	MinConfidence float64 `json:"min_confidence" yaml:"min_confidence"`
+	Fallback      string  `json:"fallback" yaml:"fallback"`
+	FailClosed    bool    `json:"fail_closed" yaml:"fail_closed"`
 }
 
 type AdapterConfig struct {
-	Name      string `yaml:"name"`
-	Kind      string `yaml:"kind"`
-	Enabled   bool   `yaml:"enabled"`
-	Endpoint  string `yaml:"endpoint"`
-	TimeoutMS int    `yaml:"timeout_ms"`
+	Name      string `json:"name" yaml:"name"`
+	Kind      string `json:"kind" yaml:"kind"`
+	Enabled   bool   `json:"enabled" yaml:"enabled"`
+	Endpoint  string `json:"endpoint,omitempty" yaml:"endpoint"`
+	TimeoutMS int    `json:"timeout_ms,omitempty" yaml:"timeout_ms"`
 }
 
 type ACLConfig struct {
-	DefaultVisibility string `yaml:"default_visibility"`
-	DefaultOwner      string `yaml:"default_owner"`
+	DefaultVisibility string `json:"default_visibility" yaml:"default_visibility"`
+	DefaultOwner      string `json:"default_owner" yaml:"default_owner"`
 }
 
 // Default returns an offline, fully testable configuration.
@@ -109,49 +109,6 @@ func Default() *Config {
 		},
 		ACL: ACLConfig{DefaultVisibility: "private", DefaultOwner: "system"},
 	}
-}
-
-// Load reads YAML, applies AGENTMEM_* overrides, and validates. A missing file
-// yields Default so the binary runs out of the box in dev mode.
-func Load(path string) (*Config, error) {
-	if path == "" {
-		path = os.Getenv(EnvPrefix + "CONFIG")
-	}
-	if path == "" {
-		path = "config.yaml"
-	}
-	cfg := Default()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("config: read %s: %w", path, err)
-		}
-	} else {
-		dec := yaml.NewDecoder(bytes.NewReader(data))
-		dec.KnownFields(true)
-		if err := dec.Decode(cfg); err != nil {
-			return nil, fmt.Errorf("config: parse %s: %w", path, err)
-		}
-	}
-	applyEnv(cfg)
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-	return cfg, nil
-}
-
-func applyEnv(cfg *Config) {
-	set := func(key string, dst *string) {
-		if v := os.Getenv(EnvPrefix + key); v != "" {
-			*dst = v
-		}
-	}
-	set("ADDR", &cfg.Server.Addr)
-	set("MODE", &cfg.Server.Mode)
-	set("GIT_ROOT", &cfg.Git.Root)
-	set("PG_DSN", &cfg.Postgres.DSN)
-	set("VECTOR_DSN", &cfg.Postgres.VectorDSN)
-	set("SYSTEMONE_ENDPOINT", &cfg.Router.SystemOne.Endpoint)
 }
 
 // Validate fails closed: unknown modes, duplicate adapters, missing production

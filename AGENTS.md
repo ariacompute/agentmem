@@ -34,11 +34,18 @@ Attested Computation bodies live in OKF+Git; PostgreSQL stores only verdicts.
 - **Git is the only authority for bodies.** PostgreSQL stores metadata only,
   linked by `content_hash` + `commit_sha`. Conflicts resolve OKF-first and are
   surfaced, never hidden.
-- **Config validation fails closed.** `KnownFields(true)`; unknown keys error;
-  unimplemented capabilities return `Unsupported` (no silent no-op).
+- **Config is `.env` only.** `config.Load` reads `.env` (`--env` /
+  `AGENTMEM_ENV_FILE` override the path), then layers process env on top;
+  a missing file falls back to `Default()`. Docker Compose consumes the same
+  `.env` via `env_file` and `${...}` interpolation.
+- **Config validation fails closed.** A closed whitelist of `AGENTMEM_*`
+  keys is enforced: unknown keys, malformed values and unimplemented
+  capabilities error (the `.env` equivalent of `KnownFields(true)`).
+  Non-`AGENTMEM_*` keys such as `POSTGRES_*` belong to Compose and are ignored.
 - **Rules run before System One.** A probabilistic choice must never override
   a deterministic authoritative decision. Timeouts/error → fail closed to OKF.
-- **No secrets in files or logs.** `AGENTMEM_PG_DSN` via environment only;
+- **No secrets in files or logs.** `.env` is gitignored; `.env.example` holds
+  placeholders only. `AGENTMEM_PG_DSN` may be injected by the process env;
   never log bodies, PII, credentials, or GORM SQL parameters.
 - **Schema source is SQL migrations**, not `AutoMigrate`. Movement is versioned
   in `schema_migrations` with an advisory lock.
@@ -51,7 +58,7 @@ make test        # go test ./... -count=1
 make vet         # go vet ./...
 make build       # single binary
 make eval        # ranking metrics from testdata/eval.jsonl
-make validate    # strict config validation
+make validate    # strict validation of .env.example
 make check-boundaries  # SDK boundaries stay declarative; no inline annotations
 ```
 
@@ -59,6 +66,7 @@ make check-boundaries  # SDK boundaries stay declarative; no inline annotations
 
 | Concern | Entry point |
 |---|---|
+| Configuration (`.env`) | `internal/config/config.go`, `dotenv.go`, `.env.example`, `docker-compose.yml` |
 | OKF document model | `internal/okf/document.go`, `frontmatter.go` |
 | Bundle read/write | `internal/okf/bundle.go` |
 | Git backend | `internal/vcs/git.go` |

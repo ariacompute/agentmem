@@ -42,14 +42,22 @@
 - `executor → receipt`；确定性 Go attester 做 SQL 规范化 provenance 与展示值 fidelity 校验；失败拒绝展示 `display_value`。
 - HTTP `POST /v1/computations` + `GET /v1/computations`；CLI `compute`（可重复 `--param`）与 `computations`；成功/拒绝/错误都写入 PG 审计。
 
-## 6. 交付与验收
+## 6. `.env` 配置加载
 
-- CLI：`serve` / `put` / `query` / `migrate` / `decisions` / `concepts` / `compute` / `computations` / `validate` / `eval`。
+- `.env` 为唯一配置文件；`.env.example` 是带占位值的模板，`cp .env.example .env` 后使用；`.env` 被 `.gitignore` / `.dockerignore` 排除，镜像内不含配置文件与凭据。
+- `config.Load` 默认读 `.env`，`--env` 与 `AGENTMEM_ENV_FILE` 可改路径；进程环境变量覆盖文件值；文件缺失回退 `Default()` 以保证离线开箱可用。
+- 自研零依赖 dotenv 解析：`KEY=VALUE`、可选 `export`、注释、单/双引号、`#` 行内注释；重复键、缺 `=`、非法键、非法数值、非法 `AGENTMEM_ADAPTERS` JSON 一律报错。
+- 封闭 `AGENTMEM_*` 键白名单（等价 `KnownFields(true)`）：未知键与未实现能力显式报错；`POSTGRES_*` 等非 `AGENTMEM_*` 键留给 Compose。`AGENTMEM_ADAPTERS` 为 JSON 数组，仅 `enabled: true` 条目装配。
+- `docker compose` 同时用 `.env` 做 `${...}` 插值与 `env_file`，版本化文件中不出现密码或 DSN。
+
+## 7. 交付与验收
+
+- CLI：`serve` / `put` / `query` / `migrate` / `decisions` / `concepts` / `compute` / `computations` / `validate` / `eval`；命令用 `--env` 指定配置文件。
 - HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`。
 - 评测：Recall@k / Precision@k / nDCG / MRR / MAP / HitRate@k 纯函数；显式区分覆盖率 Recall 与二值 HitRate。
 - 文档、CI、Docker、compose、模板级最小 Vite 页面。
 - 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries` 全绿，离线无外部服务。
 
-## 7. 非目标
+## 8. 非目标
 
 完整管理台；Go 二进制内直接链接四个 Python 引擎的原生 SDK（由 sidecar 承担 `sdk_boundary`）；非 `postgres` 计算执行器；自动 commit/push 源码仓库；跨组织知识同步协议。

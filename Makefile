@@ -16,7 +16,7 @@ eval:
 	go run ./cmd/agentmem eval --dataset testdata/eval.jsonl
 
 validate:
-	go run ./cmd/agentmem validate --config config.yaml
+	go run ./cmd/agentmem validate --env .env.example
 
 # SDK boundaries are declared as data in plugin.yaml, never as code comments.
 check-boundaries:
@@ -28,7 +28,7 @@ check-boundaries:
 	@go test ./internal/plugins/... -count=1
 
 run: build
-	./$(BINARY) serve --config config.yaml
+	./$(BINARY) serve --env .env
 
 web:
 	cd web && npm ci && npm run build

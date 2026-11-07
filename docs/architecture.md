@@ -35,6 +35,8 @@ flowchart TB
 
 包依赖单向：`okf` / `meta` / `config`（L0，零内部依赖）→ `vcs` / `adapter` / `bridges` → `plugins`（清单 + 引擎包）→ `router` / `eval` / `compute` → `service` → `handlers` / `cli` → `cmd/agentmem`。端口定义在消费方，实现注入。`gorm` 只在 `internal/meta` 内出现；`compute.SQLExecutor` 定义在 `meta`，其 GORM 实现留在 `internal/meta/postgres_exec.go`，避免下层反向 import。
 
+`config` 包不引入第三方 dotenv 依赖：`.env` 由标准库解析。加载顺序为 `Default()` → `.env`（`--env` / `AGENTMEM_ENV_FILE` 指定路径）→ 进程环境变量 → `Validate()`。封闭的 `AGENTMEM_*` 键白名单让未知键、非法数值、非法 `AGENTMEM_ADAPTERS` JSON 全部 fail closed；`POSTGRES_*` 等非前缀键留给 Docker Compose。`.env` 不进镜像，Compose 用 `env_file` 与 `${...}` 插值读取同一文件。
+
 ## 计算数据流
 
 1. `POST /v1/computations` / CLI `compute` 进入 `compute.Service.Run`。

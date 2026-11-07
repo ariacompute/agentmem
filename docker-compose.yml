@@ -1,16 +1,20 @@
+# All settings come from .env (cp .env.example .env first). Compose uses it
+# both for ${...} interpolation below and as env_file for the application.
+# No credentials are stored in this versioned file.
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: agentmem
-      POSTGRES_USER: agentmem
-      POSTGRES_PASSWORD: agentmem_dev
+      POSTGRES_DB: ${POSTGRES_DB:-agentmem}
+      POSTGRES_USER: ${POSTGRES_USER:-agentmem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agentmem -d agentmem"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agentmem} -d ${POSTGRES_DB:-agentmem}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -20,16 +24,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
-      AGENTMEM_MODE: production
+      # Container-specific overrides; everything else (including DSN and MODE)
+      # comes from .env. Real environment variables still take precedence.
       AGENTMEM_ADDR: 0.0.0.0:8080
       AGENTMEM_GIT_ROOT: /app/data/bundle
-      AGENTMEM_PG_DSN: postgres://agentmem:agentmem_dev@postgres:5432/agentmem?sslmode=disable
     ports:
       - "8080:8080"
     volumes:
       - agentmem_data:/app/data
-    command: ["serve", "--config", "/app/config.example.yaml"]
+    command: ["serve"]
 
 volumes:
   pgdata:

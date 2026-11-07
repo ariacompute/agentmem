@@ -20,7 +20,7 @@ func TestHelpAndUnknownCommand(t *testing.T) {
 
 func TestValidateCommand(t *testing.T) {
 	var buf bytes.Buffer
-	if err := Run([]string{"validate", "--config", "../../nonexistent.yaml"}, &buf); err != nil {
+	if err := Run([]string{"validate", "--env", "../../nonexistent.env"}, &buf); err != nil {
 		t.Fatal(err)
 	}
 	var out map[string]any
@@ -50,7 +50,7 @@ func TestPutQueryCommandsOffline(t *testing.T) {
 	t.Setenv("AGENTMEM_GIT_ROOT", filepath.Join(t.TempDir(), "bundle"))
 	var buf bytes.Buffer
 	if err := Run([]string{
-		"put", "--config", "../../nonexistent.yaml",
+		"put", "--env", "../../nonexistent.env",
 		"--id", "metrics/test", "--subject", "alice", "--type", "Metric",
 		"--title", "Test", "--body", "# Body", "--visibility", "public",
 	}, &buf); err != nil {

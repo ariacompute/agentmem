@@ -10,6 +10,7 @@
 - Attested Computation：参数绑定、postgres 执行、确定性 attester、失败拒绝展示、PG 审计
 - 智能路由：规则优先、System One 兜底、读写双程、存量双向迁移
 - HTTP API（含 `/v1/computations`）、CLI（含 `compute`）、纯函数评测、最小状态页
+- `.env` 单一配置源：封闭键白名单、进程环境覆盖、Docker Compose 复用同一文件
 
 ## 验证
 
