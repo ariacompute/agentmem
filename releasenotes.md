@@ -1,16 +1,17 @@
-# agentmem v0.1.0
+# agentmem release notes
 
-First release. A Go knowledge hub built on OKF+Git, PostgreSQL/GORM, pluggable
-RAG adapters and a rule-first smart router.
+A Go knowledge hub built on OKF+Git, PostgreSQL/GORM, pluggable RAG adapters
+and a rule-first smart router.
 
 ## Highlights
 
 - **OKF v0.2 + Git**: permissive frontmatter conformance, progressive
   `index.md`, `log.md`, link graph, trust tiers, Attested Computation contract
-  modelling, versioned bodies via go-git.
-- **PostgreSQL + GORM**: metadata-only store with versioned SQL migrations,
-  transactional upserts, ACL, decision audit, migration cursors and embedding
-  fingerprints. No knowledge bodies in the database.
+  and execution, versioned bodies via go-git.
+- **PostgreSQL + GORM**: metadata-only store with versioned SQL migrations
+  (`003_computations.sql`), transactional upserts, ACL, decision audit,
+  computation verdicts, migration cursors and embedding fingerprints. No
+  knowledge bodies, SQL text or result values in the database.
 - **Engine plugins**: unified `Adapter` port, built-in `okf`/`memory`/
   `pgvector`, and four first-class Go plugin packages (LlamaIndex, PageIndex,
   GraphRAG, LightRAG) with validated `plugin.yaml` manifests, a declarative
@@ -30,11 +31,6 @@ RAG adapters and a rule-first smart router.
   overrides and zero-dependency parsing. Docker Compose consumes the same file
   via `env_file` and `${...}` interpolation, with no credentials in versioned
   files.
-
-## Verification
-
-`go test ./...`, `go vet ./...`, `go build ./cmd/agentmem` and
-`make check-boundaries` all pass offline.
 
 ## Known limitations
 
