@@ -42,6 +42,9 @@ type Hit struct {
 
 // Adapter is the single plugin contract shared by built-ins and third parties.
 // conceptID is passed explicitly because an OKF document has no identity field.
+// Built-in engine plugins additionally implement the optional Lifecycle port;
+// the registry starts and closes them by type assertion without changing this
+// interface, so custom adapters remain backwards compatible.
 type Adapter interface {
 	Name() string
 	Capabilities() Capabilities

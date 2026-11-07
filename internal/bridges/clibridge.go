@@ -39,7 +39,11 @@ func defaultRunner(timeout time.Duration) Runner {
 	}
 }
 
-// CLIBridge is a generic JSON-over-stdio RAG channel.
+// CLIBridge is a generic JSON-over-stdio RAG channel. The subcommands below
+// form the formal CLI line protocol: an engine sidecar implements `health`,
+// `put --id <id>`, `query --text <t> --top-k <n>` and `delete --id <id>` on
+// top of its native SDK. Arguments are white-listed and never passed through a
+// shell. Engine plugins declare this boundary in plugin.yaml (sdk_boundary).
 type CLIBridge struct {
 	name       string
 	command    string

@@ -11,16 +11,19 @@ router with an AFM-D System One fallback.
 ## Layering (single direction, no upward imports)
 
 ```
-okf (L0, zero deps)
-  -> meta / vcs / adapter / bridges (ports + implementations)
-  -> router / eval
+okf / meta / config (L0, zero internal deps)
+  -> vcs / adapter / bridges
+  -> plugins (engine packages + manifest)
+  -> router / eval / compute
   -> service
   -> handlers / cli
   -> cmd/agentmem
 ```
 
 Ports are defined where they are consumed. `gorm` may only be imported inside
-`internal/meta`; no `*gorm.DB` in any port signature.
+`internal/meta`; no `*gorm.DB` in any port signature. `compute.SQLExecutor` is a
+`meta` port so its GORM implementation stays in L1 without an upward import.
+Attested Computation bodies live in OKF+Git; PostgreSQL stores only verdicts.
 
 ## Hard rules
 
@@ -49,6 +52,7 @@ make vet         # go vet ./...
 make build       # single binary
 make eval        # ranking metrics from testdata/eval.jsonl
 make validate    # strict config validation
+make check-boundaries  # SDK boundaries stay declarative; no inline annotations
 ```
 
 ## Where to look
@@ -59,13 +63,19 @@ make validate    # strict config validation
 | Bundle read/write | `internal/okf/bundle.go` |
 | Git backend | `internal/vcs/git.go` |
 | GORM models & migrations | `internal/meta/models.go`, `internal/meta/migrations/` |
-| Adapter contract | `internal/adapter/port.go`, `registry.go` |
+| Adapter contract | `internal/adapter/port.go`, `registry.go`, `lifecycle.go` |
 | HTTP/CLI bridges | `internal/bridges/` |
+| Engine plugins & SDK boundary | `internal/plugins/manifest/`, `internal/plugins/<engine>/plugin.yaml` |
+| Attested Computation | `internal/compute/`, `internal/meta/postgres_exec.go` |
 | Routing rules | `internal/router/rules.go` |
 | System One | `internal/router/systemone.go` |
 | Write / read / migrate | `internal/router/write.go`, `read.go`, `migrate.go` |
 | Assembly | `internal/service/knowledge.go` |
 | API / CLI | `internal/handlers/http.go`, `internal/cli/root.go` |
 
-Real third-party engine SDK wiring is intentionally out of scope; bridges are
-marked `TODO(real)`. Do not "silently" complete them with an untestable client.
+Real third-party engine SDK wiring belongs in a sidecar, not in agentmem. Each
+compiled-in engine plugin declares that boundary as data in `plugin.yaml`
+(`sdk_boundary`: sidecar, wire protocol version, endpoints/commands, capability
+mapping, credential reference) and is validated by `make check-boundaries`.
+Do not "silently" replace a bridge with an untestable native client: the offline
+mock must stay reachable and observable, and every new capability needs a fake.

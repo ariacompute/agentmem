@@ -23,9 +23,19 @@ type Config struct {
 	Git      GitConfig       `yaml:"git"`
 	Postgres PostgresConfig  `yaml:"postgres"`
 	Router   RouterConfig    `yaml:"router"`
+	Compute  ComputeConfig   `yaml:"compute"`
 	Adapters []AdapterConfig `yaml:"adapters"`
 	ACL      ACLConfig       `yaml:"acl"`
 }
+
+// ComputeConfig bounds the Attested Computation executor. Zero values are
+// normalised to DefaultCompute() by the service layer.
+type ComputeConfig struct {
+	TimeoutMS int `yaml:"timeout_ms"`
+	MaxRows   int `yaml:"max_rows"`
+}
+
+func DefaultCompute() ComputeConfig { return ComputeConfig{TimeoutMS: 5000, MaxRows: 100} }
 
 type ServerConfig struct {
 	Addr string `yaml:"addr"`
@@ -92,6 +102,7 @@ func Default() *Config {
 			},
 			ConflictPolicy: "okf_wins",
 		},
+		Compute: DefaultCompute(),
 		Adapters: []AdapterConfig{
 			{Name: "okf", Kind: "okf", Enabled: true},
 			{Name: "memory", Kind: "memory", Enabled: true},
@@ -169,6 +180,10 @@ func (c *Config) Validate() error {
 	if c.Router.ConflictPolicy != "okf_wins" {
 		return fmt.Errorf("%w: conflict_policy %q", ErrUnsupported, c.Router.ConflictPolicy)
 	}
+	if c.Compute.TimeoutMS < 0 || c.Compute.TimeoutMS > 120000 ||
+		c.Compute.MaxRows < 0 || c.Compute.MaxRows > 10000 {
+		return errors.New("config: compute.timeout_ms must be 0..120000 and compute.max_rows 0..10000")
+	}
 	seen := map[string]bool{}
 	for _, a := range c.Adapters {
 		if strings.TrimSpace(a.Name) == "" || seen[a.Name] {
@@ -176,7 +191,8 @@ func (c *Config) Validate() error {
 		}
 		seen[a.Name] = true
 		switch a.Kind {
-		case "okf", "memory", "pgvector", "http", "cli":
+		case "okf", "memory", "pgvector", "http", "cli",
+			"llamaindex", "pageindex", "graphrag", "lightrag":
 		default:
 			return fmt.Errorf("%w: adapter %q kind %q", ErrUnsupported, a.Name, a.Kind)
 		}

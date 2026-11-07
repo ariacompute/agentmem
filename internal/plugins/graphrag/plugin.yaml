@@ -1,0 +1,25 @@
+name: graphrag
+kind: graphrag
+engine: graphrag
+version: "1.0.0"
+bridge: cli
+protocol_version: agentmem-bridge/v1
+timeout_ms: 3000
+offline_mock: true
+citation_scheme: "graphrag://community/"
+capabilities:
+  vector: false
+  semantic: false
+  graph: true
+  page_level: false
+sdk_boundary:
+  sidecar: "A GraphRAG CLI adapter implementing the agentmem stdio line protocol."
+  wire_protocol: agentmem-bridge/v1
+  endpoints:
+    - "health"
+    - "put --id <id>"
+    - "query --text <t> --top-k <n>"
+    - "delete --id <id>"
+  capability_map:
+    graph: "Community-summary and entity graph retrieval"
+  credentials_ref: "AGENTMEM_GRAPHRAG_CONFIG (sidecar environment only)"

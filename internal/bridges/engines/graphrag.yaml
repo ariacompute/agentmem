@@ -8,4 +8,4 @@ capabilities:
   semantic: false
   graph: true
   page_level: false
-notes: "Graph/community-summary retrieval. Bridge protocol: POST /put, /query, /delete, GET /healthz. TODO(real): adapt to the native GraphRAG query API."
+notes: "Legacy generic-kind spec. The CLI stdio boundary and community-summary mapping are declared in internal/plugins/graphrag/plugin.yaml; see docs/plugins.md."

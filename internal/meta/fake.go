@@ -10,27 +10,31 @@ import (
 // FakeStore is an in-memory MetaStore + VectorStore for offline tests.
 // It mirrors the PostgreSQL implementation's contract exactly.
 type FakeStore struct {
-	mu          sync.Mutex
-	concepts    map[string]ConceptMeta
-	projections map[string]Projection // conceptID + "\x00" + adapter
-	decisions   []DecisionRecord
-	nextID      uint
-	cursors     map[string]Cursor
-	fingerprint map[string]string
-	acl         map[string]ACLEntry
-	vectors     map[string]Vector
-	onClose     func() error
+	mu           sync.Mutex
+	concepts     map[string]ConceptMeta
+	projections  map[string]Projection // conceptID + "\x00" + adapter
+	decisions    []DecisionRecord
+	computations []ComputationRecord
+	runKeys      map[string]bool
+	nextID       uint
+	cursors      map[string]Cursor
+	fingerprint  map[string]string
+	acl          map[string]ACLEntry
+	vectors      map[string]Vector
+	onClose      func() error
 }
 
 // NewFakeStore returns an empty in-memory store.
 func NewFakeStore() *FakeStore {
 	return &FakeStore{
-		concepts:    map[string]ConceptMeta{},
-		projections: map[string]Projection{},
-		cursors:     map[string]Cursor{},
-		fingerprint: map[string]string{},
-		acl:         map[string]ACLEntry{},
-		vectors:     map[string]Vector{},
+		concepts:     map[string]ConceptMeta{},
+		projections:  map[string]Projection{},
+		cursors:      map[string]Cursor{},
+		fingerprint:  map[string]string{},
+		acl:          map[string]ACLEntry{},
+		vectors:      map[string]Vector{},
+		computations: []ComputationRecord{},
+		runKeys:      map[string]bool{},
 	}
 }
 
@@ -161,6 +165,56 @@ func (f *FakeStore) ListDecisions(ctx context.Context, q DecisionQuery) ([]Decis
 	return out, nil
 }
 
+func (f *FakeStore) AppendComputation(ctx context.Context, r ComputationRecord) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.runKeys == nil {
+		f.runKeys = map[string]bool{}
+	}
+	key := r.JobID + "\x00" + r.Verdict
+	if f.runKeys[key] {
+		return ctx.Err()
+	}
+	f.runKeys[key] = true
+	f.nextID++
+	r.ID = f.nextID
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = time.Now().UTC()
+	}
+	if r.Reasons == nil {
+		r.Reasons = StringList{}
+	}
+	f.computations = append(f.computations, r)
+	return ctx.Err()
+}
+
+func (f *FakeStore) ListComputations(ctx context.Context, q ComputationQuery) ([]ComputationRecord, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]ComputationRecord, 0, len(f.computations))
+	for i := len(f.computations) - 1; i >= 0; i-- {
+		r := f.computations[i]
+		if q.ConceptID != "" && r.ConceptID != q.ConceptID {
+			continue
+		}
+		out = append(out, r)
+		if q.Limit > 0 && len(out) >= q.Limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// Query is the offline SQLExecutor used by the postgres computation runtime
+// when no DSN is configured. It never executes SQL: the result is derived
+// deterministically from the statement and bound arguments.
+func (f *FakeStore) Query(ctx context.Context, statement string, args []any, maxRows int) (SQLRows, error) {
+	if err := ctx.Err(); err != nil {
+		return SQLRows{}, err
+	}
+	return DeterministicSQLRows(statement, args, maxRows), nil
+}
+
 func (f *FakeStore) MigrationCursor(ctx context.Context, job string) (Cursor, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -256,6 +310,7 @@ type Snapshot struct {
 	Concepts     map[string]ConceptMeta `json:"concepts"`
 	Projections  map[string]Projection  `json:"projections"`
 	Decisions    []DecisionRecord       `json:"decisions"`
+	Computations []ComputationRecord    `json:"computations"`
 	NextID       uint                   `json:"next_id"`
 	Cursors      map[string]Cursor      `json:"cursors"`
 	Fingerprints map[string]string      `json:"fingerprints"`
@@ -271,6 +326,7 @@ func (f *FakeStore) Export() Snapshot {
 		Concepts:     make(map[string]ConceptMeta, len(f.concepts)),
 		Projections:  make(map[string]Projection, len(f.projections)),
 		Decisions:    append([]DecisionRecord(nil), f.decisions...),
+		Computations: append([]ComputationRecord(nil), f.computations...),
 		NextID:       f.nextID,
 		Cursors:      make(map[string]Cursor, len(f.cursors)),
 		Fingerprints: make(map[string]string, len(f.fingerprint)),
@@ -311,6 +367,17 @@ func (f *FakeStore) Import(s Snapshot) {
 		f.projections = map[string]Projection{}
 	}
 	f.decisions = s.Decisions
+	if f.decisions == nil {
+		f.decisions = []DecisionRecord{}
+	}
+	f.computations = s.Computations
+	if f.computations == nil {
+		f.computations = []ComputationRecord{}
+	}
+	f.runKeys = make(map[string]bool, len(f.computations))
+	for _, r := range f.computations {
+		f.runKeys[r.JobID+"\x00"+r.Verdict] = true
+	}
 	f.nextID = s.NextID
 	f.cursors = s.Cursors
 	if f.cursors == nil {

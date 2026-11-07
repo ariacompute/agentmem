@@ -30,8 +30,9 @@ type Embedder interface {
 }
 
 // HashingEmbedder is a deterministic, offline embedding used for tests and as
-// the dev default. It is lexical, not semantic: production must inject a real
-// embedder. TODO(real): replace with a model-backed embedder.
+// the dev default. It is lexical, not semantic. Production swaps it through
+// the Embedder port: Identity() is part of every projection fingerprint, so
+// injecting a model-backed implementation automatically triggers a rebuild.
 type HashingEmbedder struct {
 	Dim int
 }

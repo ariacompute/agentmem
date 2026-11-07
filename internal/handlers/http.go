@@ -3,9 +3,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
+	"agentmem/internal/compute"
 	"agentmem/internal/okf"
 	"agentmem/internal/router"
 	"agentmem/internal/service"
@@ -31,6 +33,12 @@ type queryRequest struct {
 	Query   string `json:"query"`
 	Subject string `json:"subject"`
 	TopK    int    `json:"top_k"`
+}
+
+type computationRequest struct {
+	ConceptID  string         `json:"concept_id"`
+	Subject    string         `json:"subject"`
+	Parameters map[string]any `json:"parameters"`
 }
 
 // NewHandler builds the API router.
@@ -114,7 +122,65 @@ func NewHandler(svc *service.KnowledgeService) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, ids)
 	})
+	mux.HandleFunc("/v1/computations", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			handleComputation(w, r, svc)
+		case http.MethodGet:
+			handleComputationAudit(w, r, svc)
+		default:
+			methodNotAllowed(w)
+		}
+	})
 	return mux
+}
+
+func handleComputation(w http.ResponseWriter, r *http.Request, svc *service.KnowledgeService) {
+	var req computationRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+	dec.UseNumber()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.ConceptID == "" {
+		writeError(w, http.StatusBadRequest, "concept_id is required")
+		return
+	}
+	env, err := svc.RunComputation(r.Context(), compute.Request{
+		ConceptID: req.ConceptID, Subject: req.Subject, Parameters: req.Parameters,
+	})
+	if err != nil {
+		// The envelope never carries a display value on failure.
+		writeJSON(w, computeStatus(err), map[string]any{"error": err.Error(), "envelope": env})
+		return
+	}
+	if !env.DisplayAllowed {
+		writeJSON(w, http.StatusUnprocessableEntity, env)
+		return
+	}
+	writeJSON(w, http.StatusOK, env)
+}
+
+func handleComputationAudit(w http.ResponseWriter, r *http.Request, svc *service.KnowledgeService) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	records, err := svc.ComputationAudit(r.Context(), r.URL.Query().Get("concept_id"), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, records)
+}
+
+func computeStatus(err error) int {
+	switch {
+	case errors.Is(err, compute.ErrUnsupported):
+		return http.StatusUnprocessableEntity
+	case errors.Is(err, compute.ErrExecution):
+		return http.StatusBadGateway
+	default:
+		return http.StatusBadRequest
+	}
 }
 
 func handlePut(w http.ResponseWriter, r *http.Request, svc *service.KnowledgeService) {

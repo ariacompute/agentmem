@@ -1,4 +1,4 @@
-.PHONY: build test vet eval validate run clean web
+.PHONY: build test vet eval validate check-boundaries run clean web
 
 BINARY := bin/agentmem
 PKG := ./...
@@ -17,6 +17,15 @@ eval:
 
 validate:
 	go run ./cmd/agentmem validate --config config.yaml
+
+# SDK boundaries are declared as data in plugin.yaml, never as code comments.
+check-boundaries:
+	@if grep -RIn --exclude-dir=.git --exclude-dir=bin --exclude-dir=dist --exclude=Makefile -e 'TODO'"(real)" .; then \
+		echo "SDK boundary annotations must live in plugin.yaml sdk_boundary"; exit 1; \
+	else \
+		echo "SDK boundaries are declarative"; \
+	fi
+	@go test ./internal/plugins/... -count=1
 
 run: build
 	./$(BINARY) serve --config config.yaml

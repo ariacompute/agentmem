@@ -20,6 +20,12 @@ type DecisionQuery struct {
 	Limit     int
 }
 
+// ComputationQuery filters the Attested Computation audit trail.
+type ComputationQuery struct {
+	ConceptID string
+	Limit     int
+}
+
 // MetaStore is the server-side structured data port.
 type MetaStore interface {
 	UpsertConcept(ctx context.Context, m ConceptMeta) error
@@ -40,6 +46,9 @@ type MetaStore interface {
 
 	PutACL(ctx context.Context, e ACLEntry) error
 	CheckACL(ctx context.Context, subject, conceptID string) (bool, error)
+
+	AppendComputation(ctx context.Context, r ComputationRecord) error
+	ListComputations(ctx context.Context, q ComputationQuery) ([]ComputationRecord, error)
 
 	Close() error
 }

@@ -55,8 +55,9 @@ go run ./cmd/agentmem serve --config config.yaml
 
 `internal/meta/migrations/001_init.sql` creates the metadata tables;
 `002_pgvector.sql` is best-effort and only applies when the `vector` extension
-is available. Migrations are versioned in `schema_migrations` and applied
-transactionally with an advisory lock. `AutoMigrate` is never the schema source.
+is available; `003_computations.sql` adds the Attested Computation audit table.
+Migrations are versioned in `schema_migrations` and applied transactionally
+with an advisory lock. `AutoMigrate` is never the schema source.
 
 ## HTTP API
 
@@ -69,6 +70,8 @@ transactionally with an advisory lock. `AutoMigrate` is never the schema source.
 | POST | `/v1/migrate` | Incremental reconciliation (dry-run/resume) |
 | GET | `/v1/decisions` | Routing audit trail |
 | GET | `/v1/concepts` | Canonical concept ids |
+| POST | `/v1/computations` | Execute and attest a sanctioned computation |
+| GET | `/v1/computations?concept_id=&limit=` | Attested Computation verdict audit |
 
 ## Smart routing
 
@@ -85,12 +88,27 @@ channels, and migration reconciles existing knowledge in both directions.
 ## Plugins
 
 `internal/adapter` defines the `Adapter` port. Built-ins: `okf`, `memory`,
-`pgvector`. Four Python-ecosystem engines use the generic HTTP/CLI bridges
-declared in `internal/bridges/engines/*.yaml`. Adding an engine is a factory
-registration plus a YAML declaration — see [docs/adapters.md](docs/adapters.md).
+`pgvector`. The four Python-ecosystem engines are first-class Go plugin packages
+under `internal/plugins/<engine>/`, each with a validated `plugin.yaml`, an
+`Adapter` + `Lifecycle` implementation, health checks and a versioned protocol
+fingerprint. The real SDK boundary is the `sdk_boundary` field in each manifest
+(sidecar, wire protocol, endpoints, capability mapping, credential reference),
+not a code comment. See [docs/plugins.md](docs/plugins.md) and
+[docs/adapters.md](docs/adapters.md).
 
 Go `.so` plugins are deliberately avoided; the registry is explicit and
-configuration-driven.
+configuration-driven. `make check-boundaries` verifies the boundary stays
+declarative.
+
+## Attested Computations
+
+`POST /v1/computations` / `agentmem compute` load a sanctioned computation from
+OKF+Git, bind only declared parameter values, execute it through the `postgres`
+runtime, and return a value **only after** a deterministic Go attester verifies
+SQL provenance and display-value fidelity. `bigquery`, `dbt`, `python` and
+`looker` are formal contract skeletons returning `Unsupported`. Every outcome
+is audited in `computation_runs` (offline: `data/meta.fake.json`). See
+[docs/computations.md](docs/computations.md).
 
 ## Evaluation
 
@@ -112,13 +130,15 @@ required, and the Go binary does not depend on Node.
 - [Storage: OKF+Git and PostgreSQL/GORM](docs/storage.md)
 - [OKF conformance](docs/okf-conformance.md)
 - [Adapter plugins](docs/adapters.md)
+- [Engine plugins and SDK boundary](docs/plugins.md)
+- [Attested Computation](docs/computations.md)
 - [Routing and System One](docs/routing.md)
 
 ## Non-goals
 
-Executing Attested Computations, a full admin UI, real SDK wiring for the four
-Python engines (they are HTTP/CLI bridge contracts with deterministic mocks),
-and any automatic `git commit`/`push` of the source repository.
+A full admin UI, native Python SDK clients inside the Go binary (sidecars own
+that boundary), non-`postgres` computation executors, and any automatic
+`git commit`/`push` of the source repository.
 
 ## License
 

@@ -1,9 +1,11 @@
 // Package bridges adapts third-party RAG engines to the adapter contract.
 //
-// Python-ecosystem engines (LlamaIndex/PageIndex/GraphRAG/LightRAG) are reached
-// over HTTP or CLI. The wire format below is the agentmem bridge protocol; a
-// real engine needs a thin sidecar implementing it. TODO(real): replace with
-// each engine's native protocol when credentials/services are available.
+// The JSON line protocol below is the formal boundary between agentmem and a
+// real engine: a sidecar implements it on top of the engine's native SDK.
+// Each engine plugin declares the exact endpoints, capability mapping and
+// credential reference in its plugin.yaml (sdk_boundary); see docs/plugins.md.
+// An empty endpoint or command selects the deterministic in-process mock,
+// which is always visible through Capabilities, Health and plugin Status.
 package bridges
 
 import (

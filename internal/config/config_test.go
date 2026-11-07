@@ -74,6 +74,46 @@ func TestDuplicateAdapterName(t *testing.T) {
 	}
 }
 
+func TestEnginePluginKindsAndComputeSection(t *testing.T) {
+	c := Default()
+	for _, kind := range []string{"llamaindex", "pageindex", "graphrag", "lightrag"} {
+		c.Adapters = append(c.Adapters, AdapterConfig{Name: kind, Kind: kind, Enabled: true})
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("engine plugin kinds must be accepted: %v", err)
+	}
+	if c.Compute != DefaultCompute() {
+		t.Fatalf("compute defaults drifted: %+v", c.Compute)
+	}
+	c.Compute.MaxRows = 10001
+	if err := c.Validate(); err == nil {
+		t.Fatal("compute.max_rows above the bound must fail closed")
+	}
+	c = Default()
+	c.Compute.TimeoutMS = -1
+	if err := c.Validate(); err == nil {
+		t.Fatal("negative compute timeout must fail closed")
+	}
+}
+
+func TestLoadComputeSection(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	data := "compute:\n  timeout_ms: 1200\n  max_rows: 7\n"
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(p)
+	if err != nil || cfg.Compute.TimeoutMS != 1200 || cfg.Compute.MaxRows != 7 {
+		t.Fatalf("compute section: %v / %+v", err, cfg.Compute)
+	}
+	if err := os.WriteFile(p, []byte("compute:\n  unknown: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("unknown compute key must be rejected")
+	}
+}
+
 func TestVectorDSNFallback(t *testing.T) {
 	c := Default()
 	c.Postgres.DSN = "postgres://main"

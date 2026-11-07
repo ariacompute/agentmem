@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -77,6 +78,56 @@ func (b *Bundle) Path(id string) (string, error) {
 func Hash(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// maxResourceBytes bounds sanctioned computation resources read from a bundle.
+const maxResourceBytes = 1 << 20
+
+// ReadResource reads a non-Markdown bundle resource (for example a sanctioned
+// .sql file) referenced by an Attested Computation. It applies its own path
+// safety checks because Bundle.Path always appends .md and is reserved for
+// concept documents. Traversal, absolute paths and symlink escapes are refused.
+func (b *Bundle) ReadResource(rel string) ([]byte, error) {
+	rel = strings.TrimSpace(rel)
+	if rel == "" {
+		return nil, errors.New("okf: empty resource path")
+	}
+	if strings.ContainsRune(rel, 0) || strings.Contains(rel, "\\") {
+		return nil, fmt.Errorf("okf: illegal resource path %q", rel)
+	}
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
+		return nil, fmt.Errorf("okf: resource path escapes bundle: %q", rel)
+	}
+	p := filepath.Join(b.Root, filepath.FromSlash(clean))
+	if _, err := filepath.Rel(b.Root, p); err != nil {
+		return nil, fmt.Errorf("okf: resource path escapes bundle: %q", rel)
+	}
+	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(p))
+	if err != nil {
+		return nil, fmt.Errorf("okf: resource directory %q: %w", rel, err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(b.Root)
+	if err != nil {
+		return nil, fmt.Errorf("okf: bundle root: %w", err)
+	}
+	check, err := filepath.Rel(resolvedRoot, filepath.Join(resolvedParent, filepath.Base(p)))
+	if err != nil || check == ".." || strings.HasPrefix(check, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("okf: resource symlink escapes bundle: %q", rel)
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, fmt.Errorf("okf: read resource %q: %w", rel, err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxResourceBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("okf: read resource %q: %w", rel, err)
+	}
+	if len(data) > maxResourceBytes {
+		return nil, fmt.Errorf("okf: resource %q exceeds %d bytes", rel, maxResourceBytes)
+	}
+	return data, nil
 }
 
 // Put writes a concept atomically, then incrementally refreshes only the

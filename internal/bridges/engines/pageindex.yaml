@@ -8,4 +8,4 @@ capabilities:
   semantic: true
   graph: false
   page_level: true
-notes: "Reasoning-style retrieval with page-level citations and no ranked chunks. Bridge protocol: POST /put, /query, /delete, GET /healthz. TODO(real): adapt page citations."
+notes: "Legacy generic-kind spec. Page-citation mapping and the SDK boundary are declared in internal/plugins/pageindex/plugin.yaml; see docs/plugins.md."

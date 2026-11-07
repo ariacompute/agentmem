@@ -10,7 +10,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
+	"strings"
 
+	"agentmem/internal/compute"
 	"agentmem/internal/config"
 	"agentmem/internal/eval"
 	"agentmem/internal/handlers"
@@ -28,6 +31,8 @@ Commands:
   migrate     Reconcile canonical bodies with RAG projections
   decisions   Show the routing audit trail
   concepts    List canonical concept ids
+  compute     Execute an Attested Computation (repeat --param name=value)
+  computations  Show the Attested Computation verdict audit
   validate    Validate configuration
   eval        Run ranking/routing evaluation on a JSONL dataset
 `
@@ -54,6 +59,10 @@ func Run(args []string, out io.Writer) error {
 		return cmdDecisions(args[1:], out)
 	case "concepts":
 		return cmdConcepts(args[1:], out)
+	case "compute":
+		return cmdCompute(args[1:], out)
+	case "computations":
+		return cmdComputations(args[1:], out)
 	case "validate":
 		return cmdValidate(args[1:], out)
 	case "eval":
@@ -238,6 +247,80 @@ func cmdConcepts(args []string, out io.Writer) error {
 		return err
 	}
 	return printJSON(out, ids)
+}
+
+type paramFlags struct{ values map[string]any }
+
+func (p *paramFlags) String() string {
+	keys := make([]string, 0, len(p.values))
+	for k := range p.values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+fmt.Sprint(p.values[k]))
+	}
+	return strings.Join(parts, ",")
+}
+
+func (p *paramFlags) Set(s string) error {
+	k, v, ok := strings.Cut(s, "=")
+	if !ok || strings.TrimSpace(k) == "" {
+		return fmt.Errorf("compute: --param must be name=value")
+	}
+	if p.values == nil {
+		p.values = map[string]any{}
+	}
+	p.values[k] = v
+	return nil
+}
+
+func cmdCompute(args []string, out io.Writer) error {
+	fs := newFlags("compute")
+	configPath := fs.String("config", "", "configuration file")
+	id := fs.String("id", "", "Attested Computation concept id")
+	subject := fs.String("subject", "", "requesting subject")
+	params := &paramFlags{values: map[string]any{}}
+	fs.Var(params, "param", "parameter value as name=value (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" {
+		return fmt.Errorf("compute: --id is required")
+	}
+	svc, err := mustAssemble(*configPath)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+	env, err := svc.RunComputation(context.Background(), compute.Request{
+		ConceptID: *id, Subject: *subject, Parameters: params.values,
+	})
+	if err != nil {
+		return err
+	}
+	return printJSON(out, env)
+}
+
+func cmdComputations(args []string, out io.Writer) error {
+	fs := newFlags("computations")
+	configPath := fs.String("config", "", "configuration file")
+	id := fs.String("id", "", "filter by concept id")
+	limit := fs.Int("limit", 20, "max records")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	svc, err := mustAssemble(*configPath)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+	records, err := svc.ComputationAudit(context.Background(), *id, *limit)
+	if err != nil {
+		return err
+	}
+	return printJSON(out, records)
 }
 
 func cmdValidate(args []string, out io.Writer) error {

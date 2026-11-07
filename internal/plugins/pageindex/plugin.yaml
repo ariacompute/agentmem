@@ -1,0 +1,26 @@
+name: pageindex
+kind: pageindex
+engine: pageindex
+version: "1.0.0"
+bridge: http
+protocol_version: agentmem-bridge/v1
+timeout_ms: 3000
+offline_mock: true
+citation_scheme: "pageindex://page/"
+capabilities:
+  vector: false
+  semantic: true
+  graph: false
+  page_level: true
+sdk_boundary:
+  sidecar: "A PageIndex service exposing the agentmem HTTP line protocol with page-level citations."
+  wire_protocol: agentmem-bridge/v1
+  endpoints:
+    - "GET /healthz"
+    - "POST /put"
+    - "POST /query"
+    - "POST /delete"
+  capability_map:
+    semantic: "Reasoning-style document tree navigation"
+    page_level: "Page citation fields in the /query hits envelope"
+  credentials_ref: "AGENTMEM_PAGEINDEX_TOKEN (sidecar environment only)"

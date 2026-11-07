@@ -4,7 +4,7 @@
 
 | | OKF bundle in Git | PostgreSQL（GORM） |
 |---|---|---|
-| 存什么 | 知识正文、frontmatter、`index.md`、`log.md`、跨链接 | 概念元数据、投影状态、决策审计、迁移游标、ACL、引擎指纹 |
+| 存什么 | 知识正文、frontmatter、`index.md`、`log.md`、跨链接、受批准计算体（`.sql` 资源） | 概念元数据、投影状态、决策审计、计算 verdict、迁移游标、ACL、引擎指纹 |
 | 不存什么 | 服务运行状态 | 知识正文 |
 | 权威 | 正文唯一权威 | 结构化状态权威 |
 | 关联键 | `content_hash`、`commit_sha` | 同左（外加 `concept_id`） |
@@ -21,8 +21,11 @@ data/bundle/
 │   ├── index.md             # 该目录概念清单
 │   ├── gross-margin.md      # 概念文档
 │   └── log.md
-└── computations/
-    └── revenue-ytd.md       # Attested Computation 契约
+├── computations/
+│   ├── revenue-ytd.md       # Attested Computation 契约（bigquery 骨架）
+│   └── revenue-postgres.md  # 可执行的 postgres 契约
+└── references/
+    └── revenue.sql          # 受批准计算体（Bundle.ReadResource 读取）
 ```
 
 概念 ID = 相对路径去掉 `.md`。`internal/okf/bundle.go` 的 `Put` 采用临时文件 + rename 原子写，只重生成所在目录的 `index.md`（不做全树遍历）。`log.md` 新条目按日期插入到最前。
@@ -38,13 +41,15 @@ data/bundle/
 | `migration_cursors` | `job` PK, `last_concept_id`, `done` | 断点续跑 |
 | `acl` | `(subject, concept_id)` PK, `allow` | 显式授权 |
 | `engine_fingerprints` | `adapter` PK, `fingerprint` | embedding 身份 |
+| `computation_runs` | `job_id` + `verdict` UNIQUE, `contract_hash` (idx), `params_digest`, `reasons` JSONB | Attested Computation verdict 审计（不存 SQL、参数值、结果值） |
 | `concept_vectors`（可选） | `embedding vector(1536)` | pgvector 投影 |
 
 ## 迁移
 
 - `internal/meta/migrations/001_init.sql`：基础设施表，幂等 `IF NOT EXISTS`。
 - `internal/meta/migrations/002_pgvector.sql`：`CREATE EXTENSION IF NOT EXISTS vector` + HNSW 索引，**尽力而为**：扩展不可用只告警，不阻断元数据层启动。
-- `PostgresStore.Migrate` 先建 `schema_migrations`，再按文件名顺序在事务内 `pg_advisory_xact_lock` + 检查 + 执行 + 登记。SQL 文件按 `;` 拆分逐条执行（兼容 pgx 扩展协议）。
+- `internal/meta/migrations/003_computations.sql`：`computation_runs` 表与索引，`(job_id, verdict)` 唯一键实现幂等审计。
+- `PostgresStore.Migrate` 先建 `schema_migrations`，再按文件名顺序在事务内 `pg_advisory_xact_lock` + 检查 + 执行 + 登记。SQL 文件按 `;` 拆分逐条执行（兼容 pgx 扩展协议）；新增 `NNN_*.sql` 会被 embed glob 自动拾取。
 - `AutoMigrate` 不作为 schema 来源。
 
 ## GORM 边界
@@ -62,4 +67,4 @@ data/bundle/
 
 ## 离线路径
 
-`AGENTMEM_PG_DSN` 为空时注入 `meta.FakeStore`（同时实现 `MetaStore` 与 `VectorStore`），`go test ./...` 无需数据库。CLI 每条命令是独立进程，因此 `service.Assemble` 使用 `NewFileFakeStore` 把 fake 的状态序列化到 `data/meta.fake.json`（原子写，进程退出时保存），保证写入后查询的 ACL、投影状态与决策审计跨进程可见。该快照位于 OKF bundle 的上级目录，不会被 `Bundle.List()` 扫描，也不会被 `vcs.Commit` 提交。设置 `AGENTMEM_TEST_PG_DSN` 可运行 `TestPostgresIntegration` 验证真实 GORM 后端。
+`AGENTMEM_PG_DSN` 为空时注入 `meta.FakeStore`（同时实现 `MetaStore`、`VectorStore` 与 `SQLExecutor`），`go test ./...` 无需数据库。CLI 每条命令是独立进程，因此 `service.Assemble` 使用 `NewFileFakeStore` 把 fake 的状态序列化到 `data/meta.fake.json`（原子写，进程退出时保存），保证 ACL、投影状态、决策审计与计算 verdict 跨进程可见。该快照位于 OKF bundle 的上级目录，不会被 `Bundle.List()` 扫描，也不会被 `vcs.Commit` 提交。设置 `AGENTMEM_TEST_PG_DSN` 可运行 `TestPostgresIntegration` 验证真实 GORM 后端。

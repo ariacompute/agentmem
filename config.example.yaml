@@ -35,6 +35,11 @@ router:
   # Conflict policy is fixed: the OKF+Git body always wins.
   conflict_policy: "okf_wins"
 
+compute:
+  # Executor bound; 0 uses the built-in default (5000ms / 100 rows).
+  timeout_ms: 5000
+  max_rows: 100
+
 adapters:
   - name: "okf"
     kind: "okf"
@@ -45,24 +50,27 @@ adapters:
   - name: "pgvector"
     kind: "pgvector"
     enabled: false
-  # Third-party engines use the generic HTTP/CLI bridges.
+  # First-class engine plugins. Each owns a plugin.yaml declaring its
+  # sdk_boundary (sidecar, wire protocol, endpoints, credential reference).
+  # An empty endpoint selects the deterministic offline mock.
+  # The legacy generic kinds "http" / "cli" remain available for custom engines.
   - name: "llamaindex"
-    kind: "http"
+    kind: "llamaindex"
     enabled: false
     endpoint: ""
     timeout_ms: 3000
   - name: "pageindex"
-    kind: "http"
+    kind: "pageindex"
     enabled: false
     endpoint: ""
     timeout_ms: 3000
   - name: "graphrag"
-    kind: "http"
+    kind: "graphrag"     # CLI stdio line protocol
     enabled: false
     endpoint: ""
     timeout_ms: 3000
   - name: "lightrag"
-    kind: "http"
+    kind: "lightrag"
     enabled: false
     endpoint: ""
     timeout_ms: 3000

@@ -1,0 +1,26 @@
+name: llamaindex
+kind: llamaindex
+engine: llamaindex
+version: "1.0.0"
+bridge: http
+protocol_version: agentmem-bridge/v1
+timeout_ms: 3000
+offline_mock: true
+citation_scheme: "llamaindex:/"
+capabilities:
+  vector: true
+  semantic: true
+  graph: false
+  page_level: false
+sdk_boundary:
+  sidecar: "A LlamaIndex service exposing the agentmem HTTP line protocol."
+  wire_protocol: agentmem-bridge/v1
+  endpoints:
+    - "GET /healthz"
+    - "POST /put"
+    - "POST /query"
+    - "POST /delete"
+  capability_map:
+    vector: "LlamaIndex VectorStoreIndex hybrid retrieval"
+    semantic: "BM25 retriever fused with vector search"
+  credentials_ref: "AGENTMEM_LLAMAINDEX_TOKEN (sidecar environment only)"

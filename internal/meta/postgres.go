@@ -238,6 +238,32 @@ func (s *PostgresStore) ListDecisions(ctx context.Context, q DecisionQuery) ([]D
 	return out, err
 }
 
+func (s *PostgresStore) AppendComputation(ctx context.Context, r ComputationRecord) error {
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = time.Now().UTC()
+	}
+	if r.Reasons == nil {
+		r.Reasons = StringList{}
+	}
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "job_id"}, {Name: "verdict"}},
+		DoNothing: true,
+	}).Create(&r).Error
+}
+
+func (s *PostgresStore) ListComputations(ctx context.Context, q ComputationQuery) ([]ComputationRecord, error) {
+	tx := s.db.WithContext(ctx).Model(&ComputationRecord{})
+	if q.ConceptID != "" {
+		tx = tx.Where("concept_id = ?", q.ConceptID)
+	}
+	if q.Limit > 0 {
+		tx = tx.Limit(q.Limit)
+	}
+	var out []ComputationRecord
+	err := tx.Order("id DESC").Find(&out).Error
+	return out, err
+}
+
 func (s *PostgresStore) MigrationCursor(ctx context.Context, job string) (Cursor, error) {
 	var c Cursor
 	err := s.db.WithContext(ctx).Where("job = ?", job).First(&c).Error

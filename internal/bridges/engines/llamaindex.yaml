@@ -8,4 +8,4 @@ capabilities:
   semantic: true
   graph: false
   page_level: false
-notes: "Default hybrid vector + BM25 retrieval in DeepTutor. Bridge protocol: POST /put, /query, /delete, GET /healthz. TODO(real): point at a LlamaIndex service."
+notes: "Legacy generic-kind spec. The SDK boundary (sidecar, endpoints, credential reference, protocol version) is declared in internal/plugins/llamaindex/plugin.yaml; see docs/plugins.md."

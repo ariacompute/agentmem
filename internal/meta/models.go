@@ -76,6 +76,29 @@ type EngineFingerprint struct {
 
 func (EngineFingerprint) TableName() string { return "engine_fingerprints" }
 
+// ComputationRecord is one Attested Computation verdict. It deliberately
+// stores no SQL text, parameter values, result values or knowledge bodies:
+// PostgreSQL only holds the verifiable outcome of a run whose body lives in Git.
+type ComputationRecord struct {
+	ID             uint       `gorm:"primaryKey;autoIncrement" json:"id"`
+	ConceptID      string     `gorm:"size:512;index" json:"concept_id"`
+	Subject        string     `gorm:"size:128" json:"subject"`
+	Runtime        string     `gorm:"size:64" json:"runtime"`
+	ContractHash   string     `gorm:"size:64;index" json:"contract_hash"`
+	ParamsDigest   string     `gorm:"size:64" json:"params_digest"`
+	JobID          string     `gorm:"size:64;uniqueIndex:idx_computation_run" json:"job_id"`
+	Verdict        string     `gorm:"size:32;uniqueIndex:idx_computation_run" json:"verdict"`
+	DisplayAllowed bool       `json:"display_allowed"`
+	Provenance     bool       `json:"provenance"`
+	Fidelity       bool       `json:"fidelity"`
+	Stale          bool       `json:"stale"`
+	Reasons        StringList `gorm:"type:jsonb" json:"reasons"`
+	ErrorClass     string     `gorm:"size:64" json:"error_class"`
+	CreatedAt      time.Time  `gorm:"index" json:"created_at"`
+}
+
+func (ComputationRecord) TableName() string { return "computation_runs" }
+
 // StringList is a JSONB-backed []string (Valuer/Scanner pair).
 type StringList []string
 

@@ -39,7 +39,7 @@ docker compose up -d postgres
 go run ./cmd/agentmem serve --config config.yaml
 ```
 
-`internal/meta/migrations/001_init.sql` 创建元数据表；`002_pgvector.sql` 为尽力而为，仅在 `vector` 扩展可用时生效。迁移版本记录在 `schema_migrations`，通过事务与 advisory lock 应用；`AutoMigrate` 不作为 schema 来源。
+`internal/meta/migrations/001_init.sql` 创建元数据表；`002_pgvector.sql` 为尽力而为，仅在 `vector` 扩展可用时生效；`003_computations.sql` 增加 Attested Computation 审计表。迁移版本记录在 `schema_migrations`，通过事务与 advisory lock 应用；`AutoMigrate` 不作为 schema 来源。
 
 ## HTTP API
 
@@ -52,6 +52,8 @@ go run ./cmd/agentmem serve --config config.yaml
 | POST | `/v1/migrate` | 增量对账（dry-run / 断点续跑） |
 | GET | `/v1/decisions` | 路由决策审计 |
 | GET | `/v1/concepts` | 权威概念列表 |
+| POST | `/v1/computations` | 执行并验证受批准计算 |
+| GET | `/v1/computations?concept_id=&limit=` | 计算 verdict 审计 |
 
 ## 智能路由
 
@@ -61,7 +63,11 @@ go run ./cmd/agentmem serve --config config.yaml
 
 ## 插件
 
-`internal/adapter` 定义 `Adapter` 端口；内置 `okf`、`memory`、`pgvector`。四个 Python 生态引擎通过 `internal/bridges/engines/*.yaml` 声明并由通用 HTTP/CLI 桥接接入。新增引擎 = 注册工厂 + 一份 YAML，详见 [docs/adapters.md](docs/adapters.md)。刻意不使用 Go `.so` 动态插件，注册表为显式配置驱动。
+`internal/adapter` 定义 `Adapter` 端口；内置 `okf`、`memory`、`pgvector`。四个 Python 生态引擎是 `internal/plugins/<engine>/` 下的一等 Go 插件包，各自持有严格校验的 `plugin.yaml`、`Adapter` + `Lifecycle` 实现、健康检查与版本化协议指纹。真实 SDK 对接边界由清单的 `sdk_boundary` 正式声明（sidecar、线协议、端点、能力映射、凭据引用），不依赖代码注释。详见 [docs/plugins.md](docs/plugins.md) 与 [docs/adapters.md](docs/adapters.md)。刻意不使用 Go `.so` 动态插件，注册表为显式配置驱动；`make check-boundaries` 保证边界始终结构化。
+
+## Attested Computation
+
+`POST /v1/computations` 或 `agentmem compute` 从 OKF+Git 加载受批准计算，只绑定声明参数值，经 `postgres` runtime 执行；只有确定性 Go attester 校验 SQL provenance 与展示值 fidelity 通过后才返回数值。`bigquery` / `dbt` / `python` / `looker` 为正式契约骨架，返回 `Unsupported`。成功、拒绝与错误都写入 `computation_runs` 审计（离线为 `data/meta.fake.json`）。详见 [docs/computations.md](docs/computations.md)。
 
 ## 评测
 
@@ -77,11 +83,13 @@ go run ./cmd/agentmem serve --config config.yaml
 - [存储：OKF+Git 与 PostgreSQL/GORM](docs/storage.md)
 - [OKF 兼容性](docs/okf-conformance.md)
 - [适配器插件](docs/adapters.md)
+- [引擎插件与 SDK 边界](docs/plugins.md)
+- [Attested Computation](docs/computations.md)
 - [路由与 System One](docs/routing.md)
 
 ## 非目标
 
-不执行 Attested Computation；不构建完整管理台；四个 Python 引擎不接真实 SDK（提供 HTTP/CLI 桥接契约与确定性 mock）；不自动 commit/push 源码仓库。
+不构建完整管理台；不在 Go 二进制内链接 Python 原生 SDK（由 sidecar 承担该边界）；不实现非 `postgres` 的计算执行器；不自动 commit/push 源码仓库。
 
 ## 许可
 

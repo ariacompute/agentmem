@@ -11,7 +11,7 @@
 | `verified` | **bare mapping 与 list 都接受**；bare mapping 自动视为单元素列表 |
 | `status` | `draft` / `stable` / `deprecated`；缺省按 `stable` |
 | `stale_after` | 绝对 ISO 8601 时刻；`IsStale(now)` 比较 |
-| `runtime` / `parameters` / `computation` / `executor` / `attester` | Attested Computation 契约建模（只读，不执行） |
+| `runtime` / `parameters` / `computation` / `executor` / `attester` | Attested Computation 契约声明；执行与验证在 `internal/compute` |
 | 未知键 | 以 `yaml.Node` 原样保留，round-trip 不丢失 |
 
 ## 信任等级（派生，不存储）
@@ -42,7 +42,9 @@ actor 约定：`agent/模型`（含 `/`）、`human:` 前缀、`process:` 前缀
 
 ## Attested Computation
 
-`internal/okf/attested.go` 只建模契约：`runtime`、typed `parameters`、`computation`、`executor.receipt`、`attester.resource`。agentmem **不执行**受批准的计算，也不做 receipt 的 SQL 规范化比对与展示值 fidelity 校验——这是 OKF 规范中推迟到未来版本的能力。
+`internal/okf/attested.go` 建模契约：`runtime`、typed `parameters`、`computation`、`executor.receipt`、`attester.resource`。OKF 只负责**声明**，执行与验证在 `internal/compute`：Agent 只能按声明参数填值，受批准计算体始终来自 OKF+Git（正文内联块或 bundle 内资源文件），不得改写；`postgres` runtime 参数化执行并产出 receipt；确定性 Go attester 做 SQL 规范化 provenance 校验与展示值 fidelity 校验，失败即拒绝展示并写审计。完整链路见 [`computations.md`](computations.md)。
+
+`verified`（文档级人类确认）与运行级 attestation 是正交信号；`stale_after` 过期触发 fail closed 复核。其余 runtime 目前为正式契约骨架，返回 `Unsupported`。OKF 解析仍是宽松的：未知键、未知 runtime、缺失 executor/attester 都不会让 bundle 被拒绝。
 
 ## agentmem 扩展字段
 

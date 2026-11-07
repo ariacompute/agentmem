@@ -25,6 +25,10 @@ jobs:
         run: go build -o bin/agentmem ./cmd/agentmem
       - name: Validate config
         run: go run ./cmd/agentmem validate
+      - name: Declarative SDK boundaries
+        run: make check-boundaries
+      - name: Computation smoke test (offline)
+        run: go test ./internal/compute/... -count=1
       - name: Evaluation smoke test
         run: go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
 

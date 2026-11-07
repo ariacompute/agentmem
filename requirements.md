@@ -12,8 +12,8 @@
 ## 2. PostgreSQL + GORM 存储服务端结构化数据
 
 - 依赖 `gorm.io/gorm` + `gorm.io/driver/postgres` + `pgx/v5`，版本与 `agenthub/go.mod` 一致。
-- 库内只存：概念元数据、RAG 投影状态、`content_hash` 索引、embedding `Fingerprint`、路由决策审计、迁移游标/断点、ACL、引擎指纹与配置版本。**不存知识正文**。
-- 版本化迁移 `migrations/*.sql` 由 `db.Exec` 在事务内按序应用（advisory lock + `schema_migrations`）；`AutoMigrate` 不作为 schema 来源；pgvector 迁移为尽力而为。
+- 库内只存：概念元数据、RAG 投影状态、`content_hash` 索引、embedding `Fingerprint`、路由决策审计、Attested Computation verdict、迁移游标/断点、ACL、引擎指纹与配置版本。**不存知识正文、SQL 文本、参数值或结果值**。
+- 版本化迁移 `migrations/*.sql` 由 `db.Exec` 在事务内按序应用（advisory lock + `schema_migrations`）；`003_computations.sql` 建 `computation_runs`；`AutoMigrate` 不作为 schema 来源；pgvector 迁移为尽力而为。
 - GORM 仅出现在 `internal/meta`：`MetaStore` 端口签名不含 `*gorm.DB`，上层包不 import gorm；CRUD 使用模型、`clause.OnConflict` upsert 与事务；日志默认 `Warn` 且不打印 SQL 参数。
 - `pgvector` 的 `vector` 类型用自定义 `Scanner/Valuer` + 原生参数化 SQL，经 `VectorStore` 窄端口暴露。
 - 生产 `AGENTMEM_PG_DSN` 必填；dev/测试注入文件持久化 fake（`data/meta.fake.json`），保证 CLI 多进程共享 ACL、投影与审计状态。
@@ -22,7 +22,7 @@
 
 - 统一 `Adapter` 端口：`Name` / `Capabilities` / `Put` / `Query` / `Delete` / `Fingerprint` / `Health`；显式注册表 + 配置驱动工厂，未知 kind 显式报错，未实现能力返回 `Unsupported`（禁止静默 no-op）。
 - 内置可用实现：`okf`、`memory`（倒排 + 哈希向量）、`pgvector`（含记录调用序列的 fake）。
-- 五个目标引擎：`LlamaIndex`、`PageIndex`、`GraphRAG`、`LightRAG`、`pgvector`；前四者经通用 HTTP/CLI 桥接（超时、重试上限、健康检查、参数白名单），各自有 YAML 声明与离线确定性 mock。
+- 五个目标引擎：`LlamaIndex`、`PageIndex`、`GraphRAG`、`LightRAG`、`pgvector`；前四者为 `internal/plugins/<engine>/` 独立 Go 插件包，含 `plugin.yaml`（`sdk_boundary` 正式声明真实 SDK 边界）、`Adapter` + `Lifecycle`、健康检查、版本化协议指纹与注册表装配，经泛型 HTTP/CLI 线协议与 sidecar 通信。`make check-boundaries` 保证边界结构化、仓库内无内联 SDK 边界注释。
 - 所有外部依赖置于接口之后，`go test ./...` 离线全绿，不依赖外部服务与密钥。
 
 ## 4. 智能路由（读写双程）
@@ -34,14 +34,22 @@
 - 存量迁移：基于 `content_hash` 增量对账、指纹漂移重建、dry-run、幂等、断点续跑（游标存 PG）、双向失效标记。
 - 决策审计：`slog` 结构化输出 + PG 持久化，可查询可回放，不含正文/PII/凭据。
 
-## 5. 交付与验收
+## 5. Attested Computation
 
-- CLI：`serve` / `put` / `query` / `migrate` / `decisions` / `concepts` / `validate` / `eval`。
-- HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`。
+- 受批准计算体存于 OKF+Git（bundle 内 `.sql` 资源或正文 ```sql 内联块）；Agent 只能填声明参数值，不得改写计算体。
+- 参数类型 `integer/number/string/boolean/date`；`:name` 转 `$N` 参数化绑定；拒绝多语句与变更 SQL。
+- 五 runtime 契约骨架：`bigquery / postgres / dbt / python / looker`；仅 `postgres` 真实执行（只读事务、参数化、超时、行数上限），其余返回 `Unsupported`。
+- `executor → receipt`；确定性 Go attester 做 SQL 规范化 provenance 与展示值 fidelity 校验；失败拒绝展示 `display_value`。
+- HTTP `POST /v1/computations` + `GET /v1/computations`；CLI `compute`（可重复 `--param`）与 `computations`；成功/拒绝/错误都写入 PG 审计。
+
+## 6. 交付与验收
+
+- CLI：`serve` / `put` / `query` / `migrate` / `decisions` / `concepts` / `compute` / `computations` / `validate` / `eval`。
+- HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`。
 - 评测：Recall@k / Precision@k / nDCG / MRR / MAP / HitRate@k 纯函数；显式区分覆盖率 Recall 与二值 HitRate。
 - 文档、CI、Docker、compose、模板级最小 Vite 页面。
-- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem` 全绿，离线无外部服务。
+- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries` 全绿，离线无外部服务。
 
-## 6. 非目标
+## 7. 非目标
 
-执行 Attested Computation；完整管理台；四个 Python 引擎的真实 SDK 对接（提供桥接契约与确定性 mock）；自动 commit/push 源码仓库；跨组织知识同步协议。
+完整管理台；Go 二进制内直接链接四个 Python 引擎的原生 SDK（由 sidecar 承担 `sdk_boundary`）；非 `postgres` 计算执行器；自动 commit/push 源码仓库；跨组织知识同步协议。

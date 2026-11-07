@@ -1,0 +1,27 @@
+name: lightrag
+kind: lightrag
+engine: lightrag
+version: "1.0.0"
+bridge: http
+protocol_version: agentmem-bridge/v1
+timeout_ms: 3000
+offline_mock: true
+citation_scheme: "lightrag:/"
+capabilities:
+  vector: true
+  semantic: true
+  graph: true
+  page_level: false
+sdk_boundary:
+  sidecar: "A LightRAG Server mapping the agentmem HTTP line protocol onto its native endpoints."
+  wire_protocol: agentmem-bridge/v1
+  endpoints:
+    - "GET /healthz"
+    - "POST /put"
+    - "POST /query"
+    - "POST /delete"
+  capability_map:
+    vector: "LightRAG vector retrieval mode"
+    semantic: "LightRAG hybrid keyword + semantic mode"
+    graph: "LightRAG knowledge-graph retrieval mode"
+  credentials_ref: "AGENTMEM_LIGHTRAG_TOKEN (sidecar environment only)"

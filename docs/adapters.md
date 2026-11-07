@@ -43,19 +43,19 @@ adapters:
 | `memory` | 倒排词元重叠 + 哈希向量余弦 | O(N·d) 小规模基线，离线默认 |
 | `pgvector` | `meta.VectorStore` + 参数化原生 SQL | 与元数据层复用 DSN；无 DSN 时回落内存 fake |
 
-`Embedder` 端口默认使用确定性 `HashingEmbedder`（词法而非语义）。`Fingerprint()` 由适配器名 + embedding 身份派生，变更即触发迁移重建。生产应注入真实 embedding 模型（`TODO(real)`）。
+`Embedder` 端口默认使用确定性 `HashingEmbedder`（词法而非语义）。`Fingerprint()` 由适配器名 + `Embedder.Identity()` 派生，变更即触发迁移重建。生产通过 `Embedder` 端口注入模型实现，指纹会自动失效旧投影。
 
 ## 五个第三方引擎
 
-| 引擎 | kind | 能力标签 | 桥接 |
+| 引擎 | 插件 kind | 线协议 | 能力标签 |
 |---|---|---|---|
-| LlamaIndex | `http` | vector / semantic | `engines/llamaindex.yaml` |
-| PageIndex | `http` | semantic / page_level | `engines/pageindex.yaml` |
-| GraphRAG | `http` | graph | `engines/graphrag.yaml` |
-| LightRAG | `http` | vector / semantic / graph | `engines/lightrag.yaml` |
-| pgvector | `pgvector` | vector / semantic | 原生实现 |
+| LlamaIndex | `llamaindex` | HTTP | vector / semantic |
+| PageIndex | `pageindex` | HTTP | semantic / page_level |
+| GraphRAG | `graphrag` | CLI stdio | graph |
+| LightRAG | `lightrag` | HTTP | vector / semantic / graph |
+| pgvector | `pgvector`（内置） | 参数化原生 SQL | vector / semantic |
 
-前四者的接入深度为**契约 + 可测实现**：提供通用 HTTP/CLI 桥接、YAML 声明与确定性离线 mock，不接各自原生 SDK（`TODO(real)`）。真实部署需要一个实现下述线协议的 sidecar。
+前四者现在是**一等 Go 插件包**（`internal/plugins/<engine>/`），各自持有 `plugin.yaml` 清单、`Adapter` 实现、生命周期与健康检查、配置 kind 与注册表装配。真实 SDK 对接边界由清单中的 `sdk_boundary` 字段正式声明（sidecar、线协议版本、端点/命令、能力映射、凭据引用、协议指纹），不依赖代码注释；详见 [`plugins.md`](plugins.md)。`engines/*.yaml` 仅作为泛型 `http`/`cli` kind 的向后兼容声明保留。
 
 ## HTTP 线协议
 
@@ -78,7 +78,8 @@ adapters:
 
 ## 新增引擎步骤
 
-1. 在 `internal/bridges/engines/` 添加 `<name>.yaml`（name / kind / capabilities / timeout_ms / offline_mock / notes）。
-2. 在 `config.yaml` 的 `adapters` 中启用同名条目并填 `endpoint`。
-3. 若协议不同，实现 `adapter.Adapter` 并用 `registry.RegisterKind("<kind>", factory)` 注册工厂。
-4. 补一条契约测试（复用 `contract_test.go` 的断言风格）。
+1. 新建 `internal/plugins/<name>/plugin.yaml`，填齐 `name/kind/engine/version/bridge/protocol_version/timeout_ms/offline_mock/citation_scheme/capabilities/sdk_boundary`。清单采用严格解析，未知键报错。
+2. 在同一个包中实现 `Descriptor()`、`New(cfg, deps)`、`Register(r)`，用 `pluginbase.New` 组合泛型桥接。
+3. 在 `internal/plugins/plugins.go` 的 `All()` 中登记，并在 `config.Validate()` 的 kind 白名单中加入同名 kind。
+4. 在 `config.yaml` 的 `adapters` 中启用条目并填 `endpoint`（为空即确定性离线 mock）。
+5. 补清单校验、契约与生命周期测试；完整说明见 [`plugins.md`](plugins.md)。

@@ -160,7 +160,8 @@ func TestSplitStatements(t *testing.T) {
 
 func TestMigrationFilesSorted(t *testing.T) {
 	files, err := migrationFiles()
-	if err != nil || len(files) != 2 || files[0] != "migrations/001_init.sql" {
+	if err != nil || len(files) != 3 || files[0] != "migrations/001_init.sql" ||
+		files[2] != "migrations/003_computations.sql" {
 		t.Fatalf("files = %v (%v)", files, err)
 	}
 }
