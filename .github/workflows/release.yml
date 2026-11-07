@@ -5,24 +5,246 @@ on:
     types:
       - created
 
+# Least privilege by default; the publish and image jobs opt into more.
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.27.3"
+
 jobs:
-  binaries:
+  packages:
+    name: Linux (.tar.gz / .deb) + Windows (.zip / .msi)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.27.3"
-      - name: Build release binaries
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build Linux and Windows artifacts
+        shell: bash
         run: |
-          mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/agentmem-linux-amd64 ./cmd/agentmem
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o dist/agentmem-linux-arm64 ./cmd/agentmem
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o dist/agentmem-darwin-arm64 ./cmd/agentmem
+          set -euo pipefail
+
+          # Release tags are vX.Y.Z; installer metadata needs a numeric version.
+          REF="${GITHUB_REF_NAME#v}"
+          VERSION="$(printf '%s' "$REF" | tr -c 'A-Za-z0-9._-' '_')"
+          [ -n "$VERSION" ] || VERSION="dev"
+          PKG_VERSION="$(printf '%s' "$VERSION" | grep -Eo '^[0-9]+(\.[0-9]+)*' || true)"
+          case "$(printf '%s' "$PKG_VERSION" | awk -F. '{print NF}')" in
+            1) PKG_VERSION="${PKG_VERSION}.0.0" ;;
+            2) PKG_VERSION="${PKG_VERSION}.0" ;;
+            3) ;;
+            *) PKG_VERSION="0.0.0" ;;
+          esac
+
+          mkdir -p dist build
+
+          # Documents shipped in every archive and installer.
+          stage_docs() {
+            local dest="$1"
+            mkdir -p "$dest/web/src"
+            cp README.md README_cn.md "$dest/"
+            cp LICENSE "$dest/LICENSE.txt"
+            cp .env.example "$dest/.env.example"
+            cp web/index.html web/package.json web/vite.config.js "$dest/web/"
+            cp web/src/main.js "$dest/web/src/"
+          }
+
+          # Linux: .tar.gz + .deb for amd64 and arm64.
+          for arch in amd64 arm64; do
+            name="agentmem_${VERSION}_linux_${arch}"
+            work="build/${name}"
+            rm -rf "$work"
+            mkdir -p "$work"
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build \
+              -trimpath -ldflags="-s -w" -o "$work/agentmem" ./cmd/agentmem
+            stage_docs "$work"
+            tar -czf "dist/${name}.tar.gz" -C build "$name"
+
+            deb="build/deb-${arch}"
+            rm -rf "$deb"
+            mkdir -p "$deb/DEBIAN" "$deb/usr/bin" "$deb/usr/share/doc/agentmem"
+            install -m 0755 "$work/agentmem" "$deb/usr/bin/agentmem"
+            cp README.md LICENSE .env.example "$deb/usr/share/doc/agentmem/"
+            cat > "$deb/DEBIAN/control" <<EOF
+          Package: agentmem
+          Version: ${PKG_VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: ${arch}
+          Maintainer: agentmem maintainers <agentmem@localhost>
+          Homepage: https://github.com/${GITHUB_REPOSITORY}
+          Description: OKF+Git knowledge hub with pluggable RAG and smart routing
+           agentmem keeps canonical knowledge bodies in OKF+Git and stores
+           server-side structured data in PostgreSQL.
+          EOF
+            dpkg-deb --build --root-owner-group "$deb" "dist/${name}.deb"
+          done
+
+          # Windows: .zip for amd64 and arm64.
+          for arch in amd64 arm64; do
+            name="agentmem_${VERSION}_windows_${arch}"
+            work="build/${name}"
+            rm -rf "$work"
+            mkdir -p "$work"
+            CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go build \
+              -trimpath -ldflags="-s -w" -o "$work/agentmem.exe" ./cmd/agentmem
+            stage_docs "$work"
+            (cd build && zip -qr "../dist/${name}.zip" "$name")
+          done
+
+          # Windows x64: .msi. wixl (msitools) compiles a minimal WiX v3
+          # document; fixed GUIDs keep the upgrade chain stable.
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends wixl || \
+            sudo apt-get install -y --no-install-recommends msitools
+          command -v wixl
+
+          exe="build/agentmem_${VERSION}_windows_amd64/agentmem.exe"
+          cat > build/agentmem.wxs <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+            <Product Id="{A1111111-1111-4111-8111-111111111111}"
+                     Name="agentmem" Language="1033" Version="${PKG_VERSION}"
+                     Manufacturer="agentmem"
+                     UpgradeCode="{B2222222-2222-4222-8222-222222222222}">
+              <Package Description="agentmem" Comments="agentmem CLI and server"
+                       InstallerVersion="200" Compressed="yes" />
+              <Media Id="1" Cabinet="agentmem.cab" EmbedCab="yes" />
+              <Directory Id="TARGETDIR" Name="SourceDir">
+                <Directory Id="ProgramFilesFolder" Name="PFiles">
+                  <Directory Id="INSTALLDIR" Name="agentmem">
+                    <Component Id="CmpExe" Guid="{C3333333-3333-4333-8333-333333333333}">
+                      <File Id="FilExe" Name="agentmem.exe" Source="${exe}" KeyPath="yes" />
+                    </Component>
+                    <Component Id="CmpReadme" Guid="{D4444444-4444-4444-8444-444444444444}">
+                      <File Id="FilReadme" Name="README.md" Source="README.md" KeyPath="yes" />
+                    </Component>
+                    <Component Id="CmpLicense" Guid="{E5555555-5555-4555-8555-555555555555}">
+                      <File Id="FilLicense" Name="LICENSE.txt" Source="LICENSE" KeyPath="yes" />
+                    </Component>
+                  </Directory>
+                </Directory>
+              </Directory>
+              <Feature Id="FeatMain" Title="agentmem" Level="1">
+                <ComponentRef Id="CmpExe" />
+                <ComponentRef Id="CmpReadme" />
+                <ComponentRef Id="CmpLicense" />
+              </Feature>
+            </Product>
+          </Wix>
+          EOF
+          wixl -o "dist/agentmem_${VERSION}_windows_amd64.msi" build/agentmem.wxs
+
+          # Fail the job rather than publishing a partial set of assets.
+          for suffix in \
+            linux_amd64.tar.gz linux_arm64.tar.gz \
+            linux_amd64.deb linux_arm64.deb \
+            windows_amd64.zip windows_arm64.zip \
+            windows_amd64.msi; do
+            artifact="dist/agentmem_${VERSION}_${suffix}"
+            test -s "$artifact" || { echo "missing artifact: $artifact" >&2; exit 1; }
+          done
+
+          echo "Built assets:"
+          ls -lh dist
+
       - uses: actions/upload-artifact@v4
         with:
-          name: agentmem-binaries
-          path: dist/
+          name: agentmem-linux-windows
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS (.tar.gz / .dmg)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build macOS artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="${GITHUB_REF_NAME#v}"
+          VERSION="$(printf '%s' "$REF" | tr -c 'A-Za-z0-9._-' '_')"
+          [ -n "$VERSION" ] || VERSION="dev"
+
+          mkdir -p dist build
+
+          # CGO is disabled, so both darwin architectures can be cross-built
+          # from the macOS runner. hdiutil is only available on macOS.
+          for arch in amd64 arm64; do
+            name="agentmem_${VERSION}_darwin_${arch}"
+            work="build/${name}"
+            rm -rf "$work"
+            mkdir -p "$work/web/src"
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build \
+              -trimpath -ldflags="-s -w" -o "$work/agentmem" ./cmd/agentmem
+            cp README.md README_cn.md .env.example "$work/"
+            cp LICENSE "$work/LICENSE.txt"
+            cp web/index.html web/package.json web/vite.config.js "$work/web/"
+            cp web/src/main.js "$work/web/src/"
+
+            tar -czf "dist/${name}.tar.gz" -C build "$name"
+
+            dmg_dir="build/dmg-${arch}"
+            rm -rf "$dmg_dir"
+            mkdir -p "$dmg_dir"
+            cp -R "$work/." "$dmg_dir/"
+            hdiutil create -volname "agentmem" -srcfolder "$dmg_dir" \
+              -ov -format UDZO "dist/${name}.dmg"
+          done
+
+          for suffix in \
+            darwin_amd64.tar.gz darwin_arm64.tar.gz \
+            darwin_amd64.dmg darwin_arm64.dmg; do
+            artifact="dist/agentmem_${VERSION}_${suffix}"
+            test -s "$artifact" || { echo "missing artifact: $artifact" >&2; exit 1; }
+          done
+
+          echo "Built assets:"
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentmem-macos
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Upload release assets
+    needs: [packages, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -- * > ../SHA256SUMS.txt
+          mv ../SHA256SUMS.txt SHA256SUMS.txt
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lh dist
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber \
+            --repo "$GITHUB_REPOSITORY"
 
   image:
     runs-on: ubuntu-latest
