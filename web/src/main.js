@@ -1,86 +1,181 @@
-// Template-level status page: health + routing decision list.
-// Dependency-free ES module so it works without a bundler or Node runtime.
+// Template-level console shell: shared top bar, two views, language and theme
+// switching. Dependency-free ES module so the page also works without a bundler
+// or Node runtime when served straight from web/.
+import { LANGUAGES } from './lib/languages.js'
+import { getLang, onLangChange, setLang, t } from './lib/i18n.js'
+import { getTheme, initTheme, onThemeChange, toggleTheme } from './lib/theme.js'
+import { button, chip, el } from './lib/dom.js'
+import { renderStatus } from './views/status.js'
+import { cleanupDocs, renderDocs } from './views/docs.js'
 
 const root = document.getElementById('app')
 
-function el(tag, className, text) {
-  const node = document.createElement(tag)
-  if (className) node.className = className
-  if (text !== undefined) node.textContent = String(text)
-  return node
+const statusState = { health: {}, decisions: [], error: '', loaded: false }
+const docsState = { open: {} }
+const initialView = new URLSearchParams(window.location.search).get('view')
+let view = initialView === 'docs' ? 'docs' : 'status'
+let langMenuOpen = false
+
+function buildLangSwitcher() {
+  const wrap = el('div', 'lang')
+  const current = LANGUAGES.find(([code]) => code === getLang())?.[1] ?? 'English'
+  const trigger = button('', 'icon-btn')
+  trigger.setAttribute('aria-label', t('shell', 'langLabel'))
+  trigger.title = t('shell', 'langLabel')
+  trigger.appendChild(el('span', 'theme-glyph', '◎'))
+  trigger.appendChild(el('span', 'label', current))
+  trigger.addEventListener('click', () => {
+    langMenuOpen = !langMenuOpen
+    render()
+  })
+  wrap.appendChild(trigger)
+
+  if (langMenuOpen) {
+    const menu = el('div', 'lang-menu')
+    menu.setAttribute('role', 'listbox')
+    for (const [code, name] of LANGUAGES) {
+      const item = button(name, `lang-item${code === getLang() ? ' active' : ''}`, () => {
+        langMenuOpen = false
+        setLang(code)
+      })
+      item.setAttribute('role', 'option')
+      item.setAttribute('aria-selected', code === getLang() ? 'true' : 'false')
+      menu.appendChild(item)
+    }
+    wrap.appendChild(menu)
+  }
+  return wrap
 }
 
-function section(title) {
-  const box = el('section')
-  box.appendChild(el('h2', null, title))
-  return box
+function buildThemeButton() {
+  const theme = getTheme()
+  const toDark = theme === 'light'
+  const action = t('shell', toDark ? 'themeToDark' : 'themeToLight')
+  const btn = button('', 'icon-btn')
+  btn.setAttribute('aria-label', action)
+  btn.title = `${t('shell', 'themeLabel')} · ${action}`
+  btn.appendChild(el('span', 'theme-glyph', toDark ? '☾' : '☀'))
+  btn.appendChild(el('span', 'label', t('shell', toDark ? 'themeLight' : 'themeDark')))
+  btn.addEventListener('click', toggleTheme)
+  return btn
 }
 
-function render(state) {
+function buildTopbar() {
+  const bar = el('header', 'topbar')
+  const inner = el('div', 'topbar-inner')
+
+  const brand = el('div', 'brand')
+  brand.appendChild(el('span', 'brand-mark', 'a'))
+  brand.appendChild(el('span', 'brand-name', 'agentmem'))
+  brand.appendChild(chip(t('shell', 'footerBuild')))
+  inner.appendChild(brand)
+
+  const tabs = el('nav', 'tabs')
+  for (const [id, key] of [
+    ['status', 'navStatus'],
+    ['docs', 'navDocs'],
+  ]) {
+    tabs.appendChild(
+      button(t('shell', key), `tab${view === id ? ' active' : ''}`, () => {
+        view = id
+        langMenuOpen = false
+        render()
+      }),
+    )
+  }
+  inner.appendChild(tabs)
+
+  const actions = el('div', 'topbar-actions')
+  if (view === 'status') {
+    const refresh = button('', 'icon-btn', loadStatus)
+    refresh.setAttribute('aria-label', t('shell', 'refresh'))
+    refresh.title = t('shell', 'refresh')
+    refresh.appendChild(el('span', 'theme-glyph', '↻'))
+    refresh.appendChild(el('span', 'label', t('shell', 'refresh')))
+    actions.appendChild(refresh)
+  }
+  actions.appendChild(buildLangSwitcher())
+  actions.appendChild(buildThemeButton())
+  inner.appendChild(actions)
+
+  bar.appendChild(inner)
+  return bar
+}
+
+function buildPageHead() {
+  const head = el('div', 'page-head')
+  const row = el('div', 'page-title-row')
+  row.appendChild(el('h1', null, view === 'status' ? t('shell', 'statusHeadTitle') : t('api', 'pageTitle')))
+  row.appendChild(chip(view === 'status' ? t('shell', 'footerBuild') : t('api', 'versionNote')))
+  head.appendChild(row)
+  head.appendChild(
+    el('p', 'page-sub', view === 'status' ? t('shell', 'statusHeadSub') : t('api', 'pageSub')),
+  )
+  return head
+}
+
+function buildFooter() {
+  const theme = getTheme()
+  const footer = el('footer', 'footer')
+  const inner = el('div', 'footer-inner')
+  inner.appendChild(el('span', null, t('shell', 'subtitle')))
+  const meta = el('div', 'footer-meta')
+  meta.appendChild(el('span', null, t('shell', 'footerSource')))
+  meta.appendChild(chip(getLang()))
+  meta.appendChild(chip(t('shell', theme === 'light' ? 'themeLight' : 'themeDark')))
+  meta.appendChild(chip(t('shell', 'footerBuild')))
+  inner.appendChild(meta)
+  footer.appendChild(inner)
+  return footer
+}
+
+function render() {
+  const scrollY = window.scrollY
+  cleanupDocs()
   root.replaceChildren()
-  const main = el('main')
-  main.appendChild(el('h1', null, 'agentmem'))
-  main.appendChild(el('p', 'sub', 'OKF+Git 权威正文 · PostgreSQL/GORM 结构化数据 · 智能路由'))
-  if (state.error) main.appendChild(el('p', 'err', state.error))
-
-  const health = section('服务健康')
-  const entries = Object.entries(state.health)
-  if (entries.length === 0) {
-    health.appendChild(el('p', 'empty', '尚未加载'))
-  } else {
-    for (const [key, value] of entries) {
-      const row = el('div', 'kv')
-      row.appendChild(el('b', null, key))
-      row.appendChild(el('span', null, value))
-      health.appendChild(row)
-    }
-  }
-  main.appendChild(health)
-
-  const decisions = section(`最近路由决策 (${state.decisions.length})`)
-  if (state.decisions.length === 0) {
-    decisions.appendChild(el('p', 'empty', '暂无决策记录'))
-  } else {
-    for (const d of state.decisions) {
-      const row = el('div', 'kv')
-      row.appendChild(el('b', null, d.concept_id || '(query)'))
-      const detail = el('span')
-      for (const part of [
-        `${d.rule_id || '-'} · ${d.source || '-'} · `,
-        (d.targets || []).join(', '),
-        ` · confidence=${d.confidence ?? '-'}`,
-      ]) {
-        detail.appendChild(document.createTextNode(part))
-      }
-      row.appendChild(detail)
-      decisions.appendChild(row)
-    }
-  }
-  const refresh = el('button', null, '刷新')
-  refresh.style.marginTop = '12px'
-  refresh.style.padding = '6px 12px'
-  refresh.style.cursor = 'pointer'
-  refresh.addEventListener('click', load)
-  decisions.appendChild(refresh)
-  main.appendChild(decisions)
+  root.appendChild(buildTopbar())
+  const main = el('main', 'main')
+  main.appendChild(buildPageHead())
+  const host = el('div', 'view')
+  host.id = 'view'
+  main.appendChild(host)
   root.appendChild(main)
+  root.appendChild(buildFooter())
+
+  if (view === 'status') {
+    renderStatus(host, statusState)
+  } else {
+    renderDocs(host, docsState, {
+      onToggle: (key) => {
+        docsState.open[key] = !docsState.open[key]
+        render()
+      },
+    })
+  }
+  window.scrollTo(0, scrollY)
 }
 
-async function load() {
-  const state = { health: {}, decisions: [], error: '' }
+async function loadStatus() {
   try {
     const [healthRes, decisionsRes] = await Promise.all([
       fetch('/healthz'),
       fetch('/v1/decisions?limit=20'),
     ])
-    if (!healthRes.ok || !decisionsRes.ok) throw new Error('API 返回非 2xx')
-    state.health = await healthRes.json()
-    state.decisions = (await decisionsRes.json()) || []
+    if (!healthRes.ok || !decisionsRes.ok) throw new Error(t('shell', 'badStatus'))
+    statusState.health = await healthRes.json()
+    statusState.decisions = (await decisionsRes.json()) || []
+    statusState.error = ''
   } catch (err) {
-    state.error = '无法连接 agentmem API：' + err.message
+    statusState.health = {}
+    statusState.decisions = []
+    statusState.error = t('shell', 'apiError') + err.message
   }
-  render(state)
+  statusState.loaded = true
+  if (view === 'status') render()
 }
 
-render({ health: {}, decisions: [], error: '' })
-load()
+initTheme()
+onLangChange(() => render())
+onThemeChange(() => render())
+render()
+loadStatus()

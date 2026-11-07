@@ -216,12 +216,27 @@ Recall@k, Precision@k, nDCG@k, MRR, MAP and HitRate@k as pure functions with
 no LLM judge. See [docs/architecture.md](docs/architecture.md) for the metric
 conventions (coverage recall vs binary hit rate).
 
-## Web status page
+## Web console
 
-`web/` is a dependency-free ES module page (health + recent decisions). It can
-be served directly by any static file server, or bundled with Vite when Node is
-available (`cd web && npm install && npm run build`). No runtime framework is
-required, and the Go binary does not depend on Node.
+`web/` is a dependency-free ES module console with two views: **Status**
+(health + recent routing decisions) and **API docs** (all 9 HTTP method + path
+combinations, request/response samples, conventions and error codes).
+
+- 13 languages, matching agenthub: `en`, `zh`, `zh-TW`, `es`, `fr`, `de`, `it`,
+  `ru`, `ja`, `ko`, `pt`, `ar`, `hi`. Resolution order is `?lang=` > local
+  storage > browser language > English; English is the fallback for a missing
+  key. Arabic flips the layout to RTL.
+- Light and dark themes share one monochrome grey scale. The theme is resolved
+  before the first paint, follows the OS until the visitor picks one, and only
+  an explicit choice is stored in `agentmem.theme`.
+- `?view=docs` opens the API documentation directly.
+- Methods, paths, field names and JSON samples render verbatim in every locale;
+  only prose is translated. Endpoint data mirrors `internal/handlers/http.go`.
+
+Serve `web/` directly with any static file server, or bundle it with Vite
+(`cd web && npm install && npm run build`). No runtime framework is required,
+and the Go binary does not depend on Node. Frontend checks run offline with
+`cd web && npm test` (Node's built-in test runner, no extra dependencies).
 
 ## Development commands
 

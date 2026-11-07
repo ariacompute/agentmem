@@ -39,10 +39,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Build minimal status page
+      - name: Test and build the web console
         working-directory: web
         run: |
           npm install --no-audit --no-fund
+          npm test
           npm run build
 
   # Optional: only runs on manual dispatch; the default test suite never needs

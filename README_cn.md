@@ -149,9 +149,16 @@ go run ./cmd/agentmem computations --limit 10
 
 `go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5` 输出 Recall@k、Precision@k、nDCG@k、MRR、MAP、HitRate@k，全部为纯函数、无 LLM 裁判。两套口径（覆盖率 Recall 与二值 HitRate）的区别见 [docs/architecture.md](docs/architecture.md)。
 
-## Web 状态页
+## Web 控制台
 
-`web/` 是零运行时依赖的原生 ES module 页面（健康状态 + 最近决策）。可直接用任意静态服务器托管；有 Node 时也可用 Vite 打包（`cd web && npm install && npm run build`）。Go 二进制不依赖 Node。
+`web/` 是零运行时依赖的原生 ES module 控制台，包含两个视图：**状态**（健康状态 + 最近路由决策）与 **API 文档**（全部 9 个 HTTP method + path 组合、请求/响应样例、通用约定与错误码）。
+
+- 13 种语言，与 agenthub 一致：`en`、`zh`、`zh-TW`、`es`、`fr`、`de`、`it`、`ru`、`ja`、`ko`、`pt`、`ar`、`hi`。优先级为 `?lang=` > 本地存储 > 浏览器语言 > 英文；缺失键回退英文，阿拉伯语自动切换 RTL。
+- light / dark 双主题共用一套纯黑白灰灰阶。主题在首屏绘制前解析，未选择时跟随系统，仅显式切换才写入 `agentmem.theme`。
+- `?view=docs` 可直接打开 API 文档视图。
+- 方法、路径、字段名与 JSON 样例在所有语言下逐字呈现，仅说明文字翻译；端点数据与 `internal/handlers/http.go` 保持一致。
+
+可直接用任意静态服务器托管 `web/`；有 Node 时也可用 Vite 打包（`cd web && npm install && npm run build`）。Go 二进制不依赖 Node。前端校验使用 Node 内置测试运行器，离线执行且无新增依赖：`cd web && npm test`。
 
 ## 开发命令
 
