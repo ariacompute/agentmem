@@ -79,8 +79,8 @@ upward import: `internal/auth` (consumed by `handlers` / `cli`),
 - **Web rendering is checked with impeccable.** `make web-audit` runs
   `impeccable detect` on the `web/` source (no browser required) and fails the
   build on any anti-pattern. The full element-level pass — contrast, tiny-text,
-  spacing — needs a running app plus a local Chrome/Edge: `cd web && npm run
-  dev` then `npm run audit:live`. Keep the monochrome invariant; the `.notice`
+  spacing — needs a running app plus a local Chrome/Edge: `cd web && bun run
+  dev` then `bun run audit:live`. Keep the monochrome invariant; the `.notice`
   side-accent border is a known slop tell and is intentionally avoided. Shared
   config lives in `web/.impeccable/config.json` (telemetry disabled).
 - **The web page carries its own CSP.** `web/index.html` is served as a static
@@ -111,8 +111,8 @@ make eval        # ranking metrics from testdata/eval.jsonl
 make validate    # strict validation of .env.example
 make check-boundaries  # SDK boundaries stay declarative; no inline annotations
 make check-trust-store # offline eMudhra/emSign CA fingerprint scan
-cd web && npm test  # offline node:test suites, zero extra dependencies
-cd web && npm run build  # optional Vite bundle of the same static page
+cd web && bun test  # offline node:test suites, zero extra dependencies
+cd web && bun run build  # optional Vite bundle of the same static page
 ```
 
 ## Where to look

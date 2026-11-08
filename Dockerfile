@@ -10,15 +10,15 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/agentmem ./cmd/agentmem
 
-FROM node:20-alpine AS frontend
+FROM oven/bun:alpine AS frontend
 WORKDIR /web
-# Node only has an outbound TLS surface while npm ci runs; the built console is
-# static and has no runtime trust store. Refresh the build-stage CA bundle.
+# Bun only has an outbound TLS surface while bun install runs; the built console
+# is static and has no runtime trust store. Refresh the build-stage CA bundle.
 RUN apk add --no-cache --upgrade ca-certificates
-COPY web/package.json web/package-lock.json ./
-RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
 COPY web/ .
-RUN npm run build
+RUN bun run build
 
 FROM alpine:3.21
 RUN apk add --no-cache --upgrade ca-certificates tzdata \

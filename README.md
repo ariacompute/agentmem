@@ -309,14 +309,14 @@ combinations, request/response samples, conventions and error codes).
   [impeccable](https://github.com/pbakaus/impeccable): `make web-audit` runs a
   source-level `impeccable detect` over `web/` with no browser; the full
   element-level pass (contrast, tiny-text, spacing) needs a running app plus a
-  local Chrome/Edge — `cd web && npm run dev` then `npm run audit:live`. The
+  local Chrome/Edge — `cd web && bun run dev` then `bun run audit:live`. The
   monochrome invariant is kept; the `.notice` side-accent border is
   intentionally avoided as a known slop tell.
 
 Serve `web/` directly with any static file server, or bundle it with Vite
-(`cd web && npm ci && npm run build`). No runtime framework is required,
+(`cd web && bun install --frozen-lockfile && bun run build`). No runtime framework is required,
 and the Go binary does not depend on Node. Frontend checks run offline with
-`cd web && npm test` (Node's built-in test runner, no extra dependencies).
+`cd web && bun test` (Bun's built-in test runner, no extra dependencies).
 The page ships its own CSP meta (`default-src 'none'`, same-origin assets, the
 inline theme bootstrap allowed by SHA-256) and `web/tests/security.test.mjs`
 fails if the digest and the script ever drift.

@@ -150,7 +150,7 @@ go build -o bin/agentmem ./cmd/agentmem
 go run ./cmd/agentmem validate --env .env.example
 make check-boundaries
 make check-trust-store
-cd web && npm test && npm run build     # 端点表镜像、13 语言译文、CSP 与单色守卫
+cd web && bun test && bun run build     # 端点表镜像、13 语言译文、CSP 与单色守卫
 ```
 
 `internal/handlers/http_test.go` 覆盖匿名写、越权、伪造 `subject`、401/403、错误脱敏、限流、Origin、严格 JSON 与参数边界；`internal/okf`、`internal/vcs`、`internal/bridges`、`internal/compute`、`internal/meta` 各自带有对应的离线回归用例。

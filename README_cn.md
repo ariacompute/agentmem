@@ -209,9 +209,9 @@ go run ./cmd/agentmem computations --limit 10
 - light / dark 双主题共用一套纯黑白灰灰阶。主题在首屏绘制前解析，未选择时跟随系统，仅显式切换才写入 `agentmem.theme`。
 - `?view=docs` 可直接打开 API 文档视图。
 - 方法、路径、字段名与 JSON 样例在所有语言下逐字呈现，仅说明文字翻译；端点数据与 `internal/handlers/http.go` 保持一致。
-- Web 渲染质量使用 [impeccable](https://github.com/pbakaus/impeccable) 检查：`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器）；完整的元素级检查（对比度、过小字号、间距）需要运行中的站点加本地 Chrome/Edge——`cd web && npm run dev` 后 `npm run audit:live`。单色不变式保持不变；`.notice` 的侧边强调边框作为已知「AI 痕迹」被刻意避免。
+- Web 渲染质量使用 [impeccable](https://github.com/pbakaus/impeccable) 检查：`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器）；完整的元素级检查（对比度、过小字号、间距）需要运行中的站点加本地 Chrome/Edge——`cd web && bun run dev` 后 `bun run audit:live`。单色不变式保持不变；`.notice` 的侧边强调边框作为已知「AI 痕迹」被刻意避免。
 
-可直接用任意静态服务器托管 `web/`；有 Node 时也可用 Vite 打包（`cd web && npm ci && npm run build`）。Go 二进制不依赖 Node。前端校验使用 Node 内置测试运行器，离线执行且无新增依赖：`cd web && npm test`。页面自带 `Content-Security-Policy` meta（`default-src 'none'`、仅同源资源、内联首屏主题脚本以 SHA-256 白名单放行），`web/tests/security.test.mjs` 会在摘要与脚本文本不一致时失败。
+可直接用任意静态服务器托管 `web/`；有 Bun 时也可用 Vite 打包（`cd web && bun install --frozen-lockfile && bun run build`）。Go 二进制不依赖 Bun。前端校验使用 Bun 内置测试运行器，离线执行且无新增依赖：`cd web && bun test`。页面自带 `Content-Security-Policy` meta（`default-src 'none'`、仅同源资源、内联首屏主题脚本以 SHA-256 白名单放行），`web/tests/security.test.mjs` 会在摘要与脚本文本不一致时失败。
 
 ## 开发命令
 

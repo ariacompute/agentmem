@@ -56,7 +56,7 @@
 - HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`。
 - 评测：Recall@k / Precision@k / nDCG / MRR / MAP / HitRate@k 纯函数；显式区分覆盖率 Recall 与二值 HitRate。
 - 文档、CI、Docker、compose；`web/` 零运行时依赖原生 ES module 控制台（详见第 8 节）。
-- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`make check-trust-store`、`make web-audit`、`cd web && npm test`、`cd web && npm run build` 全绿，离线无外部服务（`make web-audit` 源码级渲染检查 0 反模式）。
+- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`make check-trust-store`、`make web-audit`、`cd web && bun test`、`cd web && bun run build` 全绿，离线无外部服务（`make web-audit` 源码级渲染检查 0 反模式）。
 
 ## 8. Web 控制台
 
@@ -66,9 +66,9 @@
 - light / dark 双主题共用纯黑白灰灰阶，不含任何色相；`index.html` 首屏脚本写 `data-theme`，未选择时跟随系统，仅显式切换持久化到 `agentmem.theme`；状态差异由亮度、描边、字重、形状与克制动效表达。
 - API 文档覆盖 `internal/handlers/http.go` 的 9 个 method+path 组合，含章节索引、分组端点表、可展开的请求/响应 JSON 样例，以及 Base URL、Content-Type、4 MiB 上限、`{"error":...}` 错误体、401/403/405/422/429/502 状态码、Bearer 令牌与权限范围、`limit` 边界、无 CORS 响应头与无分页等通用约定；请求样例不出现 `subject` 字段（主体由服务端从令牌推导），出站 sidecar 线协议不属于对外 API。方法、路径、字段名、状态码与 JSON 样例在所有语言下逐字呈现。
 - 页面以静态文件托管，因此自带 `Content-Security-Policy` meta：`default-src 'none'`，仅允许同源脚本/样式与同源 `connect-src`，唯一的内联首屏主题脚本以 SHA-256 摘要白名单放行；`web/tests/security.test.mjs` 校验哈希与脚本文本一致、无外链资源与内联事件处理器。
-- Node 内置 `node:test` 套件（零新增依赖）：语言目录、译文完整性与英文兜底、端点表与后端路由一致性、单色守卫、主题解析/持久化、DOM 冒烟（两视图切换、示例展开、RTL、主题切换）；CI 的 web job 执行 `npm test` 与 `npm run build`。
+- Node 内置 `node:test` 套件（零新增依赖）：语言目录、译文完整性与英文兜底、端点表与后端路由一致性、单色守卫、主题解析/持久化、DOM 冒烟（两视图切换、示例展开、RTL、主题切换）；CI 的 web job 执行 `bun test` 与 `bun run build`。
 - 页面不输出日志、不记录 API 响应正文；示例仅用占位值，不含正文、PII 或凭据。
-- Web 渲染质量采用 [pbakaus/impeccable](https://github.com/pbakaus/impeccable) 检查与优化：`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器），完整元素级规则（对比度、过小字号、间距）需运行中站点加本地 Chrome/Edge（`cd web && npm run dev` 后 `npm run audit:live`）。保持单色不变式，刻意避免 `.notice` 侧边强调边框等已知「AI 痕迹」；共享配置 `web/.impeccable/config.json`（关闭遥测），临时缓存被 `.gitignore` 排除。
+- Web 渲染质量采用 [pbakaus/impeccable](https://github.com/pbakaus/impeccable) 检查与优化：`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器），完整元素级规则（对比度、过小字号、间距）需运行中站点加本地 Chrome/Edge（`cd web && bun run dev` 后 `bun run audit:live`）。保持单色不变式，刻意避免 `.notice` 侧边强调边框等已知「AI 痕迹」；共享配置 `web/.impeccable/config.json`（关闭遥测），临时缓存被 `.gitignore` 排除。
 
 ## 9. 安全基线
 

@@ -35,7 +35,7 @@ and a rule-first smart router.
 - **Web rendering checks (impeccable)**: adopted
   [pbakaus/impeccable](https://github.com/pbakaus/impeccable) for design and
   anti-pattern detection. `make web-audit` runs a source-level `impeccable
-  detect` over `web/` with no browser, while `npm run audit:live` covers the
+  detect` over `web/` with no browser, while `bun run audit:live` covers the
   full element-level pass (contrast, tiny-text, spacing) against a running app
   with local Chrome/Edge. The monochrome invariant is preserved: the `.notice`
   side-accent border was removed as a flagged AI-slop tell and tertiary-text

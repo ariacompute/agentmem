@@ -37,13 +37,13 @@ run: build
 	./$(BINARY) serve --env .env
 
 web:
-	cd web && npm ci && npm run build
+	cd web && bun install --frozen-lockfile && bun run build
 
 # Source-level rendering/slop check (no browser needed). The full element-level
 # pass (contrast, tiny-text) needs a running app + local Chrome/Edge:
-#   cd web && npm run dev   # then: npm run audit:live
+#   cd web && bun run dev   # then: bun run audit:live
 web-audit:
-	cd web && npx -y impeccable@latest detect src index.html
+	cd web && bunx impeccable@latest detect src index.html
 
 clean:
 	rm -rf bin web/dist

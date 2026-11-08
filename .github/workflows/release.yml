@@ -53,7 +53,7 @@ jobs:
             cp .env.example "$dest/.env.example"
             cp -R docs "$dest/docs"
             cp -R scripts "$dest/scripts"
-            cp web/index.html web/package.json web/package-lock.json web/vite.config.js "$dest/web/"
+            cp web/index.html web/package.json web/bun.lock web/vite.config.js "$dest/web/"
             cp -R web/src/. "$dest/web/src/"
             cp -R web/tests/. "$dest/web/tests/"
           }
@@ -198,7 +198,7 @@ jobs:
             cp LICENSE "$work/LICENSE.txt"
             cp -R docs "$work/docs"
             cp -R scripts "$work/scripts"
-            cp web/index.html web/package.json web/package-lock.json web/vite.config.js "$work/web/"
+            cp web/index.html web/package.json web/bun.lock web/vite.config.js "$work/web/"
             cp -R web/src/. "$work/web/src/"
             cp -R web/tests/. "$work/web/tests/"
 
