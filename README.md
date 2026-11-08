@@ -143,8 +143,9 @@ with an advisory lock. `AutoMigrate` is never the schema source.
 
 The repository ships `docker-compose.yml` (PostgreSQL + agentmem) and a
 multi-stage `Dockerfile`: the Go backend is built under `golang:1.27.3-alpine`,
-the static web console under `node:20-alpine`, and both are assembled into a
-minimal `alpine:3.21` image that runs as an unprivileged `agentmem` user.
+  the static web console is bundled with Bun under `oven/bun:alpine`, and both
+  are assembled into a minimal `alpine:3.21` image that runs as an unprivileged
+  `agentmem` user.
 
 1. Create `.env` from the template:
 
@@ -313,9 +314,24 @@ combinations, request/response samples, conventions and error codes).
   monochrome invariant is kept; the `.notice` side-accent border is
   intentionally avoided as a known slop tell.
 
+Findings print to the terminal. Persist them by redirecting the output —
+`--json` yields a machine-readable report (recommended for review) and
+`--quiet` prints only the failure count (useful for CI / a quick check):
+
+```bash
+# Machine-readable JSON report (recommended for review)
+bun x impeccable detect http://localhost:5173 --json > impeccable-report.json
+
+# Or save plain text
+bun x impeccable detect http://localhost:5173 > impeccable-report.txt
+
+# Failure count only (CI / quick check)
+bun x impeccable detect http://localhost:5173 --quiet
+```
+
 Serve `web/` directly with any static file server, or bundle it with Vite
 (`cd web && bun install --frozen-lockfile && bun run build`). No runtime framework is required,
-and the Go binary does not depend on Node. Frontend checks run offline with
+and the Go binary does not depend on a JS runtime. Frontend checks run offline with
 `cd web && bun test` (Bun's built-in test runner, no extra dependencies).
 The page ships its own CSP meta (`default-src 'none'`, same-origin assets, the
 inline theme bootstrap allowed by SHA-256) and `web/tests/security.test.mjs`

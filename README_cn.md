@@ -104,7 +104,7 @@ go run ./cmd/agentmem validate --env .env
 
 ## 使用 Docker Compose 部署
 
-仓库附带 `docker-compose.yml`（PostgreSQL + agentmem）与多阶段 `Dockerfile`：Go 后端在 `golang:1.27.3-alpine` 下构建，静态 web 控制台在 `node:20-alpine` 下构建，二者合并进以非特权用户 `agentmem` 运行的极简 `alpine:3.21` 镜像。
+仓库附带 `docker-compose.yml`（PostgreSQL + agentmem）与多阶段 `Dockerfile`：Go 后端在 `golang:1.27.3-alpine` 下构建，静态 web 控制台在 `oven/bun:alpine` 下用 Bun 打包，二者合并进以非特权用户 `agentmem` 运行的极简 `alpine:3.21` 镜像。
 
 1. 基于模板生成 `.env`：
 
@@ -210,6 +210,19 @@ go run ./cmd/agentmem computations --limit 10
 - `?view=docs` 可直接打开 API 文档视图。
 - 方法、路径、字段名与 JSON 样例在所有语言下逐字呈现，仅说明文字翻译；端点数据与 `internal/handlers/http.go` 保持一致。
 - Web 渲染质量使用 [impeccable](https://github.com/pbakaus/impeccable) 检查：`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器）；完整的元素级检查（对比度、过小字号、间距）需要运行中的站点加本地 Chrome/Edge——`cd web && bun run dev` 后 `bun run audit:live`。单色不变式保持不变；`.notice` 的侧边强调边框作为已知「AI 痕迹」被刻意避免。
+
+检测结果直接输出到终端。如需保存，可重定向输出——`--json` 生成机器可读的 JSON 报告（推荐留档复查），`--quiet` 只打印失败数（适合 CI / 快速判断）：
+
+```bash
+# 机器可读 JSON 报告（推荐保存复查）
+bun x impeccable detect http://localhost:5173 --json > impeccable-report.json
+
+# 或纯文本落盘
+bun x impeccable detect http://localhost:5173 > impeccable-report.txt
+
+# 只看失败数（CI/快速判断）
+bun x impeccable detect http://localhost:5173 --quiet
+```
 
 可直接用任意静态服务器托管 `web/`；有 Bun 时也可用 Vite 打包（`cd web && bun install --frozen-lockfile && bun run build`）。Go 二进制不依赖 Bun。前端校验使用 Bun 内置测试运行器，离线执行且无新增依赖：`cd web && bun test`。页面自带 `Content-Security-Policy` meta（`default-src 'none'`、仅同源资源、内联首屏主题脚本以 SHA-256 白名单放行），`web/tests/security.test.mjs` 会在摘要与脚本文本不一致时失败。
 
