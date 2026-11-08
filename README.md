@@ -139,6 +139,70 @@ is available; `003_computations.sql` adds the Attested Computation audit table.
 Migrations are versioned in `schema_migrations` and applied transactionally
 with an advisory lock. `AutoMigrate` is never the schema source.
 
+## Deployment with Docker Compose
+
+The repository ships `docker-compose.yml` (PostgreSQL + agentmem) and a
+multi-stage `Dockerfile`: the Go backend is built under `golang:1.27.3-alpine`,
+the static web console under `node:20-alpine`, and both are assembled into a
+minimal `alpine:3.21` image that runs as an unprivileged `agentmem` user.
+
+1. Create `.env` from the template:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Then edit it (see below). Compose consumes `.env` twice — for
+   `${POSTGRES_DB}`-style interpolation and as the `env_file` for the app — so
+   no credentials are committed.
+
+2. Set at least the following for a working stack:
+
+   ```dotenv
+   POSTGRES_PASSWORD=<strong password>
+   AGENTMEM_MODE=production
+   AGENTMEM_PG_DSN=postgres://agentmem:<POSTGRES_PASSWORD>@postgres:5432/agentmem?sslmode=require
+   AGENTMEM_AUTH_ENABLED=true
+   AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 hex>","subject":"console","scopes":["knowledge:read","knowledge:write"]}]'
+   ```
+
+   In `production`, `AGENTMEM_MODE=production` also requires a DSN without
+   `sslmode=disable` and, whenever an outbound endpoint is configured,
+   `AGENTMEM_EGRESS_ALLOWED_HOSTS`.
+
+3. Build and start:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   The `postgres` service uses `pgvector/pgvector:pg16`, is published only on
+   loopback (`127.0.0.1:5432`), and has a `pg_isready` healthcheck; the
+   `agentmem` service waits for it to be healthy, then runs `serve`. The app
+   listens on `0.0.0.0:8080` inside the container and is published only on
+   `127.0.0.1:8080`. Put a TLS-terminating reverse proxy (e.g. Nginx, Caddy) in
+   front before exposing it beyond the host.
+
+4. Verify:
+
+   ```bash
+   docker compose ps
+   curl -i http://127.0.0.1:8080/healthz
+   go run ./cmd/agentmem validate --env .env
+   ```
+
+Data and the OKF bundle live in named volumes (`pgdata`, `agentmem_data`);
+`AGENTMEM_GIT_ROOT` is `/app/data/bundle` inside the container. To seed the
+bundle, copy `testdata/bundle/` into the volume (e.g. via a temporary container
+or `docker compose cp` against the running service).
+
+**Trust-store refresh.** After the 2026-10 eMudhra/emSign CA key compromise,
+re-pull `pgvector/pgvector:pg16` and rebuild the agentmem image to refresh the
+shipped trust stores; verify offline with `make check-trust-store`.
+
+Logs: `docker compose logs -f agentmem`. Stop: `docker compose down` (add `-v`
+to also remove volumes).
+
 ## HTTP API
 
 | Method | Path | Purpose |
@@ -241,6 +305,13 @@ combinations, request/response samples, conventions and error codes).
 - `?view=docs` opens the API documentation directly.
 - Methods, paths, field names and JSON samples render verbatim in every locale;
   only prose is translated. Endpoint data mirrors `internal/handlers/http.go`.
+- Web rendering is checked with
+  [impeccable](https://github.com/pbakaus/impeccable): `make web-audit` runs a
+  source-level `impeccable detect` over `web/` with no browser; the full
+  element-level pass (contrast, tiny-text, spacing) needs a running app plus a
+  local Chrome/Edge — `cd web && npm run dev` then `npm run audit:live`. The
+  monochrome invariant is kept; the `.notice` side-accent border is
+  intentionally avoided as a known slop tell.
 
 Serve `web/` directly with any static file server, or bundle it with Vite
 (`cd web && npm ci && npm run build`). No runtime framework is required,
@@ -261,6 +332,7 @@ fails if the digest and the script ever drift.
 | `make eval` | ranking metrics from `testdata/eval.jsonl` |
 | `make check-boundaries` | enforce declarative SDK boundary + plugin tests |
 | `make check-trust-store` | offline eMudhra/emSign CA fingerprint scan |
+| `make web-audit` | source-level web rendering/slop check via impeccable |
 
 `go test ./...` passes without Postgres, network or credentials. Set
 `AGENTMEM_TEST_PG_DSN` to enable the optional real-PostgreSQL integration

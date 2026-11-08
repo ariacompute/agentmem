@@ -56,7 +56,7 @@
 - HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`。
 - 评测：Recall@k / Precision@k / nDCG / MRR / MAP / HitRate@k 纯函数；显式区分覆盖率 Recall 与二值 HitRate。
 - 文档、CI、Docker、compose；`web/` 零运行时依赖原生 ES module 控制台（详见第 8 节）。
-- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`make check-trust-store`、`cd web && npm test`、`cd web && npm run build` 全绿，离线无外部服务。
+- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`make check-trust-store`、`make web-audit`、`cd web && npm test`、`cd web && npm run build` 全绿，离线无外部服务（`make web-audit` 源码级渲染检查 0 反模式）。
 
 ## 8. Web 控制台
 
@@ -68,6 +68,7 @@
 - 页面以静态文件托管，因此自带 `Content-Security-Policy` meta：`default-src 'none'`，仅允许同源脚本/样式与同源 `connect-src`，唯一的内联首屏主题脚本以 SHA-256 摘要白名单放行；`web/tests/security.test.mjs` 校验哈希与脚本文本一致、无外链资源与内联事件处理器。
 - Node 内置 `node:test` 套件（零新增依赖）：语言目录、译文完整性与英文兜底、端点表与后端路由一致性、单色守卫、主题解析/持久化、DOM 冒烟（两视图切换、示例展开、RTL、主题切换）；CI 的 web job 执行 `npm test` 与 `npm run build`。
 - 页面不输出日志、不记录 API 响应正文；示例仅用占位值，不含正文、PII 或凭据。
+- Web 渲染质量采用 [pbakaus/impeccable](https://github.com/pbakaus/impeccable) 检查与优化：`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器），完整元素级规则（对比度、过小字号、间距）需运行中站点加本地 Chrome/Edge（`cd web && npm run dev` 后 `npm run audit:live`）。保持单色不变式，刻意避免 `.notice` 侧边强调边框等已知「AI 痕迹」；共享配置 `web/.impeccable/config.json`（关闭遥测），临时缓存被 `.gitignore` 排除。
 
 ## 9. 安全基线
 

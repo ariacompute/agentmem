@@ -21,7 +21,7 @@
 
   --text-1: #ffffff;
   --text-2: rgba(255, 255, 255, 0.7);
-  --text-3: rgba(255, 255, 255, 0.44);
+  --text-3: rgba(255, 255, 255, 0.55);
 
   --accent: #ffffff;
   --accent-ink: #050505;
@@ -58,7 +58,7 @@
 
   --text-1: #0d0d0d;
   --text-2: rgba(0, 0, 0, 0.72);
-  --text-3: rgba(0, 0, 0, 0.52);
+  --text-3: rgba(0, 0, 0, 0.6);
 
   --accent: #0d0d0d;
   --accent-ink: #ffffff;
@@ -405,8 +405,7 @@ h1 {
 
 .notice {
   border-style: solid;
-  border-inline-start-width: 3px;
-  border-inline-start-color: var(--stroke-3);
+  background: var(--bg-overlay);
   color: var(--text-2);
 }
 

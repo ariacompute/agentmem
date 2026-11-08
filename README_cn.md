@@ -102,6 +102,52 @@ go run ./cmd/agentmem validate --env .env
 
 `internal/meta/migrations/001_init.sql` 创建元数据表；`002_pgvector.sql` 为尽力而为，仅在 `vector` 扩展可用时生效；`003_computations.sql` 增加 Attested Computation 审计表。迁移版本记录在 `schema_migrations`，通过事务与 advisory lock 应用；`AutoMigrate` 不作为 schema 来源。
 
+## 使用 Docker Compose 部署
+
+仓库附带 `docker-compose.yml`（PostgreSQL + agentmem）与多阶段 `Dockerfile`：Go 后端在 `golang:1.27.3-alpine` 下构建，静态 web 控制台在 `node:20-alpine` 下构建，二者合并进以非特权用户 `agentmem` 运行的极简 `alpine:3.21` 镜像。
+
+1. 基于模板生成 `.env`：
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   随后按需编辑。Compose 会两次消费 `.env`：既用于 `${POSTGRES_DB}` 式插值，也作为 app 的 `env_file`，因此凭据不会提交进版本库。
+
+2. 至少设置以下项以启动可用栈：
+
+   ```dotenv
+   POSTGRES_PASSWORD=<强密码>
+   AGENTMEM_MODE=production
+   AGENTMEM_PG_DSN=postgres://agentmem:<POSTGRES_PASSWORD>@postgres:5432/agentmem?sslmode=require
+   AGENTMEM_AUTH_ENABLED=true
+   AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 位十六进制>","subject":"console","scopes":["knowledge:read","knowledge:write"]}]'
+   ```
+
+   `AGENTMEM_MODE=production` 还要求 DSN 不得含 `sslmode=disable`，且只要配置了出向端点就必须设置 `AGENTMEM_EGRESS_ALLOWED_HOSTS`。
+
+3. 构建并启动：
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   `postgres` 服务使用 `pgvector/pgvector:pg16`，仅绑定回环地址（`127.0.0.1:5432`）并带 `pg_isready` 健康检查；`agentmem` 服务等待其健康后再以 `serve` 启动。容器内监听 `0.0.0.0:8080`，对外仅发布到 `127.0.0.1:8080`。在跨主机暴露前，请在其前方放置一个终结 TLS 的反向代理（如 Nginx、Caddy）。
+
+4. 验证：
+
+   ```bash
+   docker compose ps
+   curl -i http://127.0.0.1:8080/healthz
+   go run ./cmd/agentmem validate --env .env
+   ```
+
+数据与 OKF bundle 存于命名卷（`pgdata`、`agentmem_data`）；容器内 `AGENTMEM_GIT_ROOT` 为 `/app/data/bundle`。如需初始化 bundle，可将 `testdata/bundle/` 复制进该卷（例如通过临时容器或对运行中的服务执行 `docker compose cp`）。
+
+**信任库刷新。** 2026-10 eMudhra/emSign 中间 CA 私钥泄露后，请重新拉取 `pgvector/pgvector:pg16` 并重建 agentmem 镜像以刷新随附信任库；可用 `make check-trust-store` 离线核验。
+
+日志：`docker compose logs -f agentmem`。停止：`docker compose down`（加 `-v` 同时删除卷）。
+
 ## HTTP API
 
 | 方法 | 路径 | 用途 |
@@ -163,6 +209,7 @@ go run ./cmd/agentmem computations --limit 10
 - light / dark 双主题共用一套纯黑白灰灰阶。主题在首屏绘制前解析，未选择时跟随系统，仅显式切换才写入 `agentmem.theme`。
 - `?view=docs` 可直接打开 API 文档视图。
 - 方法、路径、字段名与 JSON 样例在所有语言下逐字呈现，仅说明文字翻译；端点数据与 `internal/handlers/http.go` 保持一致。
+- Web 渲染质量使用 [impeccable](https://github.com/pbakaus/impeccable) 检查：`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器）；完整的元素级检查（对比度、过小字号、间距）需要运行中的站点加本地 Chrome/Edge——`cd web && npm run dev` 后 `npm run audit:live`。单色不变式保持不变；`.notice` 的侧边强调边框作为已知「AI 痕迹」被刻意避免。
 
 可直接用任意静态服务器托管 `web/`；有 Node 时也可用 Vite 打包（`cd web && npm ci && npm run build`）。Go 二进制不依赖 Node。前端校验使用 Node 内置测试运行器，离线执行且无新增依赖：`cd web && npm test`。页面自带 `Content-Security-Policy` meta（`default-src 'none'`、仅同源资源、内联首屏主题脚本以 SHA-256 白名单放行），`web/tests/security.test.mjs` 会在摘要与脚本文本不一致时失败。
 
@@ -177,6 +224,7 @@ go run ./cmd/agentmem computations --limit 10
 | `make eval` | 基于 `testdata/eval.jsonl` 的排序指标 |
 | `make check-boundaries` | 检查声明式 SDK 边界并跑插件测试 |
 | `make check-trust-store` | 离线扫描 eMudhra/emSign CA 指纹 |
+| `make web-audit` | 通过 impeccable 做源码级 web 渲染/反模式检查 |
 
 `go test ./...` 无需 Postgres、网络或凭据即可通过。设置 `AGENTMEM_TEST_PG_DSN` 可启用可选的真实 PostgreSQL 集成测试。
 

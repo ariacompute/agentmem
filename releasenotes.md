@@ -32,6 +32,14 @@ and a rule-first smart router.
   13 languages (English fallback, Arabic RTL), and a monochrome black/white/
   grey light/dark theme follows the OS until explicitly chosen. Offline
   `node:test` suites guard copy coverage, endpoint drift and the palette.
+- **Web rendering checks (impeccable)**: adopted
+  [pbakaus/impeccable](https://github.com/pbakaus/impeccable) for design and
+  anti-pattern detection. `make web-audit` runs a source-level `impeccable
+  detect` over `web/` with no browser, while `npm run audit:live` covers the
+  full element-level pass (contrast, tiny-text, spacing) against a running app
+  with local Chrome/Edge. The monochrome invariant is preserved: the `.notice`
+  side-accent border was removed as a flagged AI-slop tell and tertiary-text
+  contrast was raised to meet WCAG AA.
 - **`.env` configuration**: a single gitignored `.env` file (template:
   `.env.example`) with a closed `AGENTMEM_*` key whitelist, process-env
   overrides and zero-dependency parsing. Docker Compose consumes the same file

@@ -76,6 +76,13 @@ upward import: `internal/auth` (consumed by `handlers` / `cli`),
   (`web/tests/style.test.mjs` enforces it). All 13 languages need real
   translations in `web/src/lib/copy/`; methods, paths, field names, status codes
   and JSON samples are machine data and are never translated.
+- **Web rendering is checked with impeccable.** `make web-audit` runs
+  `impeccable detect` on the `web/` source (no browser required) and fails the
+  build on any anti-pattern. The full element-level pass — contrast, tiny-text,
+  spacing — needs a running app plus a local Chrome/Edge: `cd web && npm run
+  dev` then `npm run audit:live`. Keep the monochrome invariant; the `.notice`
+  side-accent border is a known slop tell and is intentionally avoided. Shared
+  config lives in `web/.impeccable/config.json` (telemetry disabled).
 - **The web page carries its own CSP.** `web/index.html` is served as a static
   file, so the policy is a `Content-Security-Policy` meta with
   `default-src 'none'` and the single inline theme script admitted by SHA-256.

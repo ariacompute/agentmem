@@ -22,6 +22,9 @@ operator/bin/
 node_modules/
 web/dist/
 web/coverage/
+# Impeccable design-check cache (keep the shared web/.impeccable/config.json)
+web/.impeccable/*
+!web/.impeccable/config.json
 backend/static/
 *.local
 

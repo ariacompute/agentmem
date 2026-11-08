@@ -11,6 +11,7 @@
 - **智能路由**：确定性 `R1`–`R7` 规则优先，AFM-D System One 兜底（5000ms 超时、256 条缓存、低分保护、失败关闭）；读写双程 + 可续跑迁移。
 - **接口**：JSON HTTP API（含 `/v1/computations`）、十个 CLI 命令（含 `compute` / `computations`）、纯函数检索/路由评测。
 - **Web 控制台**：零依赖原生 ES module 单页，含状态视图与内置 HTTP API 文档（9 个 method+path 组合、请求/响应 JSON 样例、通用约定与错误状态码）。界面与文档正文提供 13 种语言完整译文（英文兜底、阿拉伯语 RTL）；纯黑白灰 light / dark 双主题默认跟随系统，仅显式切换才记忆。离线 `node:test` 套件守住译文覆盖、端点漂移与单色约束。
+- **Web 渲染检查（impeccable）**：接入 [pbakaus/impeccable](https://github.com/pbakaus/impeccable) 做设计与反模式检测。`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器），`npm run audit:live` 针对运行中站点加本地 Chrome/Edge 做完整元素级检查（对比度、过小字号、间距）。保持单色不变式：移除被标记为「AI 痕迹」的 `.notice` 侧边强调边框，并提升三级文字对比度以满足 WCAG AA。
 - **`.env` 配置**：唯一配置文件为被 git 忽略的 `.env`（模板 `.env.example`），采用封闭 `AGENTMEM_*` 键白名单、进程环境覆盖与零依赖解析；Docker Compose 通过 `env_file` 与 `${...}` 插值复用同一文件，版本化文件不含凭据。
 - **安全加固（不兼容变更）**：请求不再能自报身份。Bearer 令牌以 SHA-256 摘要配置，映射到主体与权限，六个权限覆盖全部 9 条路由（`401` / `403` / `429` 进入对外契约）。私有正文仅 owner 可读，被拒读取与文档不存在不可区分。错误体统一脱敏，出向调用走主机白名单并逐跳复检重定向，bundle 写入防符号链接逃逸且以 `0600` 原子落盘，OKF/YAML 解析与计算执行均有资源上限，危险 SQL 函数被拒，CLI 桥接只允许裸可执行程序名。生产环境缺少鉴权、缺少令牌、DSN 含 `sslmode=disable` 或未配出向白名单时拒绝启动。容器以非 root 运行且发布端口仅绑回环，CI/release 采用最小 `permissions`，`make check-trust-store` 离线扫描 CA bundle 中的 eMudhra（emSign）弱证书指纹。
 
