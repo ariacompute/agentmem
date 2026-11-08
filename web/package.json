@@ -12,8 +12,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "bun test",
-    "audit": "bunx impeccable detect src index.html",
-    "audit:live": "bunx impeccable detect http://localhost:5173"
+    "audit": "bun x impeccable detect src index.html",
+    "audit:live": "bun x impeccable detect http://localhost:5173"
   },
   "devDependencies": {
     "vite": "^6.0.5"

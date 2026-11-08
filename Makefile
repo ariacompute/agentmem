@@ -43,7 +43,7 @@ web:
 # pass (contrast, tiny-text) needs a running app + local Chrome/Edge:
 #   cd web && bun run dev   # then: bun run audit:live
 web-audit:
-	cd web && bunx impeccable@latest detect src index.html
+	cd web && bun x impeccable@latest detect src index.html
 
 clean:
 	rm -rf bin web/dist

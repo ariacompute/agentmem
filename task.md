@@ -98,7 +98,7 @@
 
 - [x] `web/package.json`：新增 `audit`（源码级 `impeccable detect src index.html`）与 `audit:live`（运行态 URL `http://localhost:5173`）脚本。
 - [x] `web/.impeccable/config.json`：共享配置（关闭遥测）；`.gitignore` 排除临时缓存、保留该配置。
-- [x] `Makefile`：新增 `web-audit` 目标（`cd web && bunx impeccable@latest detect src index.html`）并并入 `.PHONY`。
+- [x] `Makefile`：新增 `web-audit` 目标（`cd web && bun x impeccable@latest detect src index.html`）并并入 `.PHONY`。
 - [x] `web/src/style.css`：移除 `.notice` 的 3px 侧边强调边框（impeccable 标记的「AI 痕迹」），改为细实线边框 + 极淡底色；复跑 `impeccable detect` 收敛至 0 反模式。
 - [x] `web/src/style.css`：提升三级文字 `--text-3` 透明度（暗色 `0.44 → 0.55`、亮色 `0.52 → 0.6`），使三级文字在 `#050505` / `#f5f5f5` 上满足 WCAG AA 对比度。
 - [x] `AGENTS.md` / `README.md` / `README_cn.md` / `requirements.md`：补充 impeccable 渲染检查工作流与 `make web-audit` 说明。
