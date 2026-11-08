@@ -272,7 +272,7 @@ jobs:
           # PAT scoped to write:packages (not GITHUB_TOKEN); rotate on a
           # schedule and store it only as the ARIACOMPUTE_TOKEN secret.
           password: ${{ secrets.ARIACOMPUTE_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true
