@@ -125,7 +125,8 @@ describe('api-content authentication', () => {
     for (const entry of endpoints) {
       const route = `${entry.method} ${entry.path}`
       if (route === 'GET /healthz') {
-        assert.deepEqual(entry.statuses, ['200', '429'])
+        // Public route: no 401/403, but a wrong method still answers 405.
+        assert.deepEqual(entry.statuses, ['200', '405', '429'])
         continue
       }
       assert.ok(entry.statuses.includes('401'), `${route} lacks 401`)

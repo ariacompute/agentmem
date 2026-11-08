@@ -42,6 +42,7 @@ export const errorLines = [
   '{"error": "authentication required"}',
   '{"error": "permission denied"}',
   '{"error": "rate limit exceeded"}',
+  '{"error": "document not found or access denied"}',
   '{"error": "query is empty"}',
   '{"error": "method not allowed"}',
   '{"error": "computation rejected", "envelope": {"concept_id": "computations/example", "display_allowed": false, "verified": false}}',
@@ -72,7 +73,8 @@ export const endpoints = [
     method: 'GET',
     path: '/healthz',
     descKey: 'epHealthz',
-    statuses: ['200', '429'],
+    // Public, so no 401/403; 405 still applies to a non-GET method.
+    statuses: ['200', '405', '429'],
     request: 'GET /healthz',
     response: `{
   "status": "ok",
