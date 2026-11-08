@@ -2,7 +2,7 @@
 // switching. Dependency-free ES module so the page also works without a bundler
 // or Node runtime when served straight from web/.
 import { LANGUAGES } from './lib/languages.js'
-import { getLang, mirrorHtml, onLangChange, setLang, t } from './lib/i18n.js'
+import { getLang, initLang, mirrorHtml, onLangChange, setLang, t } from './lib/i18n.js'
 import { getTheme, initTheme, onThemeChange, toggleTheme } from './lib/theme.js'
 import { button, chip, el } from './lib/dom.js'
 import { renderStatus } from './views/status.js'
@@ -178,7 +178,7 @@ async function loadStatus() {
 }
 
 initTheme()
-mirrorHtml(getLang())
+initLang()
 onLangChange(() => render())
 onThemeChange(() => render())
 render()

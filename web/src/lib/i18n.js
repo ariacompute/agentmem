@@ -34,15 +34,24 @@ export function detectLang(search, storage) {
   return 'en'
 }
 
-// Some test runners install a minimal `window` stub (no `location` or
-// `localStorage`) shared across the process. Guard both so module evaluation
-// never throws before the real browser environment is in place.
-const browserWindow = typeof window !== 'undefined' ? window : undefined
+// Resolve window/storage lazily, never capturing it at module load. Some test
+// runners share one process and import this module (via a sibling test) before
+// the document/window stubs are installed; a captured reference would be frozen
+// as `undefined`, so language detection and localStorage persistence would
+// silently no-op even after the real environment is in place.
+function readSearch() {
+  return typeof window !== 'undefined' && window.location
+    ? window.location.search ?? ''
+    : ''
+}
 
-let langRef = detectLang(
-  browserWindow?.location?.search ?? '',
-  browserWindow?.localStorage ?? null,
-)
+function readStorage() {
+  return typeof window !== 'undefined' && window.localStorage
+    ? window.localStorage
+    : null
+}
+
+let langRef = detectLang(readSearch(), readStorage())
 
 const listeners = new Set()
 const cache = new Map()
@@ -61,14 +70,23 @@ export function getLang() {
   return langRef
 }
 
+/** Re-read the language from the live environment and mirror it onto the
+ *  document. Called on boot so that a module cached before the DOM/window
+ *  existed (e.g. when a sibling test imports first) still resolves and
+ *  reflects the correct language once the real environment is in place. */
+export function initLang() {
+  langRef = detectLang(readSearch(), readStorage())
+  mirrorHtml(langRef)
+  return langRef
+}
+
 /** Applies a language: persists it, mirrors <html lang|dir>, notifies views. */
 export function setLang(next) {
   const lang = isValidLang(next) ? next : 'en'
   langRef = lang
   cache.clear()
-  if (browserWindow && browserWindow.localStorage) {
-    browserWindow.localStorage.setItem(STORAGE_KEY, lang)
-  }
+  const storage = readStorage()
+  if (storage) storage.setItem(STORAGE_KEY, lang)
   mirrorHtml(lang)
   for (const fn of listeners) fn(lang)
   return lang
