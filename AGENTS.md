@@ -13,7 +13,7 @@ embeds nor serves it.
 ## Layering (single direction, no upward imports)
 
 ```
-okf / meta / config (L0, zero internal deps)
+auth / safepath / netsafe / okf / meta / config (L0, zero internal deps)
   -> vcs / adapter / bridges
   -> plugins (engine packages + manifest)
   -> router / eval / compute
@@ -26,6 +26,11 @@ Ports are defined where they are consumed. `gorm` may only be imported inside
 `internal/meta`; no `*gorm.DB` in any port signature. `compute.SQLExecutor` is a
 `meta` port so its GORM implementation stays in L1 without an upward import.
 Attested Computation bodies live in OKF+Git; PostgreSQL stores only verdicts.
+
+Three security leaf packages are standard-library only, so they never create an
+upward import: `internal/auth` (consumed by `handlers` / `cli`),
+`internal/safepath` (consumed by `okf` / `vcs`) and `internal/netsafe`
+(consumed by `bridges` / `router`).
 
 ## Hard rules
 
@@ -48,7 +53,20 @@ Attested Computation bodies live in OKF+Git; PostgreSQL stores only verdicts.
   a deterministic authoritative decision. Timeouts/error → fail closed to OKF.
 - **No secrets in files or logs.** `.env` is gitignored; `.env.example` holds
   placeholders only. `AGENTMEM_PG_DSN` may be injected by the process env;
-  never log bodies, PII, credentials, or GORM SQL parameters.
+  never log bodies, PII, credentials, or GORM SQL parameters. `AGENTMEM_AUTH_TOKENS`
+  stores SHA-256 digests only — never a raw bearer value.
+- **Identity is established once, at the Handler boundary.** The security
+  middleware turns `Authorization: Bearer` into a `Principal`, injects it into
+  the `context`, and handlers pass a plain subject string downstream. A subject
+  in a request body or query string is ignored, never trusted, and any new route
+  must be added to `routePermissions` in `internal/handlers/security.go`.
+- **Errors are redacted at the edge.** Clients see a fixed class string and a
+  stable status code; internal logs may record the error type (`%T`) but never
+  bodies, DSNs, SQL parameters or external stderr.
+- **Production fails closed.** `AGENTMEM_MODE=production` requires
+  `AGENTMEM_AUTH_ENABLED=true`, at least one token, a DSN without
+  `sslmode=disable`, and `AGENTMEM_EGRESS_ALLOWED_HOSTS` whenever an outbound
+  endpoint is configured.
 - **Schema source is SQL migrations**, not `AutoMigrate`. Movement is versioned
   in `schema_migrations` with an advisory lock.
 - **Explicit plugin registry**, not Go `.so` plugins.
@@ -58,6 +76,23 @@ Attested Computation bodies live in OKF+Git; PostgreSQL stores only verdicts.
   (`web/tests/style.test.mjs` enforces it). All 13 languages need real
   translations in `web/src/lib/copy/`; methods, paths, field names, status codes
   and JSON samples are machine data and are never translated.
+- **The web page carries its own CSP.** `web/index.html` is served as a static
+  file, so the policy is a `Content-Security-Policy` meta with
+  `default-src 'none'` and the single inline theme script admitted by SHA-256.
+  Editing that script invalidates the digest: rerun `web/tests/security.test.mjs`
+  and update the hash — or move the script to `web/src/theme-boot.js`.
+
+## Trust stores
+
+The eMudhra (emSign) weak intermediate CAs are handled twice: Go 1.27.3 ships
+the `crypto/x509` blocklist, and `scripts/check-emudhra.sh` scans a system or
+image CA bundle for the known root/intermediate SHA-256 fingerprints. Run
+`make check-trust-store` before a release and after refreshing a base image. The
+scan is offline by design (forward and intercepting proxies produce false
+positives); to check a container, export the bundle with
+`docker run --rm --entrypoint cat <image> /etc/ssl/certs/ca-certificates.crt`
+and scan the file on the host. Never install `openssl` into the runtime image
+just for this check.
 
 ## Commands
 
@@ -68,6 +103,7 @@ make build       # single binary
 make eval        # ranking metrics from testdata/eval.jsonl
 make validate    # strict validation of .env.example
 make check-boundaries  # SDK boundaries stay declarative; no inline annotations
+make check-trust-store # offline eMudhra/emSign CA fingerprint scan
 cd web && npm test  # offline node:test suites, zero extra dependencies
 cd web && npm run build  # optional Vite bundle of the same static page
 ```
@@ -90,6 +126,11 @@ cd web && npm run build  # optional Vite bundle of the same static page
 | Write / read / migrate | `internal/router/write.go`, `read.go`, `migrate.go` |
 | Assembly | `internal/service/knowledge.go` |
 | API / CLI | `internal/handlers/http.go`, `internal/cli/root.go` |
+| Authentication & permissions | `internal/auth/auth.go`, `internal/handlers/security.go` |
+| Path safety | `internal/safepath/safepath.go` |
+| Outbound allowlist | `internal/netsafe/netsafe.go` |
+| Security posture docs | `docs/security.md`, `SECURITY.md` |
+| Trust-store scan | `scripts/check-emudhra.sh`, `make check-trust-store` |
 | Web shell / views | `web/index.html`, `web/src/main.js`, `web/src/views/` |
 | Web languages & copy | `web/src/lib/languages.js`, `i18n.js`, `copy/` |
 | Web themes | `web/src/lib/theme.js`, `web/src/style.css` |
@@ -104,9 +145,12 @@ Do not "silently" replace a bridge with an untestable native client: the offline
 mock must stay reachable and observable, and every new capability needs a fake.
 
 The endpoint table in `web/src/lib/api-content.js` is the user-facing half of
-`internal/handlers/http.go`: a route change must be mirrored there.
-`web/tests/api-content.test.mjs` pins the 9 method+path combinations,
-`copy-fallback.test.mjs` demands a non-English translation for every key, and
-`style.test.mjs` keeps the console monochrome. The outbound sidecar wire
+`internal/handlers/http.go`: a route, status code or auth requirement change must
+be mirrored there, including the `headerLines` bearer/scope/rate-limit rows and
+the `statusGroups` table. Request samples never carry a `subject` field.
+`web/tests/api-content.test.mjs` pins the 9 method+path combinations and the
+documented statuses, `copy-fallback.test.mjs` demands a non-English translation
+for every key, `style.test.mjs` keeps the console monochrome, and
+`security.test.mjs` keeps the page CSP honest. The outbound sidecar wire
 protocol in `internal/bridges/` is not part of the public API; do not document
 `/put`, `/query` or `/delete` as agentmem endpoints.

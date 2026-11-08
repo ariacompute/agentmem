@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +14,27 @@ import (
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
+
+var (
+	urlCredentialRe = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^@/\s]+@`)
+	passwordRe      = regexp.MustCompile(`(?i)(password\s*[=:]\s*)[^\s&"']+`)
+)
+
+// redactConnectionError strips the DSN and any embedded credentials from a
+// driver error before it can reach CLI output or the structured log. pgx/pq
+// errors routinely echo the full connection string.
+func redactConnectionError(err error, dsn string) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if dsn != "" {
+		msg = strings.ReplaceAll(msg, dsn, "[redacted]")
+	}
+	msg = urlCredentialRe.ReplaceAllString(msg, "${1}[redacted]@")
+	msg = passwordRe.ReplaceAllString(msg, "${1}[redacted]")
+	return errors.New(msg)
+}
 
 // Options configures the PostgreSQL/GORM connection. DSN is injected at runtime.
 type Options struct {
@@ -58,7 +80,7 @@ func OpenPostgres(ctx context.Context, o Options) (*PostgresStore, error) {
 	)
 	db, err := gorm.Open(postgres.Open(o.DSN), &gorm.Config{Logger: gl})
 	if err != nil {
-		return nil, fmt.Errorf("meta: open postgres: %w", err)
+		return nil, fmt.Errorf("meta: open postgres: %w", redactConnectionError(err, o.DSN))
 	}
 	sqlDB, err := db.DB()
 	if err != nil {
@@ -74,7 +96,7 @@ func OpenPostgres(ctx context.Context, o Options) (*PostgresStore, error) {
 		sqlDB.SetConnMaxLifetime(o.ConnMaxLifetime)
 	}
 	if err := sqlDB.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("meta: ping postgres: %w", err)
+		return nil, fmt.Errorf("meta: ping postgres: %w", redactConnectionError(err, o.DSN))
 	}
 	s := &PostgresStore{db: db}
 	if err := s.Migrate(ctx); err != nil {
@@ -125,7 +147,9 @@ func (s *PostgresStore) Migrate(ctx context.Context) error {
 		})
 		if err != nil {
 			if strings.Contains(name, "pgvector") {
-				slog.Warn("meta: optional pgvector migration skipped", "file", name, "error", err)
+				// GORM errors can contain SQL text; only the type is logged.
+				slog.Warn("meta: optional pgvector migration skipped",
+					"file", name, "error_type", fmt.Sprintf("%T", err))
 				continue
 			}
 			return fmt.Errorf("meta: migration %s: %w", name, err)

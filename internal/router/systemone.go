@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"agentmem/internal/netsafe"
 )
 
 // Numeric contracts mirror router/afm_d to avoid drift.
@@ -32,14 +35,16 @@ type SystemOneConfig struct {
 	MaxChoices    int
 	MinConfidence float64
 	Fallback      string
-	FailClosed    bool
+	// AllowedHosts is the closed outbound allowlist used to re-check every
+	// redirect hop. Fail-closed behaviour is unconditional and has no switch.
+	AllowedHosts []string
 }
 
 func DefaultSystemOneConfig() SystemOneConfig {
 	return SystemOneConfig{
 		TimeoutMS: DefaultTimeoutMS, CacheCapacity: DefaultCacheCapacity,
 		MaxChoices: DefaultMaxChoices, MinConfidence: DefaultMinConfidence,
-		Fallback: CanonicalTarget, FailClosed: true,
+		Fallback: CanonicalTarget,
 	}
 }
 
@@ -73,6 +78,7 @@ type systemOneResponse struct {
 type SystemOneDecisioner struct {
 	cfg    SystemOneConfig
 	client *http.Client
+	hosts  []string
 	stub   *StubDecisioner
 
 	mu    sync.Mutex
@@ -96,11 +102,24 @@ func NewSystemOneDecisioner(cfg SystemOneConfig) *SystemOneDecisioner {
 	if cfg.Fallback == "" {
 		cfg.Fallback = CanonicalTarget
 	}
+	hosts := cfg.AllowedHosts
+	if len(hosts) == 0 && strings.TrimSpace(cfg.Endpoint) != "" {
+		// Standalone construction (tests, CLI helpers) pins the client to the
+		// explicitly configured host. The service assembly always injects the
+		// global allowlist and validates the endpoint before startup.
+		if u, err := url.Parse(cfg.Endpoint); err == nil && u.Hostname() != "" {
+			hosts = []string{u.Hostname()}
+		}
+	}
 	return &SystemOneDecisioner{
-		cfg:    cfg,
-		client: &http.Client{Timeout: time.Duration(cfg.TimeoutMS) * time.Millisecond},
-		stub:   NewStubDecisioner(),
-		cache:  map[string]RouteDecision{},
+		cfg:   cfg,
+		hosts: hosts,
+		client: &http.Client{
+			Timeout:       time.Duration(cfg.TimeoutMS) * time.Millisecond,
+			CheckRedirect: netsafe.RedirectPolicy(hosts, netsafe.DefaultMaxHops),
+		},
+		stub:  NewStubDecisioner(),
+		cache: map[string]RouteDecision{},
 	}
 }
 
@@ -135,6 +154,11 @@ func (s *SystemOneDecisioner) Decide(ctx context.Context, task DecisionTask) (Ro
 }
 
 func (s *SystemOneDecisioner) call(ctx context.Context, task DecisionTask, eligible []string) (RouteDecision, error) {
+	// Re-check the endpoint on the way out: assembly validates it once, but a
+	// standalone constructor must not be able to reach an unlisted host.
+	if err := netsafe.ValidateEndpoint(s.cfg.Endpoint, s.hosts); err != nil {
+		return RouteDecision{}, fmt.Errorf("systemone: %w", err)
+	}
 	payload, err := json.Marshal(s.buildBody(task, eligible))
 	if err != nil {
 		return RouteDecision{}, err

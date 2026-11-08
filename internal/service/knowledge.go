@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"agentmem/internal/compute"
 	"agentmem/internal/config"
 	"agentmem/internal/meta"
+	"agentmem/internal/netsafe"
 	"agentmem/internal/okf"
 	"agentmem/internal/plugins"
 	"agentmem/internal/router"
@@ -44,6 +46,21 @@ func Assemble(ctx context.Context, cfg *config.Config) (*KnowledgeService, error
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+	// Fail closed at assembly time on outbound endpoints: no adapter should
+	// ever be able to reach a metadata service, a private network or a host
+	// outside the operator's allowlist.
+	if strings.TrimSpace(cfg.Router.SystemOne.Endpoint) != "" {
+		if err := netsafe.ValidateEndpoint(cfg.Router.SystemOne.Endpoint, cfg.Egress.AllowedHosts); err != nil {
+			return nil, fmt.Errorf("service: system one endpoint: %w", err)
+		}
+	}
+	for _, a := range cfg.Adapters {
+		if a.Enabled && a.Kind != "cli" && strings.TrimSpace(a.Endpoint) != "" {
+			if err := netsafe.ValidateEndpoint(a.Endpoint, cfg.Egress.AllowedHosts); err != nil {
+				return nil, fmt.Errorf("service: adapter %q endpoint: %w", a.Name, err)
+			}
+		}
 	}
 	bundle, err := okf.Open(cfg.Git.Root)
 	if err != nil {
@@ -88,6 +105,7 @@ func Assemble(ctx context.Context, cfg *config.Config) (*KnowledgeService, error
 	}
 	if err := registry.Build(cfg, adapter.Deps{
 		Bundle: bundle, Vector: vectors, Meta: m, Embedder: adapter.NewHashingEmbedder(64),
+		AllowedHosts: cfg.Egress.AllowedHosts,
 	}); err != nil {
 		_ = closer()
 		return nil, err
@@ -107,7 +125,9 @@ func Assemble(ctx context.Context, cfg *config.Config) (*KnowledgeService, error
 	so.MaxChoices = cfg.Router.SystemOne.MaxChoices
 	so.MinConfidence = cfg.Router.SystemOne.MinConfidence
 	so.Fallback = cfg.Router.SystemOne.Fallback
-	so.FailClosed = cfg.Router.SystemOne.FailClosed
+	so.AllowedHosts = cfg.Egress.AllowedHosts
+	// FailClosed stays unconditional: DefaultSystemOneConfig sets it to true
+	// and the Composite hard-codes it. There is deliberately no .env switch.
 	decisioner := router.NewComposite(router.NewRuleEngine(), router.NewSystemOneDecisioner(so))
 	sqlExec, ok := m.(meta.SQLExecutor)
 	if !ok {
@@ -188,7 +208,10 @@ func (s *KnowledgeService) Health(ctx context.Context) map[string]string {
 	}
 	for name, err := range s.Registry.HealthAll(ctx) {
 		if err != nil {
-			out["adapter:"+name] = "error: " + err.Error()
+			// Adapter errors can contain URLs, DSNs or external process stderr.
+			// Only the error type reaches the log; the response stays generic.
+			slog.Warn("adapter unhealthy", "adapter", name, "error_type", fmt.Sprintf("%T", err))
+			out["adapter:"+name] = "unhealthy"
 			out["status"] = "degraded"
 		} else {
 			out["adapter:"+name] = "ok"

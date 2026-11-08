@@ -19,7 +19,36 @@ import (
 // Runner executes a command without a shell. Tests inject a deterministic one.
 type Runner func(ctx context.Context, command string, args []string, stdin []byte) ([]byte, error)
 
-var safeArg = regexp.MustCompile(`^[A-Za-z0-9_./:+=@-]+$`)
+// A CLI command must be a bare executable name resolved through PATH. Paths,
+// shell metacharacters and whitespace would allow arbitrary program execution.
+var commandRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
+
+// unsafeArgRunes are shell/expansion metacharacters. exec.CommandContext never
+// invokes a shell, but sidecars may re-parse these arguments; UTF-8 text is
+// otherwise allowed so non-ASCII knowledge stays usable.
+const unsafeArgRunes = "`$&|;<>(){}[]*?!\\\"'"
+
+func safeArgument(s string) bool {
+	if len(s) > 4096 {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || strings.ContainsRune(unsafeArgRunes, r) {
+			return false
+		}
+	}
+	return true
+}
+
+func validateCommand(command string) error {
+	if command == "" {
+		return nil // offline mock
+	}
+	if len(command) > 256 || !commandRe.MatchString(command) {
+		return fmt.Errorf("bridges: CLI command %q must be a bare executable name", command)
+	}
+	return nil
+}
 
 func defaultRunner(timeout time.Duration) Runner {
 	return func(ctx context.Context, command string, args []string, stdin []byte) ([]byte, error) {
@@ -29,11 +58,11 @@ func defaultRunner(timeout time.Duration) Runner {
 		if len(stdin) > 0 {
 			cmd.Stdin = bytes.NewReader(stdin)
 		}
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
 		out, err := cmd.Output()
 		if err != nil {
-			return nil, fmt.Errorf("bridges: cli %s: %w: %s", command, err, strings.TrimSpace(stderr.String()))
+			// External stderr can embed absolute paths, credentials or document
+			// bodies. Only the failure type is retained; stderr is never echoed.
+			return nil, fmt.Errorf("bridges: cli command failed (%T)", err)
 		}
 		return out, nil
 	}
@@ -70,6 +99,8 @@ func NewCLIBridge(cfg config.AdapterConfig, spec EngineSpec) (*CLIBridge, error)
 	}
 	if b.command == "" {
 		b.offline = adapter.NewMemoryAdapter(adapter.NewHashingEmbedder(64))
+	} else if err := validateCommand(b.command); err != nil {
+		return nil, err
 	}
 	return b, nil
 }
@@ -130,12 +161,12 @@ func (b *CLIBridge) Delete(ctx context.Context, conceptID string) error {
 
 func (b *CLIBridge) run(ctx context.Context, args []string, stdin []byte) ([]byte, error) {
 	for _, a := range args {
-		if !safeArg.MatchString(a) {
-			return nil, fmt.Errorf("bridges: unsafe CLI argument %q", a)
+		if !safeArgument(a) {
+			return nil, fmt.Errorf("bridges: unsafe CLI argument")
 		}
 	}
-	if !safeArg.MatchString(b.command) {
-		return nil, fmt.Errorf("bridges: unsafe CLI command %q", b.command)
+	if err := validateCommand(b.command); err != nil {
+		return nil, err
 	}
 	return b.runner(ctx, b.command, args, stdin)
 }

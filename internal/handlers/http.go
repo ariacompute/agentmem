@@ -4,6 +4,10 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"mime"
 	"net/http"
 	"strconv"
 
@@ -25,24 +29,23 @@ type documentInput struct {
 
 type putRequest struct {
 	ConceptID string        `json:"concept_id"`
-	Subject   string        `json:"subject"`
 	Document  documentInput `json:"document"`
 }
 
 type queryRequest struct {
-	Query   string `json:"query"`
-	Subject string `json:"subject"`
-	TopK    int    `json:"top_k"`
+	Query string `json:"query"`
+	TopK  int    `json:"top_k"`
 }
 
 type computationRequest struct {
 	ConceptID  string         `json:"concept_id"`
-	Subject    string         `json:"subject"`
 	Parameters map[string]any `json:"parameters"`
 }
 
-// NewHandler builds the API router.
-func NewHandler(svc *service.KnowledgeService) http.Handler {
+// NewHandler builds the API router. The subject of every request is taken from
+// the trusted principal injected by the security middleware; request bodies and
+// query strings can no longer assert an identity.
+func NewHandler(svc *service.KnowledgeService, opts Options) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -74,9 +77,18 @@ func NewHandler(svc *service.KnowledgeService) http.Handler {
 			writeError(w, http.StatusBadRequest, "query is empty")
 			return
 		}
-		res, err := svc.Query(r.Context(), req.Subject, req.Query, req.TopK)
+		if req.TopK < 0 || req.TopK > maxTopK {
+			writeError(w, http.StatusBadRequest, "top_k is out of range")
+			return
+		}
+		subject, ok := subjectFrom(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		res, err := svc.Query(r.Context(), subject, req.Query, req.TopK)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			serverError(w, "query", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, res)
@@ -92,7 +104,7 @@ func NewHandler(svc *service.KnowledgeService) http.Handler {
 		}
 		rep, err := svc.RunMigration(r.Context(), opt)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			redactedBadRequest(w, "migrate", err, "migration rejected")
 			return
 		}
 		writeJSON(w, http.StatusOK, rep)
@@ -102,10 +114,13 @@ func NewHandler(svc *service.KnowledgeService) http.Handler {
 			methodNotAllowed(w)
 			return
 		}
-		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		limit, ok := parseLimit(w, r)
+		if !ok {
+			return
+		}
 		records, err := svc.Decisions(r.Context(), r.URL.Query().Get("concept_id"), limit)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			serverError(w, "decisions", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, records)
@@ -117,7 +132,7 @@ func NewHandler(svc *service.KnowledgeService) http.Handler {
 		}
 		ids, err := svc.Concepts(r.Context())
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			serverError(w, "concepts", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, ids)
@@ -132,27 +147,31 @@ func NewHandler(svc *service.KnowledgeService) http.Handler {
 			methodNotAllowed(w)
 		}
 	})
-	return mux
+	return newSecurity(opts).wrap(mux)
 }
 
 func handleComputation(w http.ResponseWriter, r *http.Request, svc *service.KnowledgeService) {
 	var req computationRequest
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
-	dec.UseNumber()
-	if err := dec.Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decode(w, r, &req) {
 		return
 	}
 	if req.ConceptID == "" {
 		writeError(w, http.StatusBadRequest, "concept_id is required")
 		return
 	}
+	subject, ok := subjectFrom(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
 	env, err := svc.RunComputation(r.Context(), compute.Request{
-		ConceptID: req.ConceptID, Subject: req.Subject, Parameters: req.Parameters,
+		ConceptID: req.ConceptID, Subject: subject, Parameters: req.Parameters,
 	})
 	if err != nil {
-		// The envelope never carries a display value on failure.
-		writeJSON(w, computeStatus(err), map[string]any{"error": err.Error(), "envelope": env})
+		slog.Warn("computation rejected", "class", "computation", "error_type", fmt.Sprintf("%T", err))
+		// The envelope never carries a display value on failure, and the error
+		// body never carries the underlying SQL, DSN or driver message.
+		writeJSON(w, computeStatus(err), map[string]any{"error": "computation rejected", "envelope": env})
 		return
 	}
 	if !env.DisplayAllowed {
@@ -163,10 +182,13 @@ func handleComputation(w http.ResponseWriter, r *http.Request, svc *service.Know
 }
 
 func handleComputationAudit(w http.ResponseWriter, r *http.Request, svc *service.KnowledgeService) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	limit, ok := parseLimit(w, r)
+	if !ok {
+		return
+	}
 	records, err := svc.ComputationAudit(r.Context(), r.URL.Query().Get("concept_id"), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, "computation-audit", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, records)
@@ -192,9 +214,14 @@ func handlePut(w http.ResponseWriter, r *http.Request, svc *service.KnowledgeSer
 		writeError(w, http.StatusBadRequest, "concept_id and document.type are required")
 		return
 	}
-	res, err := svc.Put(r.Context(), req.Subject, req.ConceptID, toDocument(req.Document))
+	subject, ok := subjectFrom(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	res, err := svc.Put(r.Context(), subject, req.ConceptID, toDocument(req.Document))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		redactedBadRequest(w, "put", err, "write rejected")
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -206,9 +233,16 @@ func handleGet(w http.ResponseWriter, r *http.Request, svc *service.KnowledgeSer
 		writeError(w, http.StatusBadRequest, "id is required")
 		return
 	}
-	d, err := svc.Store.Get(r.Context(), r.URL.Query().Get("subject"), id)
+	subject, ok := subjectFrom(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	d, err := svc.Store.Get(r.Context(), subject, id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		// A single, indistinguishable response avoids revealing whether a
+		// private document exists to a subject without access.
+		writeError(w, http.StatusNotFound, "document not found or access denied")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -233,13 +267,45 @@ func toDocument(in documentInput) *okf.Document {
 	return d
 }
 
+const (
+	maxRequestBytes = 4 << 20
+	maxTopK         = 100
+	defaultLimit    = 20
+	maxLimit        = 1000
+)
+
 func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		writeError(w, http.StatusBadRequest, "Content-Type must be application/json")
+		return false
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBytes))
+	dec.DisallowUnknownFields()
+	dec.UseNumber()
 	if err := dec.Decode(dst); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return false
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "unexpected trailing data")
 		return false
 	}
 	return true
+}
+
+func parseLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return defaultLimit, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > maxLimit {
+		writeError(w, http.StatusBadRequest, "limit is out of range")
+		return 0, false
+	}
+	return n, true
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

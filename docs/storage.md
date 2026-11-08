@@ -28,7 +28,9 @@ data/bundle/
     └── revenue.sql          # 受批准计算体（Bundle.ReadResource 读取）
 ```
 
-概念 ID = 相对路径去掉 `.md`。`internal/okf/bundle.go` 的 `Put` 采用临时文件 + rename 原子写，只重生成所在目录的 `index.md`（不做全树遍历）。`log.md` 新条目按日期插入到最前。
+概念 ID = 相对路径去掉 `.md`。所有路径（`Path` / `Get` / `Put` / `Delete` / `ReadResource`）都先经 `internal/safepath.Resolve`：拒绝 NUL、反斜杠、冒号、控制字符、`..` 段、尾部空格/点、Windows 保留名与超过 512 字节的相对路径，并用 `Clean` + `EvalSymlinks` 确认目标（或最深的已存在祖先）仍在 bundle root 内，符号链接逃逸无法成立。
+
+`internal/okf/bundle.go` 的 `Put` 采用 `os.CreateTemp`（权限 `0o600`）+ `fsync` + `rename` 原子写，只重生成所在目录的 `index.md`（不做全树遍历）。`log.md` 新条目按日期插入到最前。目录遍历对条目数与总字节数设上限，frontmatter 解析对文档大小、YAML 节点数/深度与别名展开设上限；**未知键与未知类型仍然接受**，OKF 宽松兼容是硬约束。
 
 ## PostgreSQL 表
 
@@ -59,11 +61,24 @@ data/bundle/
 - Upsert 使用 `clause.OnConflict{DoUpdates: clause.AssignmentColumns(...)}`；批量写入走事务 / `CreateInBatches`。
 - `vector` 列的写入与余弦查询使用参数化原生 SQL（`?::vector`、`<=>`），经 `VectorStore` 窄端口暴露给适配器。
 - Logger 默认 `Warn`，`ParameterizedQueries: true`，不输出 SQL 参数值。
-- 连接池通过 `db.DB()` 设置 `MaxOpenConns` / `MaxIdleConns` / `ConnMaxLifetime`。
+- 连接与查询错误在返回或记录前先脱敏：pgx 错误可能携带完整 DSN 与 SQL 参数，只保留错误类型与分类，客户端只看到固定的 `internal error`。
+- 连接池通过 `db.DB()` 设置 `MaxOpenConns` / `MaxIdleConns` / `ConnMaxLifetime`；计算执行器在只读事务内按 `AGENTMEM_COMPUTE_MAX_ROWS`（默认 100）截断行数，并由计算服务的整轮 context 超时（`AGENTMEM_COMPUTE_TIMEOUT_MS`）兜住耗时。
 
 ## ACL 双写
 
-`visibility` / `owner` 写入 OKF frontmatter 作为可移植副本；PostgreSQL 的 `acl` 表 + `concepts_meta.visibility` 是运行时校验权威。两者不一致时以 PG 为准并输出结构化告警。`private` 仅 owner 可读，`team` 需非空 subject，`public` 放行。
+`visibility` / `owner` 写入 OKF frontmatter 作为可移植副本；PostgreSQL 的 `acl` 表 + `concepts_meta.visibility` 是运行时校验权威。两者不一致时以 PG 为准并输出结构化告警。
+
+主体（subject）只来自 Handler 中间件由令牌推导的 `Principal`，请求体与查询串里的 `subject` 被忽略；写入时 `owner` 缺省取该主体，且不允许把 `owner` 写成别人（否则越权写入者可以接管他人私有概念）。
+
+判定顺序：先查 `acl` 表里 `(subject, concept_id)` 的显式授权（`allow=false` 即拒绝），缺失时才回落到可见性规则：
+
+| 可见性 | 回落规则 |
+|---|---|
+| `private` | subject 非空且等于 `owner`（强隔离） |
+| `team` | subject 非空 |
+| `public` | 放行 |
+
+匿名写入一律拒绝（`store: anonymous write rejected`），覆盖 CLI 路径；覆盖他人已有正文同样被拒（`store: write denied for this concept`）。`acl` 查询走 `(subject, concept_id)` 主键集合式查询，不做逐文档全表扫描。读取失败与权限不足对客户端返回同一个 `404`，不泄露私有文档是否存在。
 
 ## 离线路径
 

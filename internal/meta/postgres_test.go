@@ -2,11 +2,49 @@ package meta
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestRedactConnectionError(t *testing.T) {
+	dsn := "postgres://agentmem:s3cr3t@db:5432/agentmem?sslmode=require"
+	err := fmt.Errorf("driver: cannot connect using %s (password=s3cr3t)", dsn)
+	got := redactConnectionError(err, dsn).Error()
+	for _, secret := range []string{dsn, "s3cr3t"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("connection error leaked %q: %s", secret, got)
+		}
+	}
+	if !strings.Contains(got, "[redacted]") {
+		t.Fatalf("expected a redaction marker: %s", got)
+	}
+	if redactConnectionError(nil, dsn) != nil {
+		t.Fatal("nil error must stay nil")
+	}
+	bare := redactConnectionError(errors.New("postgres://u:p@host/db password=p"), "").Error()
+	if strings.Contains(bare, ":p@") || strings.Contains(bare, "password=p") {
+		t.Fatalf("credentials in a bare error were not redacted: %s", bare)
+	}
+}
+
+func TestACLFromVisibilityRejectsAnonymousPrivate(t *testing.T) {
+	m := ConceptMeta{ConceptID: "private/c", Visibility: "private", Owner: "alice"}
+	for _, subject := range []string{"", "bob"} {
+		if aclFromVisibility(m, subject) {
+			t.Fatalf("private document readable by %q", subject)
+		}
+	}
+	if !aclFromVisibility(m, "alice") {
+		t.Fatal("owner must read a private document")
+	}
+	if aclFromVisibility(ConceptMeta{Visibility: "team"}, "") {
+		t.Fatal("anonymous subject must not read team documents")
+	}
+}
 
 func TestFakeMetaStoreContract(t *testing.T) {
 	ctx := context.Background()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -27,8 +28,48 @@ var canonicalOrder = []string{
 	"runtime", "parameters", "computation", "executor", "attester",
 }
 
+// Parsing budgets defend against YAML alias bombs and pathologically deep
+// documents. OKF conformance stays permissive: unknown keys and types are
+// still accepted; only resource consumption is bounded.
+const (
+	maxFrontmatterBytes = 1 << 20
+	maxYAMLNodes        = 10000
+	maxYAMLDepth        = 32
+	maxYAMLAliases      = 32
+)
+
+var aliasTokenRe = regexp.MustCompile(`(?:^|[\s,\[{])[&*][A-Za-z_][A-Za-z0-9_-]*`)
+
+func guardFrontmatter(fm []byte) error {
+	if len(fm) > maxFrontmatterBytes {
+		return fmt.Errorf("okf: frontmatter exceeds %d bytes", maxFrontmatterBytes)
+	}
+	if n := len(aliasTokenRe.FindAll(fm, -1)); n > maxYAMLAliases {
+		return fmt.Errorf("okf: frontmatter exceeds %d YAML alias/anchor tokens", maxYAMLAliases)
+	}
+	return nil
+}
+
+func checkNodeBudget(n *yaml.Node, depth int, count *int) error {
+	if depth > maxYAMLDepth {
+		return fmt.Errorf("okf: frontmatter exceeds YAML depth %d", maxYAMLDepth)
+	}
+	if *count++; *count > maxYAMLNodes {
+		return fmt.Errorf("okf: frontmatter exceeds %d YAML nodes", maxYAMLNodes)
+	}
+	for _, child := range n.Content {
+		if err := checkNodeBudget(child, depth+1, count); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SplitFrontmatter separates the leading YAML block from the markdown body.
 func SplitFrontmatter(data []byte) (fm []byte, body []byte, err error) {
+	if len(data) > maxDocumentBytes {
+		return nil, nil, fmt.Errorf("okf: document exceeds %d bytes", maxDocumentBytes)
+	}
 	lines := strings.Split(string(data), "\n")
 	if len(lines) == 0 || strings.TrimSpace(strings.TrimSuffix(lines[0], "\r")) != "---" {
 		return nil, nil, errors.New("okf: missing opening frontmatter delimiter")
@@ -56,9 +97,16 @@ func ParseDocument(data []byte) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := guardFrontmatter(fm); err != nil {
+		return nil, err
+	}
 	var root yaml.Node
 	if err := yaml.Unmarshal(fm, &root); err != nil {
 		return nil, fmt.Errorf("okf: invalid frontmatter: %w", err)
+	}
+	count := 0
+	if err := checkNodeBudget(&root, 0, &count); err != nil {
+		return nil, err
 	}
 	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
 		root = *root.Content[0]

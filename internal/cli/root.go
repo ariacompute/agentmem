@@ -5,14 +5,19 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
+	"time"
 
+	"agentmem/internal/auth"
 	"agentmem/internal/compute"
 	"agentmem/internal/config"
 	"agentmem/internal/eval"
@@ -110,13 +115,74 @@ func cmdServe(args []string, out io.Writer) error {
 	if *addr != "" {
 		cfg.Server.Addr = *addr
 	}
+	authenticator, err := buildAuthenticator(cfg)
+	if err != nil {
+		return err
+	}
 	svc, err := service.Assemble(context.Background(), cfg)
 	if err != nil {
 		return err
 	}
 	defer svc.Close()
+	handler := handlers.NewHandler(svc, handlers.Options{
+		Auth:           authenticator,
+		LocalSubject:   cfg.ACL.DefaultOwner,
+		AllowedOrigins: cfg.Auth.AllowedOrigins,
+		RateRPS:        cfg.RateLimit.RPS,
+		RateBurst:      cfg.RateLimit.Burst,
+	})
+	srv := &http.Server{
+		Addr:              cfg.Server.Addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 	fmt.Fprintf(out, "agentmem listening on %s (postgres=%s)\n", cfg.Server.Addr, postgresMode(cfg))
-	return http.ListenAndServe(cfg.Server.Addr, handlers.NewHandler(svc))
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	select {
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-sigCh:
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}
+}
+
+// buildAuthenticator converts the plain .env data into the auth package's
+// typed token specs. config stays an L0 leaf with no import of auth.
+func buildAuthenticator(cfg *config.Config) (*auth.Authenticator, error) {
+	specs := make([]auth.TokenSpec, 0, len(cfg.Auth.Tokens))
+	for _, t := range cfg.Auth.Tokens {
+		scopes := make([]auth.Permission, 0, len(t.Scopes))
+		for _, raw := range t.Scopes {
+			p, err := auth.ParsePermission(raw)
+			if err != nil {
+				return nil, err
+			}
+			scopes = append(scopes, p)
+		}
+		specs = append(specs, auth.TokenSpec{
+			TokenSHA256: t.TokenSHA256, Subject: t.Subject, Scopes: scopes,
+		})
+	}
+	return auth.New(specs, cfg.Auth.Enabled)
 }
 
 func postgresMode(cfg *config.Config) string {

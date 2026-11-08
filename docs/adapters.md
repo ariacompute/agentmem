@@ -68,9 +68,21 @@ adapters:
 
 客户端有超时、重试上限（仅传输错误/5xx，最多 1 次重试）、4xx 立即失败与 4MB 响应上限。
 
+### 出向主机白名单
+
+`AGENTMEM_EGRESS_ALLOWED_HOSTS` 是出向调用的唯一授权来源，`internal/netsafe` 在装配期与每次重定向各校验一遍：
+
+- 只接受 `http` / `https`，端点不得内嵌凭据或 fragment；
+- 裸主机名只匹配自身，`*.example.com` 只匹配子域；
+- 回环/私网/链路本地/组播等 IP 字面量必须被逐字点名，通配条目不授权；
+- 重定向最多 3 跳，逐跳复检，禁止 `https → http` 降级；
+- 只要存在非空 HTTP 端点（System One 或非 `cli` 适配器），白名单就不能为空，否则 `config.Load` 失败。
+
+响应体与 URL 不回显到错误或日志：桥接错误只保留失败类型，正文只在命中白名单的主机上发送。
+
 ## CLI 线协议
 
-`command put --id <id>`（stdin 为 put JSON）、`command query --text <t> --top-k <n>`（stdout 为 query JSON）、`command delete --id <id>`、`command health`。所有参数经白名单校验，执行不经过 shell。
+`command put --id <id>`（stdin 为 put JSON）、`command query --text <t> --top-k <n>`（stdout 为 query JSON）、`command delete --id <id>`、`command health`。`command` 必须是不带路径的裸可执行程序名（`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`，长度 ≤ 256），执行不经过 shell；参数拒绝控制字符与 shell 元字符，但允许 UTF-8 文本，使非 ASCII 知识仍可用。外部进程的 stderr 不会拼进错误、日志或响应。
 
 ## 离线 mock
 

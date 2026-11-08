@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"agentmem/internal/safepath"
 )
 
 // Bundle is a directory tree of OKF concept documents.
@@ -66,10 +68,9 @@ func (b *Bundle) Path(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	p := filepath.Join(b.Root, filepath.FromSlash(clean)+".md")
-	rel, err := filepath.Rel(b.Root, p)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("okf: path escapes bundle: %q", id)
+	p, err := safepath.Resolve(b.Root, clean+".md")
+	if err != nil {
+		return "", fmt.Errorf("okf: path escapes bundle %q: %w", id, err)
 	}
 	return p, nil
 }
@@ -80,8 +81,13 @@ func Hash(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// maxResourceBytes bounds sanctioned computation resources read from a bundle.
-const maxResourceBytes = 1 << 20
+// Size budgets keep a crafted bundle from turning a read into an unbounded
+// allocation. They are deliberately generous for real knowledge bases.
+const (
+	maxResourceBytes = 1 << 20
+	maxDocumentBytes = 8 << 20
+	maxBundleEntries = 100000
+)
 
 // ReadResource reads a non-Markdown bundle resource (for example a sanctioned
 // .sql file) referenced by an Attested Computation. It applies its own path
@@ -92,28 +98,9 @@ func (b *Bundle) ReadResource(rel string) ([]byte, error) {
 	if rel == "" {
 		return nil, errors.New("okf: empty resource path")
 	}
-	if strings.ContainsRune(rel, 0) || strings.Contains(rel, "\\") {
-		return nil, fmt.Errorf("okf: illegal resource path %q", rel)
-	}
-	clean := filepath.ToSlash(filepath.Clean(rel))
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
-		return nil, fmt.Errorf("okf: resource path escapes bundle: %q", rel)
-	}
-	p := filepath.Join(b.Root, filepath.FromSlash(clean))
-	if _, err := filepath.Rel(b.Root, p); err != nil {
-		return nil, fmt.Errorf("okf: resource path escapes bundle: %q", rel)
-	}
-	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(p))
+	p, err := safepath.Resolve(b.Root, rel)
 	if err != nil {
-		return nil, fmt.Errorf("okf: resource directory %q: %w", rel, err)
-	}
-	resolvedRoot, err := filepath.EvalSymlinks(b.Root)
-	if err != nil {
-		return nil, fmt.Errorf("okf: bundle root: %w", err)
-	}
-	check, err := filepath.Rel(resolvedRoot, filepath.Join(resolvedParent, filepath.Base(p)))
-	if err != nil || check == ".." || strings.HasPrefix(check, ".."+string(filepath.Separator)) {
-		return nil, fmt.Errorf("okf: resource symlink escapes bundle: %q", rel)
+		return nil, fmt.Errorf("okf: resource path %q: %w", rel, err)
 	}
 	f, err := os.Open(p)
 	if err != nil {
@@ -165,9 +152,17 @@ func (b *Bundle) Get(id string) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(p)
+	f, err := os.Open(p)
 	if err != nil {
 		return nil, fmt.Errorf("okf: read %s: %w", id, err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxDocumentBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("okf: read %s: %w", id, err)
+	}
+	if len(data) > maxDocumentBytes {
+		return nil, fmt.Errorf("okf: document %q exceeds %d bytes", id, maxDocumentBytes)
 	}
 	return ParseDocument(data)
 }
@@ -194,9 +189,13 @@ func (b *Bundle) Delete(id string) error {
 // List returns all concept ids, sorted, excluding reserved files.
 func (b *Bundle) List() ([]string, error) {
 	var out []string
+	scanned := 0
 	err := filepath.WalkDir(b.Root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if scanned++; scanned > maxBundleEntries {
+			return fmt.Errorf("okf: bundle exceeds %d entries", maxBundleEntries)
 		}
 		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
 			return nil
@@ -349,12 +348,33 @@ func cleanID(id string) string {
 	return c
 }
 
+// atomicWrite uses a unique, non-world-readable temporary file in the target
+// directory. A fixed ".tmp" name would be raceable and could follow a symlink
+// planted next to the concept. fsync before rename keeps the body durable.
 func atomicWrite(p string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	f, err := os.CreateTemp(dir, ".agentmem-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 	return os.Rename(tmp, p)

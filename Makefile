@@ -1,4 +1,4 @@
-.PHONY: build test vet eval validate check-boundaries run clean web
+.PHONY: build test vet eval validate check-boundaries check-trust-store run clean web
 
 BINARY := bin/agentmem
 PKG := ./...
@@ -26,6 +26,12 @@ check-boundaries:
 		echo "SDK boundaries are declarative"; \
 	fi
 	@go test ./internal/plugins/... -count=1
+
+# Offline trust-store gate for the eMudhra/emSign CA key compromise (2026-10).
+# Fingerprints are matched locally; online probes produce false positives
+# behind forward/intercepting proxies and are deliberately not used.
+check-trust-store:
+	@./scripts/check-emudhra.sh
 
 run: build
 	./$(BINARY) serve --env .env

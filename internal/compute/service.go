@@ -2,7 +2,7 @@ package compute
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -60,6 +60,10 @@ func NewService(b *okf.Bundle, r *RuntimeRegistry, audit meta.MetaStore, timeout
 // is written to the audit store. Attestation failure is a valid run outcome
 // (nil error) whose envelope explicitly refuses to display a value.
 func (s *Service) Run(ctx context.Context, req Request) (Envelope, error) {
+	// One deadline covers the whole run. The audit write in finish keeps the
+	// original context so a timed-out execution is still recorded.
+	runCtx, cancel := context.WithTimeout(ctx, s.Timeout)
+	defer cancel()
 	env := Envelope{ConceptID: req.ConceptID, Verdict: Verdict{Reasons: []string{}}}
 	if req.ConceptID == "" {
 		err := fail(ErrContract, "concept_id is required")
@@ -82,8 +86,6 @@ func (s *Service) Run(ctx context.Context, req Request) (Envelope, error) {
 		err := fail(ErrUnsupported, "runtime %q has no registered contract", c.Runtime)
 		return s.finish(ctx, req, env, "error_"+Class(err), err)
 	}
-	runCtx, cancel := context.WithTimeout(ctx, s.Timeout)
-	defer cancel()
 	receipt, err := rt.Execute(runCtx, bound)
 	if err != nil {
 		return s.finish(ctx, req, env, "error_"+Class(err), err)
@@ -132,12 +134,11 @@ func (s *Service) finish(ctx context.Context, req Request, env Envelope, verdict
 	if s.Audit != nil {
 		if err := s.Audit.AppendComputation(ctx, rec); err != nil {
 			// Never log bodies, SQL, parameters, results or credentials.
-			slog.Warn("compute: audit write failed", "class", env.ErrorClass)
-			if runErr != nil {
-				runErr = errors.Join(runErr, err)
-			} else {
-				runErr = err
-			}
+			slog.Warn("compute: audit write failed",
+				"class", env.ErrorClass, "error_type", fmt.Sprintf("%T", err))
+			// Keep the failure visible, but never return the underlying DB
+			// error (which may carry a DSN or SQL text) to the caller.
+			return env, fail(ErrExecution, "audit write failed")
 		}
 	}
 	return env, runErr

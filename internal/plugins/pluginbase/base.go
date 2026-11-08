@@ -54,6 +54,7 @@ func New(desc manifest.Descriptor, cfg config.AdapterConfig) (*Plugin, error) {
 	ac := config.AdapterConfig{
 		Name: name, Kind: desc.Kind, Enabled: true,
 		Endpoint: cfg.Endpoint, TimeoutMS: timeout,
+		EgressHosts: cfg.EgressHosts,
 	}
 	spec := bridges.EngineSpec{
 		Name: desc.Name, Kind: desc.Bridge, Endpoint: cfg.Endpoint,

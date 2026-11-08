@@ -19,7 +19,10 @@ var sqlKeywords = map[string]bool{
 	"PARTITION": true, "ROUND": true, "CURRENT_DATE": true, "NOW": true,
 }
 
-const maxCanonicalCache = 256
+const (
+	maxCanonicalCache   = 256
+	maxCanonicalSQLSize = 1 << 20
+)
 
 var canonicalCache = struct {
 	sync.Mutex
@@ -40,6 +43,11 @@ func isIdent(c byte) bool {
 // become a uniform placeholder. Positional $N placeholders are preserved so a
 // reordered binding can never pass as the same statement.
 func CanonicalSQL(s string) string {
+	// An unbounded SQL string must not become an unbounded cache key. It is
+	// still normalised correctly, just not memoised.
+	if len(s) > maxCanonicalSQLSize {
+		return canonicalSQL(s)
+	}
 	canonicalCache.Lock()
 	defer canonicalCache.Unlock()
 	if cached, ok := canonicalCache.values[s]; ok {

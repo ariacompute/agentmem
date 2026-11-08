@@ -63,8 +63,36 @@
 - [x] `web/src/lib/theme.js` + `web/src/style.css` + `index.html` 首屏脚本：纯黑白灰双主题、跟随系统、显式选择持久化、`prefers-reduced-motion`。
 - [x] 外壳重构：`web/src/main.js` 顶栏 / 导航 / 语言与主题切换器 / 页脚，`views/status.js` 状态视图、`views/docs.js` 文档视图。
 - [x] `web/src/lib/api-content.js`：9 个 method+path 组合、JSON 样例、通用约定与状态码，严格镜像 `internal/handlers/http.go`。
-- [x] `web/tests/` 六个零依赖 `node:test` 套件（语言、译文兜底、端点漂移、单色守卫、主题、DOM 冒烟）；`web/package.json` 的 `npm test` 与 CI web job 接入。
+- [x] `web/tests/` 零依赖 `node:test` 套件（语言、译文兜底、端点漂移、单色守卫、主题、DOM 冒烟；CSP 守卫见阶段 11）；`web/package.json` 的 `npm test` 与 CI web job 接入。
 - [x] `README.md` / `README_cn.md` Web 章节同步。
+
+## 阶段 10 · eMudhra（emSign）信任库响应
+
+- [x] `scripts/check-emudhra.sh`：离线扫描 CA bundle 的 2 个根 + 8 个中间证书 SHA-256 指纹，退出码 `0` 干净 / `1` 命中 / `2` 无法读取，零网络调用（与 `mcpx` 同一指纹表）。
+- [x] `make check-trust-store` 目标并入 `.PHONY` 与 CI；`SECURITY.md` 记录镜像 CA 导出后在宿主扫描的口径，不把 `openssl` 装进运行时镜像。
+- [x] `Dockerfile` / `docker-compose.yml`：构建与运行阶段刷新 `ca-certificates`，运行时升到 `alpine:3.21` 非 root 用户。
+
+## 阶段 11 · 全面安全加固
+
+- [x] H1 `internal/auth` + `handlers/security.go`：Bearer → 摘要常量时间比较 → `Principal` 注入 `context`；9 条路由的权限矩阵集中在 `routePermissions`。
+- [x] H2 主体只由中间件产生；`/v1/knowledge`、`/v1/query`、`/v1/computations` 移除请求体 `subject`，严格 JSON 解码拒绝该字段。
+- [x] H3 `store.TrustedACL` / `AuthorizeUpdate` / `aclFromVisibility`：私有文档按 owner 强隔离，匿名写入拒绝，读无权限与不存在统一 `404`。
+- [x] H4 错误脱敏：客户端只见分类文案，日志只记 `class` + `%T`；移除全部 `err.Error()` 回显（含 `/healthz` 与计算审计）。
+- [x] H5 配置闭白名单覆盖进程环境 `AGENTMEM_*`；生产强制鉴权 + 令牌 + 拒绝 `sslmode=disable` + 出向端点必配白名单；删除死开关 `AGENTMEM_SYSTEMONE_FAIL_CLOSED`。
+- [x] H6 `internal/netsafe`：装配期端点校验 + `RedirectPolicy` 逐跳复检 + 禁止 TLS 降级；System One 与 HTTP 桥接同时接入。
+- [x] H7 `internal/safepath`：`okf` 全部读写删与 `vcs` 提交路径统一校验，符号链接逃逸（文件或父目录）拒绝；原子写改 `CreateTemp` + `0o600` + `fsync` + `rename`。
+- [x] H8 计算面：危险函数黑名单扩充（文件/网络/会话/大对象），块注释内占位符不绑定，整轮共用超时 context，审计失败不回显。
+- [x] H9 CLI 桥接：裸可执行程序名白名单、UTF-8 参数放行、stderr 不进错误；`engines.yaml` 改严格解析。
+- [x] H10 服务超时与优雅退出（读头 5s / 读 15s / 写 30s / 空闲 60s / 头 1 MiB）；compose 端口改 `127.0.0.1` 回环，容器内仍 `0.0.0.0`。
+- [x] H11 CI/release 最小 `permissions`、`persist-credentials: false`、`image` job 使用 `ARIACOMPUTE_TOKEN`（PAT，仅 `write:packages`）、`go mod verify`、dependabot。
+- [x] M1 每客户端令牌桶限流（默认 20 rps / burst 40，桶表上限 10000）+ 认证失败日志按秒节流。
+- [x] M2 `AGENTMEM_ALLOWED_ORIGINS` 精确匹配（同源直接放行，不返回 CORS 头）。
+- [x] M3 安全响应头：`nosniff`、`DENY`、`no-referrer`、`no-store`、API 侧 CSP。
+- [x] M4 严格 JSON（`Content-Type` 校验、4 MiB、`DisallowUnknownFields`、拒绝尾随数据）与参数边界（`top_k` ≤ 100、`limit` 1–1000 默认 20）。
+- [x] M5 OKF 解析资源上限（文档 8 MiB、frontmatter 1 MiB、YAML 节点 10000/深度 32/别名 32、条目 100000、资源 1 MiB），不加 `KnownFields(true)`。
+- [x] M6 规范化缓存键长度上限；`audit:read` 覆盖 `/v1/decisions` 与 `/v1/computations`。
+- [x] M7 Web：`api-content.js` 同步 Bearer/scopes/限流行与 401/403/429 状态，13 语言补真实译文，移除请求样例的 `subject`，新增 CSP meta（inline 主题脚本 SHA-256 白名单）与 `web/tests/security.test.mjs`。
+- [x] L1 `docs/security.md`、`SECURITY.md`、`AGENTS.md`、`README*`、`requirements.md`、`releasenotes*` 同步留痕。
 
 ## 验收
 
@@ -75,8 +103,9 @@ go build -o bin/agentmem ./cmd/agentmem
 go run ./cmd/agentmem validate --env .env.example
 go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
 make check-boundaries
+make check-trust-store
 cd web && npm test
 cd web && npm run build
 ```
 
-验收条件：以上命令全部成功；不启动 Postgres、不访问网络、不需要密钥；四个插件在离线 mock 下可装配、可写、可查、可启停；`postgres` 计算链路离线可执行且 attestation 失败拒绝展示；13 语言文案完整、端点表与 `http.go` 一致、单色守卫通过，web 仍可用任意静态服务器直接托管。
+验收条件：以上命令全部成功；不启动 Postgres、不访问网络、不需要密钥；四个插件在离线 mock 下可装配、可写、可查、可启停；`postgres` 计算链路离线可执行且 attestation 失败拒绝展示；鉴权矩阵、越权、伪造主体、错误脱敏与限流均有离线用例；系统/镜像 CA bundle 不含 eMudhra 弱证书指纹；13 语言文案完整、端点表与 `http.go` 一致（含 401/403/429）、CSP 哈希自洽、单色守卫通过，web 仍可用任意静态服务器直接托管。

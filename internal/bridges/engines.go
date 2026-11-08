@@ -1,8 +1,10 @@
 package bridges
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -64,8 +66,16 @@ func EngineSpecs() ([]EngineSpec, error) {
 			return nil, err
 		}
 		var raw engineSpecYAML
-		if err := yaml.Unmarshal(data, &raw); err != nil {
+		// Embedded declarations are code, not user data: unknown keys and
+		// multiple documents must fail closed rather than be silently ignored.
+		dec := yaml.NewDecoder(bytes.NewReader(data))
+		dec.KnownFields(true)
+		if err := dec.Decode(&raw); err != nil {
 			return nil, fmt.Errorf("bridges: parse %s: %w", name, err)
+		}
+		var trailing any
+		if err := dec.Decode(&trailing); err != io.EOF {
+			return nil, fmt.Errorf("bridges: %s must contain exactly one YAML document", name)
 		}
 		if raw.Name == "" || raw.Kind == "" {
 			return nil, fmt.Errorf("bridges: %s missing name/kind", name)

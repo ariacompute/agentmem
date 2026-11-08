@@ -101,12 +101,19 @@ gitignored `.env`, never in versioned files or logs.
 | `AGENTMEM_SYSTEMONE_MAX_CHOICES` | Max candidate count |
 | `AGENTMEM_SYSTEMONE_MIN_CONFIDENCE` | Low-score protection threshold |
 | `AGENTMEM_SYSTEMONE_FALLBACK` | Eligible fallback target |
-| `AGENTMEM_SYSTEMONE_FAIL_CLOSED` | Fail closed on timeout/error |
 | `AGENTMEM_COMPUTE_TIMEOUT_MS` | Computation timeout (`0` = default 5000 ms) |
 | `AGENTMEM_COMPUTE_MAX_ROWS` | Max result rows (`0` = default 100) |
 | `AGENTMEM_ADAPTERS` | JSON array of adapter entries |
 | `AGENTMEM_ACL_DEFAULT_VISIBILITY` | `private` / `team` / `public` |
-| `AGENTMEM_ACL_DEFAULT_OWNER` | Default owner |
+| `AGENTMEM_ACL_DEFAULT_OWNER` | Default owner (also the local subject when auth is off) |
+| `AGENTMEM_AUTH_ENABLED` | Require a bearer token on every route except `/healthz` |
+| `AGENTMEM_AUTH_TOKENS` | JSON array of `{token_sha256, subject, scopes}`; digests only |
+| `AGENTMEM_ALLOWED_ORIGINS` | Comma-separated cross-origin consoles allowed to write |
+| `AGENTMEM_EGRESS_ALLOWED_HOSTS` | Outbound host allowlist (`api.example.com`, `*.example.com`) |
+| `AGENTMEM_RATE_RPS` / `AGENTMEM_RATE_BURST` | Per-client token bucket (default 20 / 40) |
+
+Fail-closed routing is unconditional: there is no switch to disable the fallback
+to the canonical body on timeout or error.
 
 `AGENTMEM_COMPUTE_TIMEOUT_MS` / `AGENTMEM_COMPUTE_MAX_ROWS` bound execution;
 `0` selects the built-in defaults (5000 ms / 100 rows). `AGENTMEM_ADAPTERS`
@@ -136,9 +143,9 @@ with an advisory lock. `AutoMigrate` is never the schema source.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/healthz` | Health of all adapters, plugins and stores |
-| POST | `/v1/knowledge` | Routed write (`concept_id`, `subject`, `document`) |
-| GET | `/v1/knowledge?id=&subject=` | Canonical read with ACL check |
+| GET | `/healthz` | Health of all adapters, plugins and stores (public) |
+| POST | `/v1/knowledge` | Routed write (`concept_id`, `document`) |
+| GET | `/v1/knowledge?id=` | Canonical read with ACL check |
 | POST | `/v1/query` | Routed read with dual-path merge |
 | POST | `/v1/migrate` | Incremental reconciliation (dry-run/resume) |
 | GET | `/v1/decisions` | Routing audit trail |
@@ -146,10 +153,12 @@ with an advisory lock. `AutoMigrate` is never the schema source.
 | POST | `/v1/computations` | Execute and attest a sanctioned computation |
 | GET | `/v1/computations?concept_id=&limit=` | Attested Computation verdict audit |
 
-`POST /v1/computations` returns `200` for a verified value, `422` for an
-attestation failure or an unsupported runtime, `400` for an invalid contract or
-parameters, and `502` for an executor failure. Failed responses never carry
-`display_value`.
+Every route except `/healthz` needs the permission listed above; `401` / `403` /
+`429` match the error table in the console. `POST /v1/computations` returns `200`
+for a verified value, `422` for an attestation failure or an unsupported
+runtime, `400` for an invalid contract or parameters, and `502` for an executor
+failure. Failed responses never carry `display_value`, and error bodies never
+echo SQL, DSNs or driver text.
 
 ## Smart routing
 
@@ -234,9 +243,12 @@ combinations, request/response samples, conventions and error codes).
   only prose is translated. Endpoint data mirrors `internal/handlers/http.go`.
 
 Serve `web/` directly with any static file server, or bundle it with Vite
-(`cd web && npm install && npm run build`). No runtime framework is required,
+(`cd web && npm ci && npm run build`). No runtime framework is required,
 and the Go binary does not depend on Node. Frontend checks run offline with
 `cd web && npm test` (Node's built-in test runner, no extra dependencies).
+The page ships its own CSP meta (`default-src 'none'`, same-origin assets, the
+inline theme bootstrap allowed by SHA-256) and `web/tests/security.test.mjs`
+fails if the digest and the script ever drift.
 
 ## Development commands
 
@@ -248,14 +260,67 @@ and the Go binary does not depend on Node. Frontend checks run offline with
 | `make validate` | strict validation of `.env.example` |
 | `make eval` | ranking metrics from `testdata/eval.jsonl` |
 | `make check-boundaries` | enforce declarative SDK boundary + plugin tests |
+| `make check-trust-store` | offline eMudhra/emSign CA fingerprint scan |
 
 `go test ./...` passes without Postgres, network or credentials. Set
 `AGENTMEM_TEST_PG_DSN` to enable the optional real-PostgreSQL integration
 test.
 
+## Authentication and access control
+
+With `AGENTMEM_AUTH_ENABLED=true`, every route except `GET /healthz` requires
+`Authorization: Bearer <token>`.
+
+Configuration stores only the SHA-256 digest of each token:
+
+```bash
+printf %s 'your-token' | sha256sum
+```
+
+```dotenv
+AGENTMEM_AUTH_ENABLED=true
+AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 hex>","subject":"console","scopes":["knowledge:read","knowledge:write"]}]'
+```
+
+| Route | Scope |
+|---|---|
+| `GET /healthz` | public |
+| `GET /v1/knowledge`, `POST /v1/query`, `GET /v1/concepts` | `knowledge:read` |
+| `POST /v1/knowledge` | `knowledge:write` |
+| `POST /v1/migrate` | `migrate:run` |
+| `GET /v1/decisions`, `GET /v1/computations` | `audit:read` |
+| `POST /v1/computations` | `compute:run` |
+
+Missing or unknown credentials answer `401` with `WWW-Authenticate: Bearer`; a
+valid token without the required scope answers `403`; exceeding
+`AGENTMEM_RATE_RPS` answers `429`. Private documents are readable only by their
+owner (an explicit `acl` grant wins), anonymous writes are refused, and a read
+denied by ACL is indistinguishable from a missing document (`404`) so existence
+cannot be probed. Tokens are static: rotating one means editing `.env` and
+restarting. See [docs/security.md](docs/security.md) for the threat model.
+
+`AGENTMEM_MODE=production` refuses to start without authentication, without at
+least one token, with a DSN containing `sslmode=disable`, or with an outbound
+endpoint but no `AGENTMEM_EGRESS_ALLOWED_HOSTS`.
+
+## Trust store security
+
+The 2026-10 eMudhra (emSign) intermediate CA key compromise is covered in two
+layers: Go 1.27.3 ships the `crypto/x509` blocklist, and the runtime image
+refreshes its Alpine `ca-certificates` bundle at build time. `make
+check-trust-store` scans a system or image CA bundle offline for the known
+root/intermediate SHA-256 fingerprints (exit `0` clean, `1` hit, `2` unreadable):
+
+```bash
+make check-trust-store
+docker run --rm --entrypoint cat <image> /etc/ssl/certs/ca-certificates.crt > /tmp/image-ca.crt
+scripts/check-emudhra.sh /tmp/image-ca.crt
+```
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Security: identity, ACL, egress and trust stores](docs/security.md)
 - [Storage: OKF+Git and PostgreSQL/GORM](docs/storage.md)
 - [OKF conformance](docs/okf-conformance.md)
 - [Adapter plugins](docs/adapters.md)

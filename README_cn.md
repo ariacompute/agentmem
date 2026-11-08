@@ -75,12 +75,18 @@ go run ./cmd/agentmem decisions --limit 10
 | `AGENTMEM_SYSTEMONE_MAX_CHOICES` | 候选数量上限 |
 | `AGENTMEM_SYSTEMONE_MIN_CONFIDENCE` | 低分保护阈值 |
 | `AGENTMEM_SYSTEMONE_FALLBACK` | 可用回落目标 |
-| `AGENTMEM_SYSTEMONE_FAIL_CLOSED` | 超时/错误时失败关闭 |
 | `AGENTMEM_COMPUTE_TIMEOUT_MS` | 计算超时（`0` = 默认 5000 ms） |
 | `AGENTMEM_COMPUTE_MAX_ROWS` | 最大结果行数（`0` = 默认 100） |
 | `AGENTMEM_ADAPTERS` | 适配器条目的 JSON 数组 |
 | `AGENTMEM_ACL_DEFAULT_VISIBILITY` | `private` / `team` / `public` |
-| `AGENTMEM_ACL_DEFAULT_OWNER` | 默认 owner |
+| `AGENTMEM_ACL_DEFAULT_OWNER` | 默认 owner（关闭鉴权时也是本地主体） |
+| `AGENTMEM_AUTH_ENABLED` | 除 `/healthz` 外所有路由要求 Bearer 令牌 |
+| `AGENTMEM_AUTH_TOKENS` | `{token_sha256, subject, scopes}` 的 JSON 数组，只存摘要 |
+| `AGENTMEM_ALLOWED_ORIGINS` | 允许写入的跨源控制台来源（逗号分隔） |
+| `AGENTMEM_EGRESS_ALLOWED_HOSTS` | 出向主机白名单（`api.example.com`、`*.example.com`） |
+| `AGENTMEM_RATE_RPS` / `AGENTMEM_RATE_BURST` | 每客户端令牌桶（默认 20 / 40） |
+
+失败关闭是无条件的：不存在关闭「超时/错误回落到主干」的开关。
 
 `AGENTMEM_COMPUTE_TIMEOUT_MS` / `AGENTMEM_COMPUTE_MAX_ROWS` 限定执行边界；`0` 使用内置默认值（5000 ms / 100 行）。`AGENTMEM_ADAPTERS` 接受 JSON 数组，例如 `[{"name":"okf","kind":"okf","enabled":true}]`；仅 `"enabled":true` 的条目会被装配。
 
@@ -100,9 +106,9 @@ go run ./cmd/agentmem validate --env .env
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/healthz` | 各适配器、插件与存储的健康状态 |
-| POST | `/v1/knowledge` | 路由写入（`concept_id`、`subject`、`document`） |
-| GET | `/v1/knowledge?id=&subject=` | 带 ACL 的权威读取 |
+| GET | `/healthz` | 各适配器、插件与存储的健康状态（公开） |
+| POST | `/v1/knowledge` | 路由写入（`concept_id`、`document`） |
+| GET | `/v1/knowledge?id=` | 带 ACL 的权威读取 |
 | POST | `/v1/query` | 路由查询与双路合并 |
 | POST | `/v1/migrate` | 增量对账（dry-run / 断点续跑） |
 | GET | `/v1/decisions` | 路由决策审计 |
@@ -110,7 +116,7 @@ go run ./cmd/agentmem validate --env .env
 | POST | `/v1/computations` | 执行并验证受批准计算 |
 | GET | `/v1/computations?concept_id=&limit=` | 计算 verdict 审计 |
 
-`POST /v1/computations` 验证通过返回 `200`；attestation 失败或 runtime 未实现返回 `422`；契约/参数非法返回 `400`；执行器故障返回 `502`。失败响应一律不携带 `display_value`。
+除 `/healthz` 外每条路由都需要上表中的对应权限；`401` / `403` / `429` 与控制台里的错误码表一致。`POST /v1/computations` 验证通过返回 `200`；attestation 失败或 runtime 未实现返回 `422`；契约/参数非法返回 `400`；执行器故障返回 `502`。失败响应一律不携带 `display_value`，错误体也不会回显 SQL、DSN 或驱动信息。
 
 ## 智能路由
 
@@ -158,7 +164,7 @@ go run ./cmd/agentmem computations --limit 10
 - `?view=docs` 可直接打开 API 文档视图。
 - 方法、路径、字段名与 JSON 样例在所有语言下逐字呈现，仅说明文字翻译；端点数据与 `internal/handlers/http.go` 保持一致。
 
-可直接用任意静态服务器托管 `web/`；有 Node 时也可用 Vite 打包（`cd web && npm install && npm run build`）。Go 二进制不依赖 Node。前端校验使用 Node 内置测试运行器，离线执行且无新增依赖：`cd web && npm test`。
+可直接用任意静态服务器托管 `web/`；有 Node 时也可用 Vite 打包（`cd web && npm ci && npm run build`）。Go 二进制不依赖 Node。前端校验使用 Node 内置测试运行器，离线执行且无新增依赖：`cd web && npm test`。页面自带 `Content-Security-Policy` meta（`default-src 'none'`、仅同源资源、内联首屏主题脚本以 SHA-256 白名单放行），`web/tests/security.test.mjs` 会在摘要与脚本文本不一致时失败。
 
 ## 开发命令
 
@@ -170,12 +176,52 @@ go run ./cmd/agentmem computations --limit 10
 | `make validate` | 严格校验 `.env.example` |
 | `make eval` | 基于 `testdata/eval.jsonl` 的排序指标 |
 | `make check-boundaries` | 检查声明式 SDK 边界并跑插件测试 |
+| `make check-trust-store` | 离线扫描 eMudhra/emSign CA 指纹 |
 
 `go test ./...` 无需 Postgres、网络或凭据即可通过。设置 `AGENTMEM_TEST_PG_DSN` 可启用可选的真实 PostgreSQL 集成测试。
+
+## 身份认证与访问控制
+
+开启 `AGENTMEM_AUTH_ENABLED=true` 后，除 `GET /healthz` 之外的每条路由都需要 `Authorization: Bearer <token>`。
+
+配置里只存令牌的 SHA-256 摘要：
+
+```bash
+printf %s 'your-token' | sha256sum
+```
+
+```dotenv
+AGENTMEM_AUTH_ENABLED=true
+AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 位十六进制>","subject":"console","scopes":["knowledge:read","knowledge:write"]}]'
+```
+
+| 路由 | 权限 |
+|---|---|
+| `GET /healthz` | 公开 |
+| `GET /v1/knowledge`、`POST /v1/query`、`GET /v1/concepts` | `knowledge:read` |
+| `POST /v1/knowledge` | `knowledge:write` |
+| `POST /v1/migrate` | `migrate:run` |
+| `GET /v1/decisions`、`GET /v1/computations` | `audit:read` |
+| `POST /v1/computations` | `compute:run` |
+
+令牌缺失或未知返回 `401`（带 `WWW-Authenticate: Bearer`）；令牌缺少权限返回 `403`；超过 `AGENTMEM_RATE_RPS` 返回 `429`。私有文档仅 owner 可读（`acl` 表显式授权优先），匿名写入一律拒绝，因 ACL 被拒的读取与文档不存在同样返回 `404`，无法探测私有文档是否存在。令牌是静态的：轮换需修改 `.env` 并重启，威胁模型见 [docs/security.md](docs/security.md)。
+
+`AGENTMEM_MODE=production` 时，缺少鉴权、没有令牌、DSN 含 `sslmode=disable`，或存在出向端点却没有 `AGENTMEM_EGRESS_ALLOWED_HOSTS`，都会拒绝启动。
+
+## 信任库安全
+
+2026-10 的 eMudhra（emSign）中间 CA 私钥泄露事件由两层兜底：Go 1.27.3 内置 `crypto/x509` 屏蔽列表，运行时镜像在构建时刷新 Alpine 的 `ca-certificates`。`make check-trust-store` 离线扫描系统或镜像 CA bundle 中已知根/中间证书的 SHA-256 指纹（退出码 `0` 干净、`1` 命中、`2` 无法读取）：
+
+```bash
+make check-trust-store
+docker run --rm --entrypoint cat <image> /etc/ssl/certs/ca-certificates.crt > /tmp/image-ca.crt
+scripts/check-emudhra.sh /tmp/image-ca.crt
+```
 
 ## 文档
 
 - [架构](docs/architecture.md)
+- [安全：身份、ACL、出向管控与信任库](docs/security.md)
 - [存储：OKF+Git 与 PostgreSQL/GORM](docs/storage.md)
 - [OKF 兼容性](docs/okf-conformance.md)
 - [适配器插件](docs/adapters.md)

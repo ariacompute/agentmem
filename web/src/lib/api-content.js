@@ -33,13 +33,18 @@ export const serverBaseLines = [
 export const headerLines = [
   'Content-Type: application/json; charset=utf-8',
   'request body limit: 4 MiB (4194304 bytes)',
-  'authorization: none   ·   CORS headers: none   ·   pagination: none',
+  'authorization: Bearer <access-token>   ·   CORS headers: none   ·   pagination: none',
+  'scopes: knowledge:read · knowledge:write · migrate:run · audit:read · compute:run',
+  'rate limit: 20 req/s per client, burst 40   ·   Origin allow-list enforced',
 ]
 
 export const errorLines = [
+  '{"error": "authentication required"}',
+  '{"error": "permission denied"}',
+  '{"error": "rate limit exceeded"}',
   '{"error": "query is empty"}',
   '{"error": "method not allowed"}',
-  '{"error": "unsupported runtime", "envelope": {"concept_id": "computations/example", "display_allowed": false, "verified": false}}',
+  '{"error": "computation rejected", "envelope": {"concept_id": "computations/example", "display_allowed": false, "verified": false}}',
 ]
 
 /** Prose blocks on the overview section. Samples stay untranslated. */
@@ -67,7 +72,7 @@ export const endpoints = [
     method: 'GET',
     path: '/healthz',
     descKey: 'epHealthz',
-    statuses: ['200'],
+    statuses: ['200', '429'],
     request: 'GET /healthz',
     response: `{
   "status": "ok",
@@ -81,10 +86,9 @@ export const endpoints = [
     method: 'POST',
     path: '/v1/knowledge',
     descKey: 'epPut',
-    statuses: ['200', '400', '405'],
+    statuses: ['200', '400', '401', '403', '405', '429'],
     request: `{
   "concept_id": "concepts/example",
-  "subject": "alice",
   "document": {
     "type": "Concept",
     "title": "Example",
@@ -115,8 +119,8 @@ export const endpoints = [
     method: 'GET',
     path: '/v1/knowledge',
     descKey: 'epGet',
-    statuses: ['200', '400', '404', '405'],
-    request: 'GET /v1/knowledge?id=concepts/example&subject=alice',
+    statuses: ['200', '400', '401', '403', '404', '405', '429'],
+    request: 'GET /v1/knowledge?id=concepts/example',
     response: `{
   "concept_id": "concepts/example",
   "type": "Concept",
@@ -134,10 +138,9 @@ export const endpoints = [
     method: 'POST',
     path: '/v1/query',
     descKey: 'epQuery',
-    statuses: ['200', '400', '405', '500'],
+    statuses: ['200', '400', '401', '403', '405', '429', '500'],
     request: `{
   "query": "definition of an example",
-  "subject": "alice",
   "top_k": 5
 }`,
     response: `{
@@ -166,7 +169,7 @@ export const endpoints = [
     method: 'POST',
     path: '/v1/migrate',
     descKey: 'epMigrate',
-    statuses: ['200', '400', '405'],
+    statuses: ['200', '400', '401', '403', '405', '429'],
     request: `{
   "job": "nightly",
   "direction": "canonical_to_rag",
@@ -194,7 +197,7 @@ export const endpoints = [
     method: 'GET',
     path: '/v1/decisions',
     descKey: 'epDecisions',
-    statuses: ['200', '405', '500'],
+    statuses: ['200', '400', '401', '403', '405', '429', '500'],
     request: 'GET /v1/decisions?concept_id=concepts/example&limit=20',
     response: `[
   {
@@ -214,7 +217,7 @@ export const endpoints = [
     method: 'GET',
     path: '/v1/concepts',
     descKey: 'epConcepts',
-    statuses: ['200', '405', '500'],
+    statuses: ['200', '401', '403', '405', '429', '500'],
     request: 'GET /v1/concepts',
     response: `["concepts/example"]`,
   },
@@ -223,10 +226,9 @@ export const endpoints = [
     method: 'POST',
     path: '/v1/computations',
     descKey: 'epComputePost',
-    statuses: ['200', '400', '405', '422', '502'],
+    statuses: ['200', '400', '401', '403', '405', '422', '429', '502'],
     request: `{
   "concept_id": "computations/example",
-  "subject": "alice",
   "parameters": { "year": 2026 }
 }`,
     response: `{
@@ -255,7 +257,7 @@ export const endpoints = [
     method: 'GET',
     path: '/v1/computations',
     descKey: 'epComputeGet',
-    statuses: ['200', '405', '500'],
+    statuses: ['200', '400', '401', '403', '405', '429', '500'],
     request: 'GET /v1/computations?concept_id=computations/example&limit=20',
     response: `[
   {
@@ -282,10 +284,13 @@ export const endpoints = [
 /** Status rows for the errors section. `codes` is a wire-level hint. */
 export const statusGroups = [
   { status: '200', descKey: 'status200', codes: 'ok' },
-  { status: '400', descKey: 'status400', codes: 'invalid JSON / required / ACL' },
+  { status: '400', descKey: 'status400', codes: 'invalid JSON / required / boundary' },
+  { status: '401', descKey: 'status401', codes: 'missing / unknown credentials' },
+  { status: '403', descKey: 'status403', codes: 'missing scope / origin' },
   { status: '404', descKey: 'status404', codes: 'not found / refused' },
   { status: '405', descKey: 'status405', codes: 'method not allowed' },
   { status: '422', descKey: 'status422', codes: 'unsupported / attestation' },
+  { status: '429', descKey: 'status429', codes: 'client rate limit' },
   { status: '500', descKey: 'status500', codes: 'store / router' },
   { status: '502', descKey: 'status502', codes: 'executor' },
 ]

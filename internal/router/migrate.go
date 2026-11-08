@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"agentmem/internal/adapter"
 	"agentmem/internal/meta"
@@ -63,8 +64,17 @@ func (m *Migrator) Run(ctx context.Context, opt MigrationOptions) (MigrationRepo
 	if opt.Job == "" {
 		opt.Job = opt.Direction + ":" + opt.Target
 	}
+	// Cursor ids are persisted in PostgreSQL; bound their length and reject
+	// control characters so a crafted job name cannot become an injection or
+	// unbounded-allocation vector.
+	if len(opt.Job) > 128 || strings.ContainsAny(opt.Job, "\x00\r\n") {
+		return MigrationReport{}, fmt.Errorf("router: invalid migration job name")
+	}
 	if opt.Limit <= 0 {
 		opt.Limit = 100
+	}
+	if opt.Limit > 1000 {
+		opt.Limit = 1000
 	}
 	a, ok := m.Registry.Get(opt.Target)
 	if !ok || opt.Target == CanonicalTarget {
@@ -120,7 +130,7 @@ func (m *Migrator) toRAG(ctx context.Context, opt MigrationOptions, a adapter.Ad
 		hash, err := m.hashOf(id)
 		if err != nil {
 			rep.Failed++
-			rep.Errors = append(rep.Errors, id+": "+err.Error())
+			rep.Errors = append(rep.Errors, id+": "+redactError("read failed", err))
 			continue
 		}
 		projections, err := m.Store.Meta.ListProjections(ctx, meta.ProjectionQuery{ConceptID: id, Adapter: opt.Target})
@@ -141,14 +151,14 @@ func (m *Migrator) toRAG(ctx context.Context, opt MigrationOptions, a adapter.Ad
 				doc, err := m.Store.Bundle.Get(id)
 				if err != nil {
 					rep.Failed++
-					rep.Errors = append(rep.Errors, id+": "+err.Error())
+					rep.Errors = append(rep.Errors, id+": "+redactError("read failed", err))
 				} else if err := a.Put(ctx, id, doc); err != nil {
 					rep.Failed++
-					rep.Errors = append(rep.Errors, id+": "+err.Error())
+					rep.Errors = append(rep.Errors, id+": "+redactError("write failed", err))
 					_ = store.RecordProjection(ctx, m.Store.Meta, id, opt.Target, hash, fp, store.ProjectionFailed)
 				} else if err := store.RecordProjection(ctx, m.Store.Meta, id, opt.Target, hash, fp, store.ProjectionSynced); err != nil {
 					rep.Failed++
-					rep.Errors = append(rep.Errors, id+": "+err.Error())
+					rep.Errors = append(rep.Errors, id+": "+redactError("record failed", err))
 				} else {
 					rep.Synced++
 				}
@@ -183,7 +193,7 @@ func (m *Migrator) toCanonical(ctx context.Context, opt MigrationOptions, a adap
 		orphan := err != nil && errors.Is(err, os.ErrNotExist)
 		if err != nil && !orphan {
 			rep.Failed++
-			rep.Errors = append(rep.Errors, p.ConceptID+": "+err.Error())
+			rep.Errors = append(rep.Errors, p.ConceptID+": "+redactError("read failed", err))
 			continue
 		}
 		if !orphan && p.ContentHash == hash && p.Status == store.ProjectionSynced {
@@ -194,7 +204,7 @@ func (m *Migrator) toCanonical(ctx context.Context, opt MigrationOptions, a adap
 				if orphan {
 					if err := a.Delete(ctx, p.ConceptID); err != nil && !errors.Is(err, adapter.ErrUnsupported) {
 						rep.Failed++
-						rep.Errors = append(rep.Errors, p.ConceptID+": "+err.Error())
+						rep.Errors = append(rep.Errors, p.ConceptID+": "+redactError("delete failed", err))
 					} else {
 						rep.Invalidated++
 					}

@@ -134,6 +134,90 @@ func TestValidateVisibility(t *testing.T) {
 	}
 }
 
+func TestPutAsBindsOwnerToTrustedSubject(t *testing.T) {
+	s, _ := newStore(t, "private")
+	ctx := context.Background()
+	d := doc("Owned.")
+	// The configured default owner is "alice"; a trusted write by "carol"
+	// must bind the owner to carol, not to the static default.
+	if _, err := s.PutAs(ctx, "carol", "owned/c", d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Owner() != "carol" || d.Visibility() != "private" {
+		t.Fatalf("ACL defaults = owner %q visibility %q", d.Owner(), d.Visibility())
+	}
+	if _, err := s.Get(ctx, "bob", "owned/c"); err == nil {
+		t.Fatal("private body readable by a non-owner")
+	}
+	if _, err := s.Get(ctx, "carol", "owned/c"); err != nil {
+		t.Fatalf("owner read denied: %v", err)
+	}
+}
+
+func TestPutAsRejectsAnonymousAndForeignOwner(t *testing.T) {
+	s, _ := newStore(t, "public")
+	ctx := context.Background()
+	if _, err := s.PutAs(ctx, "", "anon/c", doc("Body.")); err == nil {
+		t.Fatal("anonymous write must be rejected")
+	}
+	foreign := doc("x")
+	foreign.SetOwner("bob")
+	if _, err := s.PutAs(ctx, "alice", "foreign/c", foreign); err == nil {
+		t.Fatal("a writer must not mint a document owned by someone else")
+	}
+}
+
+func TestPutAsRejectsOverwritingAnotherOwnersBody(t *testing.T) {
+	s, _ := newStore(t, "private")
+	ctx := context.Background()
+	if _, err := s.PutAs(ctx, "alice", "private/c", doc("Original.")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PutAs(ctx, "bob", "private/c", doc("Tampered.")); err == nil {
+		t.Fatal("bob must not overwrite alice's private body")
+	}
+	got, err := s.Get(ctx, "alice", "private/c")
+	if err != nil || !strings.Contains(got.Description, "Original") {
+		t.Fatalf("body was tampered with: %+v (%v)", got, err)
+	}
+	if _, err := s.PutAs(ctx, "alice", "private/c", doc("Updated.")); err != nil {
+		t.Fatalf("owner must be able to update: %v", err)
+	}
+}
+
+func TestDeleteAsEnforcesOwnership(t *testing.T) {
+	s, _ := newStore(t, "private")
+	ctx := context.Background()
+	if _, err := s.PutAs(ctx, "alice", "private/c", doc("Body.")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteAs(ctx, "", "private/c"); err == nil {
+		t.Fatal("anonymous delete must be rejected")
+	}
+	if err := s.DeleteAs(ctx, "bob", "private/c"); err == nil {
+		t.Fatal("non-owner delete must be rejected")
+	}
+	if err := s.DeleteAs(ctx, "alice", "private/c"); err != nil {
+		t.Fatalf("owner delete denied: %v", err)
+	}
+}
+
+func TestTrustedACLRejectsInvalidVisibility(t *testing.T) {
+	d := doc("x")
+	d.SetVisibility("everyone")
+	if err := TrustedACL(d, ACLDefaults{}, "alice"); err == nil {
+		t.Fatal("invalid visibility must fail closed")
+	}
+	owned := doc("x")
+	owned.SetOwner("alice")
+	if err := AuthorizeUpdate(owned, "bob"); err == nil {
+		t.Fatal("foreign update must fail closed")
+	}
+	if err := AuthorizeUpdate(owned, "alice"); err != nil {
+		t.Fatalf("owner update denied: %v", err)
+	}
+}
+
 func TestApplyACLDefaults(t *testing.T) {
 	d := doc("x")
 	if err := ApplyACLDefaults(d, ACLDefaults{Visibility: "team", Owner: "bob"}); err != nil {

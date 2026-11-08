@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"agentmem/internal/safepath"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -66,18 +66,26 @@ func (g *GitRepository) Commit(ctx context.Context, message string, files map[st
 	}
 	sortStrings(names)
 	for _, name := range names {
-		rel := filepath.FromSlash(name)
-		if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-			return "", fmt.Errorf("vcs: path escapes repository: %q", name)
+		// The shared path boundary cleans the name, rejects NUL/absolute/
+		// traversal/Windows-reserved segments and verifies that neither the
+		// target nor any existing parent symlink escapes the repository.
+		p, err := safepath.Resolve(g.root, name)
+		if err != nil {
+			return "", fmt.Errorf("vcs: path escapes repository %q: %w", name, err)
 		}
-		p := filepath.Join(g.root, rel)
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(p, files[name], 0o644); err != nil {
+		if err := os.WriteFile(p, files[name], 0o600); err != nil {
 			return "", err
 		}
-		if _, err := w.Add(name); err != nil {
+		// Stage exactly the resolved path instead of the caller's spelling, so
+		// go-git cannot re-join a name that resolved elsewhere.
+		staged, err := filepath.Rel(g.root, p)
+		if err != nil {
+			return "", fmt.Errorf("vcs: stage %s: %w", name, err)
+		}
+		if _, err := w.Add(filepath.ToSlash(staged)); err != nil {
 			return "", fmt.Errorf("vcs: stage %s: %w", name, err)
 		}
 	}

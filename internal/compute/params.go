@@ -185,6 +185,17 @@ func bindStatement(sql string, params []okf.Parameter) (string, error) {
 				out.WriteByte(sql[i])
 				i++
 			}
+		case c == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			// A ":name" inside a block comment is documentation, not a hole.
+			start := i
+			i += 2
+			for i+1 < len(sql) && !(sql[i] == '*' && sql[i+1] == '/') {
+				i++
+			}
+			if i+1 < len(sql) {
+				i += 2
+			}
+			out.WriteString(sql[start:i])
 		case c == ':' && i+1 < len(sql) && isIdentStart(sql[i+1]):
 			start := i + 1
 			i++

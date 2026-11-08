@@ -31,9 +31,9 @@ OKF 解析仍然宽松：未知键、未知 runtime、缺失 executor/attester �
 
 - 参数类型：`integer` / `number` / `string` / `boolean` / `date`。
 - Agent 只能提供声明的参数名。未声明名称返回 `ErrInvalidParams`；提供 `computation` / `sql` / `statement` / `runtime` / `attester` / `executor` / `contract` / `body` 返回 `ErrComputationRewrite`。
-- `:name` 占位符在引号与注释之外替换为 `$N`，`Args` 按参数声明顺序对齐；**从不拼接值到 SQL 文本**。
+- `:name` 占位符在引号之外、且**不在块注释内**替换为 `$N`，`Args` 按参数声明顺序对齐；**从不拼接值到 SQL 文本**。
 - `params_digest` 是排序后参数值的 SHA-256 摘要，用于 receipt 与审计关联，不存明文值。
-- `SafeStatement` 拒绝多语句、非 `SELECT`/`WITH` 开头、以及 INSERT/UPDATE/DELETE/DROP/INTO/SET 等变更或会话关键字。
+- `SafeStatement` 拒绝多语句、非 `SELECT`/`WITH` 开头，以及变更/会话关键字。除 `INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/GRANT/COPY/CALL/DO/VACUUM/SET/BEGIN/COMMIT/ROLLBACK/INTO/EXECUTE/MERGE` 外，还拒绝读写文件、访问网络与导出大对象的函数：`pg_read_file`、`pg_read_binary_file`、`pg_ls_dir`、`pg_stat_file`、`pg_sleep`、`pg_notify`、`pg_listen`、`pg_terminate_backend`、`pg_cancel_backend`、`dblink`、`dblink_exec`、`lo_import`、`lo_export`、`lo_unlink`、`set_config`、`query_to_xml`、`database_to_xml`。SELECT 外壳本身不足以让这些函数变安全。
 
 ## Runtime 矩阵
 
@@ -61,10 +61,10 @@ OKF 解析仍然宽松：未知键、未知 runtime、缺失 executor/attester �
 
 ## HTTP
 
-`POST /v1/computations`
+`POST /v1/computations`，需要 `compute:run` 权限；主体来自 `Authorization: Bearer`，请求体不再接受 `subject`。
 
 ```json
-{"concept_id":"computations/revenue-postgres","subject":"analyst:1","parameters":{"year":2026}}
+{"concept_id":"computations/revenue-postgres","parameters":{"year":2026}}
 ```
 
 成功 `200`：
@@ -81,9 +81,10 @@ OKF 解析仍然宽松：未知键、未知 runtime、缺失 executor/attester �
 ```
 
 - attestation 失败：`422` + 同一 envelope（`display_allowed=false`，无 `display_value`）。
-- 参数/契约错误：`400` + `{"error": ..., "envelope": ...}`；`Unsupported`：`422`；执行器故障：`502`。错误 envelope 同样不含可展示值。
+- 参数/契约错误：`400` + `{"error": "computation rejected", "envelope": ...}`；`Unsupported`：`422`；执行器故障：`502`。错误 envelope 同样不含可展示值，响应体也不会回显底层 SQL、DSN 或驱动信息。
+- 缺少或未知令牌 `401`，令牌缺少 `compute:run` 权限 `403`，客户端超出限流 `429`。
 
-`GET /v1/computations?concept_id=&limit=` 返回 `computation_runs` 审计（最新在前）。
+`GET /v1/computations?concept_id=&limit=` 返回 `computation_runs` 审计（最新在前），需要 `audit:read` 权限；`limit` 缺省 20，允许 1–1000。
 
 ## CLI
 
@@ -97,15 +98,17 @@ go run ./cmd/agentmem computations --id computations/revenue-postgres --limit 20
 
 ## 配置与审计
 
-```yaml
-compute:
-  timeout_ms: 5000   # 0 使用默认 5000
-  max_rows: 100      # 0 使用默认 100
+```dotenv
+# 0 使用内置默认 5000 ms / 100 行
+AGENTMEM_COMPUTE_TIMEOUT_MS=5000
+AGENTMEM_COMPUTE_MAX_ROWS=100
 ```
+
+整轮执行共用一个超时 context（契约加载、绑定与执行都在其中）；超时按失败处理，拒绝展示。
 
 `003_computations.sql` 建立 `computation_runs` 表（含 `(job_id, verdict)` 唯一键实现幂等），迁移由 `schema_migrations` + advisory lock 管理。审计记录只保存 `concept_id / subject / runtime / contract_hash / params_digest / job_id / verdict / 布尔判定 / reasons / error_class / created_at`：**不保存 SQL 文本、参数值、结果值或知识正文**。离线 fake 的快照 `data/meta.fake.json` 同步包含该审计列表，CLI 跨进程可读。
 
-日志只输出类别与摘要，不输出正文、凭据、PII 或 GORM SQL 参数；`postgres_exec.go` 在计算会话上将 GORM logger 设为 `Silent`。
+日志只输出类别与摘要，不输出正文、凭据、PII 或 GORM SQL 参数；`postgres_exec.go` 在计算会话上将 GORM logger 设为 `Silent`。审计写入失败不会把底层错误回显给客户端，只记录错误类型。
 
 ## 离线验收
 

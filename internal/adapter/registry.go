@@ -19,6 +19,8 @@ type Deps struct {
 	Vector   meta.VectorStore
 	Embedder Embedder
 	Meta     meta.MetaStore
+	// AllowedHosts is the closed outbound allowlist shared by HTTP bridges.
+	AllowedHosts []string
 }
 
 // Factory builds one adapter from configuration and injected dependencies.
@@ -113,6 +115,9 @@ func (r *Registry) Build(cfg *config.Config, deps Deps) error {
 		if !ok {
 			return fmt.Errorf("%w: adapter %q kind %q has no factory", ErrUnsupported, a.Name, a.Kind)
 		}
+		// Inject the global egress allowlist into each adapter without widening
+		// the .env surface (EgressHosts is a runtime-only field).
+		a.EgressHosts = deps.AllowedHosts
 		built, err := f(a, deps)
 		if err != nil {
 			return fmt.Errorf("adapter: build %q: %w", a.Name, err)

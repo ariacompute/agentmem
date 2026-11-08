@@ -4,7 +4,9 @@
 
 ```mermaid
 flowchart TB
-  CLI["CLI 与 HTTP API"] --> SVC["KnowledgeService 用例编排"]
+  CLI["CLI 与 HTTP API"] --> MW["handlers.security 鉴权 权限 限流 Origin"]
+  MW --> AUTH["auth 摘要映射与 Principal"]
+  AUTH --> SVC["KnowledgeService 用例编排"]
   SVC --> W["写入分流 WriteRouter"]
   SVC --> Q["查询路由 ReadRouter"]
   SVC --> M["迁移对账 Migrator"]
@@ -33,9 +35,23 @@ flowchart TB
   CMP --> PG
 ```
 
-包依赖单向：`okf` / `meta` / `config`（L0，零内部依赖）→ `vcs` / `adapter` / `bridges` → `plugins`（清单 + 引擎包）→ `router` / `eval` / `compute` → `service` → `handlers` / `cli` → `cmd/agentmem`。端口定义在消费方，实现注入。`gorm` 只在 `internal/meta` 内出现；`compute.SQLExecutor` 定义在 `meta`，其 GORM 实现留在 `internal/meta/postgres_exec.go`，避免下层反向 import。
+包依赖单向：`auth` / `safepath` / `netsafe` 与 `okf` / `meta` / `config`（L0，零内部依赖）→ `vcs` / `adapter` / `bridges` → `plugins`（清单 + 引擎包）→ `router` / `eval` / `compute` → `service` → `handlers` / `cli` → `cmd/agentmem`。端口定义在消费方，实现注入。`gorm` 只在 `internal/meta` 内出现；`compute.SQLExecutor` 定义在 `meta`，其 GORM 实现留在 `internal/meta/postgres_exec.go`，避免下层反向 import。
 
-`config` 包不引入第三方 dotenv 依赖：`.env` 由标准库解析。加载顺序为 `Default()` → `.env`（`--env` / `AGENTMEM_ENV_FILE` 指定路径）→ 进程环境变量 → `Validate()`。封闭的 `AGENTMEM_*` 键白名单让未知键、非法数值、非法 `AGENTMEM_ADAPTERS` JSON 全部 fail closed；`POSTGRES_*` 等非前缀键留给 Docker Compose。`.env` 不进镜像，Compose 用 `env_file` 与 `${...}` 插值读取同一文件。
+三个安全叶子包只依赖标准库，因此不产生向上的依赖：
+
+| 包 | 消费方 | 职责 |
+|---|---|---|
+| `internal/auth` | `handlers` / `cli` | 权限常量、`Principal`、令牌 SHA-256 摘要映射、context 注入与读取 |
+| `internal/safepath` | `okf` / `vcs` | 相对路径校验、`Clean` + `EvalSymlinks` + root 包含性判定 |
+| `internal/netsafe` | `bridges` / `router` | 出向端点 scheme/host 白名单校验与逐跳重定向复检 |
+
+`config` 包不引入第三方 dotenv 依赖：`.env` 由标准库解析。加载顺序为 `Default()` → `.env`（`--env` / `AGENTMEM_ENV_FILE` 指定路径）→ 进程环境变量 → `Validate()`。封闭的 `AGENTMEM_*` 键白名单（同时覆盖进程环境中出现的未知 `AGENTMEM_*` 键）让未知键、非法数值、非法 `AGENTMEM_ADAPTERS` JSON 全部 fail closed；`POSTGRES_*` 等非前缀键留给 Docker Compose。`.env` 不进镜像，Compose 用 `env_file` 与 `${...}` 插值读取同一文件。
+
+## 信任边界
+
+身份只在 Handler 边界建立一次。`handlers.security` 中间件依次做 panic 恢复、安全响应头、单进程限流与 Origin 校验，然后解析 `Authorization: Bearer`，由 `auth.Authenticator` 以 SHA-256 摘要 + `crypto/subtle` 常量时间比较得到 `Principal` 并注入 `context`。Handler 从 context 取主体、按权限矩阵判定后，才把**主体字符串**交给 `service` / `router` / `meta` / `store`；底层沿用既有的 `subject string` 签名，但已没有任何请求自报身份的入口（请求体与查询串里的 `subject` 一律忽略）。
+
+因此：仅经 Handler 的流量被视为可信；CLI 属于本地可信操作，`AGENTMEM_AUTH_ENABLED=false` 时使用 `AGENTMEM_ACL_DEFAULT_OWNER` 作为本地主体。对外错误只保留固定分类文案与稳定状态码，内部 `slog` 仅记录错误类型（`%T`），不记录正文、DSN、SQL 参数或外部进程 stderr。权限矩阵、令牌轮换与威胁模型见 [security.md](security.md)。
 
 ## 计算数据流
 

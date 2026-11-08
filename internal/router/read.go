@@ -88,6 +88,9 @@ func (r *ReadRouter) Query(ctx context.Context, subject, text string, topK int) 
 	if topK <= 0 {
 		topK = 5
 	}
+	if topK > 100 {
+		topK = 100
+	}
 	task := DecisionTask{
 		Kind: "read", Text: text,
 		Features: ExtractQueryFeatures(text, r.canonicalHits(text)),
@@ -131,7 +134,7 @@ func (r *ReadRouter) Query(ctx context.Context, subject, text string, topK int) 
 	byTarget := map[string][]adapter.Hit{}
 	for o := range ch {
 		if o.err != nil {
-			result.Errors[o.target] = o.err.Error()
+			result.Errors[o.target] = redactError("channel failed", o.err)
 			continue
 		}
 		byTarget[o.target] = o.hits

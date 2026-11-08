@@ -35,6 +35,45 @@ type PutResult struct {
 	Unchanged   bool   `json:"unchanged"`
 }
 
+// PutAs is the authenticated write path used by the HTTP handler. It binds the
+// ACL owner to the trusted subject and refuses to overwrite a body owned by a
+// different subject. Put remains available for local CLI operations, which are
+// trusted by virtue of running on the host.
+func (s *OKFStore) PutAs(ctx context.Context, subject, id string, d *okf.Document) (PutResult, error) {
+	if err := TrustedACL(d, s.ACL, subject); err != nil {
+		return PutResult{}, err
+	}
+	clean, err := okf.ValidateConceptID(id)
+	if err != nil {
+		return PutResult{}, err
+	}
+	if existing, err := s.Bundle.Get(clean); err == nil {
+		if err := AuthorizeUpdate(existing, subject); err != nil {
+			return PutResult{}, err
+		}
+	}
+	return s.Put(ctx, clean, d)
+}
+
+// DeleteAs applies the same ownership rule to canonical deletions.
+func (s *OKFStore) DeleteAs(ctx context.Context, subject, id string) error {
+	if strings.TrimSpace(subject) == "" {
+		return fmt.Errorf("store: anonymous delete rejected")
+	}
+	clean, err := okf.ValidateConceptID(id)
+	if err != nil {
+		return err
+	}
+	existing, err := s.Bundle.Get(clean)
+	if err != nil {
+		return err
+	}
+	if err := AuthorizeUpdate(existing, subject); err != nil {
+		return err
+	}
+	return s.Delete(ctx, clean)
+}
+
 // Put writes the body first, commits it to Git, then records metadata. A failed
 // metadata write never rolls back the body; migration reconciles the gap.
 func (s *OKFStore) Put(ctx context.Context, id string, d *okf.Document) (PutResult, error) {

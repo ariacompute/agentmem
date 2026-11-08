@@ -34,7 +34,17 @@ actor 约定：`agent/模型`（含 `/`）、`human:` 前缀、`process:` 前缀
 - 断链（未创建的概念链接合法，代表「尚未写的知识」）；
 - 缺失 `index.md`。
 
-`ParseDocument` 仅在 frontmatter 分隔符缺失或 YAML 语法非法时报错。`Bundle.Links` 返回链接目标但不校验存在性。
+`ParseDocument` 仅在 frontmatter 分隔符缺失或 YAML 语法非法时报错。`Bundle.Links` 返回链接目标但不校验存在性。**不加 `KnownFields(true)`**：加它会立刻违反上表「未知键不得拒绝」。
+
+宽松不等于无上限。解析层只叠加与语义无关的资源约束，超限报错属于「资源保护」而非「conformance 拒绝」：
+
+| 约束 | 口径 |
+|---|---|
+| 单文档 | `maxDocumentBytes` 8 MiB（正文 + frontmatter） |
+| frontmatter | `maxFrontmatterBytes` 1 MiB；YAML 节点数 10000、嵌套深度 32、别名 32（阻断「别名炸弹」） |
+| 目录遍历 | `maxBundleEntries` 100000 个条目 |
+| 资源文件 | `Bundle.ReadResource` 单个资源 `maxResourceBytes` 1 MiB |
+| 相对路径 | `internal/safepath` 校验：拒绝 NUL、反斜杠、冒号、控制字符、`..` 段、尾部空格/点、Windows 保留名、超过 `MaxRelLength` 512 字节，并做符号链接包含性检查 |
 
 ## 渐进式披露
 

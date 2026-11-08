@@ -75,6 +75,48 @@ func adaptersSetter(c *Config, v string) error {
 	return nil
 }
 
+// tokensSetter uses the same strict JSON discipline as adaptersSetter: unknown
+// fields and trailing data are hard errors, and an empty value means "no
+// tokens" so the documented .env.example placeholder stays loadable.
+func tokensSetter(c *Config, v string) error {
+	if strings.TrimSpace(v) == "" {
+		c.Auth.Tokens = nil
+		return nil
+	}
+	dec := json.NewDecoder(strings.NewReader(v))
+	dec.DisallowUnknownFields()
+	var list []AuthTokenSpec
+	if err := dec.Decode(&list); err != nil {
+		return fmt.Errorf("expected a JSON array of auth tokens: %w", err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return errors.New("unexpected trailing data after the tokens array")
+	}
+	c.Auth.Tokens = list
+	return nil
+}
+
+func listSetter(pick func(*Config) *[]string) envSetter {
+	return func(c *Config, v string) error {
+		if strings.TrimSpace(v) == "" {
+			*pick(c) = nil
+			return nil
+		}
+		parts := strings.Split(v, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				return errors.New("empty list entry")
+			}
+			out = append(out, p)
+		}
+		*pick(c) = out
+		return nil
+	}
+}
+
 // envSpecs is the closed whitelist of AGENTMEM_* keys. An unknown key in a
 // .env file is a hard error — the dotenv equivalent of KnownFields(true).
 var envSpecs = []struct {
@@ -100,12 +142,20 @@ var envSpecs = []struct {
 	{"AGENTMEM_SYSTEMONE_MAX_CHOICES", intSetter(func(c *Config) *int { return &c.Router.SystemOne.MaxChoices })},
 	{"AGENTMEM_SYSTEMONE_MIN_CONFIDENCE", floatSetter(func(c *Config) *float64 { return &c.Router.SystemOne.MinConfidence })},
 	{"AGENTMEM_SYSTEMONE_FALLBACK", strSetter(func(c *Config) *string { return &c.Router.SystemOne.Fallback })},
-	{"AGENTMEM_SYSTEMONE_FAIL_CLOSED", boolSetter(func(c *Config) *bool { return &c.Router.SystemOne.FailClosed })},
 	{"AGENTMEM_COMPUTE_TIMEOUT_MS", intSetter(func(c *Config) *int { return &c.Compute.TimeoutMS })},
 	{"AGENTMEM_COMPUTE_MAX_ROWS", intSetter(func(c *Config) *int { return &c.Compute.MaxRows })},
 	{AdaptersVar, adaptersSetter},
 	{"AGENTMEM_ACL_DEFAULT_VISIBILITY", strSetter(func(c *Config) *string { return &c.ACL.DefaultVisibility })},
 	{"AGENTMEM_ACL_DEFAULT_OWNER", strSetter(func(c *Config) *string { return &c.ACL.DefaultOwner })},
+	{"AGENTMEM_AUTH_ENABLED", boolSetter(func(c *Config) *bool { return &c.Auth.Enabled })},
+	{"AGENTMEM_AUTH_TOKENS", tokensSetter},
+	{"AGENTMEM_ALLOWED_ORIGINS", listSetter(func(c *Config) *[]string { return &c.Auth.AllowedOrigins })},
+	{"AGENTMEM_EGRESS_ALLOWED_HOSTS", listSetter(func(c *Config) *[]string { return &c.Egress.AllowedHosts })},
+	{"AGENTMEM_RATE_RPS", intSetter(func(c *Config) *int { return &c.RateLimit.RPS })},
+	{"AGENTMEM_RATE_BURST", intSetter(func(c *Config) *int { return &c.RateLimit.Burst })},
+	// Read directly by the optional Postgres integration test; declared so the
+	// closed whitelist also covers process-environment keys.
+	{"AGENTMEM_TEST_PG_DSN", func(*Config, string) error { return nil }},
 }
 
 var envSetterByKey = func() map[string]envSetter {
@@ -135,6 +185,11 @@ func Load(path string) (*Config, error) {
 	}
 	if path == "" {
 		path = EnvFileDefault
+	}
+	// The closed whitelist covers the process environment too: a typo in an
+	// injected AGENTMEM_* variable must not be silently ignored.
+	if err := rejectUnknownProcessEnvKeys(); err != nil {
+		return nil, err
 	}
 	fileValues, err := readEnvFile(path)
 	if err != nil {
@@ -171,6 +226,27 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func rejectUnknownProcessEnvKeys() error {
+	var unknown []string
+	for _, entry := range os.Environ() {
+		key := entry
+		if i := strings.IndexByte(entry, '='); i >= 0 {
+			key = entry[:i]
+		}
+		if !strings.HasPrefix(key, EnvPrefix) {
+			continue
+		}
+		if _, ok := envSetterByKey[key]; !ok {
+			unknown = append(unknown, key)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return fmt.Errorf("config: unknown process environment keys %s", strings.Join(unknown, ", "))
+	}
+	return nil
 }
 
 func rejectUnknownEnvKeys(path string, values map[string]string) error {

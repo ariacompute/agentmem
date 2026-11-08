@@ -3,6 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Content Security Policy. Every asset is local, so 'self' is enough for
+      the module bundle, the stylesheet and the same-origin /healthz + /v1
+      calls (the Vite dev proxy keeps them same-origin). The only inline
+      script is the parser-blocking theme resolver below, admitted by its
+      SHA-256 digest; web/tests/security.test.mjs recomputes that digest from
+      this file and fails if the two ever drift.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'sha256-mzeryZFrNf4VCOrOZpT96qWc7YnYh2IpCBFOVEM0lyc='; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'"
+    />
     <title>agentmem</title>
     <meta name="description" content="agentmem status console and HTTP API documentation." />
     <script>

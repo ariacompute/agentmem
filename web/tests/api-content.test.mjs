@@ -10,6 +10,7 @@ import {
   endpointGroups,
   endpoints,
   errorLines,
+  headerLines,
   serverBase,
   statusGroups,
 } from '../src/lib/api-content.js'
@@ -100,5 +101,53 @@ describe('api-content endpoints', () => {
     assert.equal(docsSections.length, 3)
     assert.equal(serverBase.addr, '127.0.0.1:8080')
     assert.equal(serverBase.addrEnv, 'AGENTMEM_ADDR')
+  })
+})
+
+describe('api-content authentication', () => {
+  it('documents a bearer token instead of anonymous access', () => {
+    const conventions = headerLines.join('\n')
+    assert.match(conventions, /authorization: Bearer/)
+    assert.doesNotMatch(conventions, /authorization: none/i)
+    assert.match(conventions, /knowledge:read/)
+    assert.match(conventions, /compute:run/)
+    assert.match(conventions, /rate limit/i)
+  })
+
+  it('never lets the caller assert a subject', () => {
+    for (const entry of endpoints) {
+      assert.equal(/"subject"/.test(entry.request), false, `${entry.method} ${entry.path} request`)
+      assert.equal(/subject=/.test(entry.request), false, `${entry.method} ${entry.path} query`)
+    }
+  })
+
+  it('advertises authentication and authorization failures on protected routes', () => {
+    for (const entry of endpoints) {
+      const route = `${entry.method} ${entry.path}`
+      if (route === 'GET /healthz') {
+        assert.deepEqual(entry.statuses, ['200', '429'])
+        continue
+      }
+      assert.ok(entry.statuses.includes('401'), `${route} lacks 401`)
+      assert.ok(entry.statuses.includes('403'), `${route} lacks 403`)
+      assert.ok(entry.statuses.includes('429'), `${route} lacks 429`)
+    }
+  })
+
+  it('uses only statuses explained in the error table', () => {
+    const explained = new Set(statusGroups.map((group) => group.status))
+    assert.deepEqual([...explained], ['200', '400', '401', '403', '404', '405', '422', '429', '500', '502'])
+    for (const entry of endpoints) {
+      for (const status of entry.statuses) {
+        assert.ok(explained.has(status), `${entry.method} ${entry.path} answers undocumented ${status}`)
+      }
+    }
+  })
+
+  it('ships an error sample for every documented authentication failure', () => {
+    const samples = errorLines.join('\n')
+    for (const message of ['authentication required', 'permission denied', 'rate limit exceeded']) {
+      assert.ok(samples.includes(message), `${message} has no sample`)
+    }
   })
 })

@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -45,12 +47,15 @@ jobs:
           # Documents shipped in every archive and installer.
           stage_docs() {
             local dest="$1"
-            mkdir -p "$dest/web/src"
-            cp README.md README_cn.md "$dest/"
+            mkdir -p "$dest/web/src" "$dest/web/tests"
+            cp README.md README_cn.md SECURITY.md requirements.md "$dest/"
             cp LICENSE "$dest/LICENSE.txt"
             cp .env.example "$dest/.env.example"
-            cp web/index.html web/package.json web/vite.config.js "$dest/web/"
-            cp web/src/main.js "$dest/web/src/"
+            cp -R docs "$dest/docs"
+            cp -R scripts "$dest/scripts"
+            cp web/index.html web/package.json web/package-lock.json web/vite.config.js "$dest/web/"
+            cp -R web/src/. "$dest/web/src/"
+            cp -R web/tests/. "$dest/web/tests/"
           }
 
           # Linux: .tar.gz + .deb for amd64 and arm64.
@@ -163,6 +168,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -184,13 +191,16 @@ jobs:
             name="agentmem_${VERSION}_darwin_${arch}"
             work="build/${name}"
             rm -rf "$work"
-            mkdir -p "$work/web/src"
+            mkdir -p "$work/web/src" "$work/web/tests"
             CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build \
               -trimpath -ldflags="-s -w" -o "$work/agentmem" ./cmd/agentmem
-            cp README.md README_cn.md .env.example "$work/"
+            cp README.md README_cn.md SECURITY.md requirements.md .env.example "$work/"
             cp LICENSE "$work/LICENSE.txt"
-            cp web/index.html web/package.json web/vite.config.js "$work/web/"
-            cp web/src/main.js "$work/web/src/"
+            cp -R docs "$work/docs"
+            cp -R scripts "$work/scripts"
+            cp web/index.html web/package.json web/package-lock.json web/vite.config.js "$work/web/"
+            cp -R web/src/. "$work/web/src/"
+            cp -R web/tests/. "$work/web/tests/"
 
             tar -czf "dist/${name}.tar.gz" -C build "$name"
 
@@ -253,10 +263,14 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
+          # PAT scoped to write:packages (not GITHUB_TOKEN); rotate on a
+          # schedule and store it only as the ARIACOMPUTE_TOKEN secret.
           password: ${{ secrets.ARIACOMPUTE_TOKEN }}
       - uses: docker/build-push-action@v6
         with:

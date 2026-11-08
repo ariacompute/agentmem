@@ -1,6 +1,13 @@
 # All settings come from .env (cp .env.example .env first). Compose uses it
 # both for ${...} interpolation below and as env_file for the application.
 # No credentials are stored in this versioned file.
+#
+# eMudhra/emSign CA key compromise (2026-10): re-pull pgvector/pgvector:pg16
+# and rebuild the agentmem image to refresh their trust stores. Site
+# certificates are unaffected; no re-issuance is needed. Verify the delivered
+# bundle offline with `make check-trust-store`.
+# Both host ports are bound to loopback; put a TLS-terminating reverse proxy
+# in front before exposing the service beyond the local machine.
 
 services:
   postgres:
@@ -10,7 +17,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-agentmem}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -32,7 +39,7 @@ services:
       AGENTMEM_ADDR: 0.0.0.0:8080
       AGENTMEM_GIT_ROOT: /app/data/bundle
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - agentmem_data:/app/data
     command: ["serve"]

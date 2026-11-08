@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"agentmem/internal/adapter"
 	"agentmem/internal/meta"
@@ -65,16 +66,23 @@ func (w *WriteRouter) Put(ctx context.Context, subject, id string, doc *okf.Docu
 	if doc == nil {
 		return WriteResult{}, fmt.Errorf("router: nil document")
 	}
+	if strings.TrimSpace(subject) == "" {
+		return WriteResult{}, fmt.Errorf("router: anonymous write rejected")
+	}
 	clean, err := okf.ValidateConceptID(id)
 	if err != nil {
 		return WriteResult{}, err
 	}
-	if err := store.ApplyACLDefaults(doc, w.Store.ACL); err != nil {
+	// The owner comes from the authenticated principal, never from the request.
+	if err := store.TrustedACL(doc, w.Store.ACL, subject); err != nil {
 		return WriteResult{}, err
 	}
 	canonicalExists := false
-	if _, err := w.Store.Bundle.Get(clean); err == nil {
+	if existing, err := w.Store.Bundle.Get(clean); err == nil {
 		canonicalExists = true
+		if err := store.AuthorizeUpdate(existing, subject); err != nil {
+			return WriteResult{}, err
+		}
 	}
 	task := DecisionTask{
 		Kind:      "write",
@@ -93,7 +101,7 @@ func (w *WriteRouter) Put(ctx context.Context, subject, id string, doc *okf.Docu
 	result := WriteResult{ConceptID: clean, Decision: decision}
 
 	if contains(decision.Targets, CanonicalTarget) {
-		put, err := w.Store.Put(ctx, clean, doc)
+		put, err := w.Store.PutAs(ctx, subject, clean, doc)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -132,10 +140,10 @@ func (w *WriteRouter) Put(ctx context.Context, subject, id string, doc *okf.Docu
 		status := store.ProjectionSynced
 		errText := ""
 		if putErr != nil {
-			status, errText = store.ProjectionFailed, putErr.Error()
+			status, errText = store.ProjectionFailed, redactError("projection failed", putErr)
 			_ = store.RecordProjection(ctx, w.Store.Meta, clean, target, result.ContentHash, a.Fingerprint(), store.ProjectionFailed)
 		} else if err := store.RecordProjection(ctx, w.Store.Meta, clean, target, result.ContentHash, a.Fingerprint(), store.ProjectionSynced); err != nil {
-			status, errText = store.ProjectionFailed, err.Error()
+			status, errText = store.ProjectionFailed, redactError("projection record failed", err)
 		}
 		result.Projections = append(result.Projections, ProjectionResult{Target: target, Status: status, Error: errText})
 	}

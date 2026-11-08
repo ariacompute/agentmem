@@ -16,11 +16,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"agentmem/internal/adapter"
 	"agentmem/internal/config"
+	"agentmem/internal/netsafe"
 	"agentmem/internal/okf"
 )
 
@@ -63,10 +65,11 @@ func NewHTTPBridge(cfg config.AdapterConfig, spec EngineSpec) (*HTTPBridge, erro
 	}
 	caps := spec.Capabilities
 	caps.Put, caps.Query, caps.Delete = true, true, true
+	client := &http.Client{Timeout: timeout}
 	b := &HTTPBridge{
 		name:       cfg.Name,
 		endpoint:   strings.TrimRight(cfg.Endpoint, "/"),
-		client:     &http.Client{Timeout: timeout},
+		client:     client,
 		maxRetries: 1,
 		engineCaps: caps,
 	}
@@ -74,7 +77,20 @@ func NewHTTPBridge(cfg config.AdapterConfig, spec EngineSpec) (*HTTPBridge, erro
 	// explicit (visible via Capabilities/Health), never a silent no-op.
 	if b.endpoint == "" {
 		b.offline = adapter.NewMemoryAdapter(adapter.NewHashingEmbedder(64))
+		return b, nil
 	}
+	hosts := cfg.EgressHosts
+	if len(hosts) == 0 {
+		// No global allowlist was injected (standalone factory use, e.g. a
+		// test): pin the bridge to the host it was explicitly configured with.
+		if u, err := url.Parse(b.endpoint); err == nil && u.Hostname() != "" {
+			hosts = []string{u.Hostname()}
+		}
+	}
+	if err := netsafe.ValidateEndpoint(b.endpoint, hosts); err != nil {
+		return nil, fmt.Errorf("bridges: adapter %q: %w", cfg.Name, err)
+	}
+	client.CheckRedirect = netsafe.RedirectPolicy(hosts, netsafe.DefaultMaxHops)
 	return b, nil
 }
 
@@ -159,14 +175,16 @@ func (b *HTTPBridge) do(ctx context.Context, method, path string, payload any) (
 		}
 		req, err := http.NewRequestWithContext(ctx, method, b.endpoint+path, reader)
 		if err != nil {
-			return nil, err
+			// net/http errors embed the full URL, which may contain internal
+			// hosts or credentials. Only the error type is retained.
+			return nil, fmt.Errorf("bridges: build %s request: %T", path, err)
 		}
 		if payload != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
 		resp, err := b.client.Do(req)
 		if err != nil {
-			lastErr = err
+			lastErr = fmt.Errorf("bridges: transport failure (%T)", err)
 			continue
 		}
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -183,5 +201,5 @@ func (b *HTTPBridge) do(ctx context.Context, method, path string, payload any) (
 		}
 		return data, nil
 	}
-	return nil, fmt.Errorf("bridges: %s failed after %d attempts: %w", path, b.maxRetries+1, lastErr)
+	return nil, fmt.Errorf("bridges: %s failed after %d attempts: %v", path, b.maxRetries+1, lastErr)
 }

@@ -12,6 +12,7 @@
 - 🌐 **接口**：HTTP API（含 `/v1/computations`）、十个 CLI 命令（含 `compute` / `computations`）、纯函数评测
 - 🖥️ **Web 控制台**：零依赖 ES module 单页，状态视图 + 内置 HTTP API 文档（9 个端点组合、JSON 样例、通用约定与错误码）；13 语言完整译文、英文兜底、阿拉伯语 RTL；纯黑白灰 light / dark 双主题跟随系统；零依赖 `node:test` 守住译文、端点漂移与单色约束
 - ⚙️ **`.env` 配置**：单一配置源（模板 `.env.example`）、封闭 `AGENTMEM_*` 键白名单、进程环境覆盖、零依赖解析，Docker Compose 通过 `env_file` 与 `${...}` 复用同一文件
+- 🔐 **安全加固**：Bearer 令牌（仅存 SHA-256 摘要）+ 权限矩阵 + 可信主体注入（请求体不再接受 `subject`）；私有正文强隔离、错误体脱敏、限流与 Origin 校验；出向主机白名单 + 逐跳重定向复检；bundle 路径防符号链接逃逸与 `0600` 原子写；危险 SQL 拦截与执行超时；非 root 容器 + 回环端口 + 最小权限 CI；`make check-trust-store` 离线扫描 eMudhra（emSign）弱证书
 
 ## ⚠️ 已知限制
 

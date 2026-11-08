@@ -24,8 +24,11 @@ type Contract struct {
 	StaleAfter       *time.Time
 }
 
-// supportedStatement is a read-only SELECT / WITH statement only.
-var forbiddenSQL = regexp.MustCompile(`\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|CALL|DO|VACUUM|SET|BEGIN|COMMIT|ROLLBACK|INTO|EXECUTE|MERGE|REPLACE)\b`)
+// supportedStatement is a read-only SELECT / WITH statement only. In addition
+// to mutating keywords, PostgreSQL functions that read files, reach the
+// network, mutate session state, sleep or export large objects are refused:
+// a SELECT wrapper alone is not enough to make them safe.
+var forbiddenSQL = regexp.MustCompile(`\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|CALL|DO|VACUUM|SET|BEGIN|COMMIT|ROLLBACK|INTO|EXECUTE|MERGE|REPLACE|PG_READ_FILE|PG_READ_BINARY_FILE|PG_LS_DIR|PG_STAT_FILE|PG_SLEEP|PG_NOTIFY|PG_LISTEN|PG_TERMINATE_BACKEND|PG_CANCEL_BACKEND|DBLINK|DBLINK_EXEC|LO_IMPORT|LO_EXPORT|LO_UNLINK|SET_CONFIG|QUERY_TO_XML|DATABASE_TO_XML)\b`)
 
 // LoadContract resolves an Attested Computation document into an executable
 // contract. The body is always read from the bundle; callers can never inject
