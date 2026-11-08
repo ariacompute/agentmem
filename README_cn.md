@@ -209,18 +209,20 @@ go run ./cmd/agentmem computations --limit 10
 - light / dark 双主题共用一套纯黑白灰灰阶。主题在首屏绘制前解析，未选择时跟随系统，仅显式切换才写入 `agentmem.theme`。
 - `?view=docs` 可直接打开 API 文档视图。
 - 方法、路径、字段名与 JSON 样例在所有语言下逐字呈现，仅说明文字翻译；端点数据与 `internal/handlers/http.go` 保持一致。
-- Web 渲染质量使用 [impeccable](https://github.com/pbakaus/impeccable) 检查：`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器）；完整的元素级检查（对比度、过小字号、间距）需要运行中的站点加本地 Chrome/Edge——`cd web && bun run dev` 后 `bun run audit:live`。单色不变式保持不变；`.notice` 的侧边强调边框作为已知「AI 痕迹」被刻意避免。
-
-检测结果直接输出到终端。如需保存，可重定向输出——`--json` 生成机器可读的 JSON 报告（推荐留档复查），`--quiet` 只打印失败数（适合 CI / 快速判断）：
+- Web 渲染质量使用 [impeccable](https://github.com/pbakaus/impeccable) 检查，单色不变式保持不变；`.notice` 的侧边强调边框作为已知「AI 痕迹」被刻意避免。命令合并如下：
 
 ```bash
-# 机器可读 JSON 报告（推荐保存复查）
+# 源码级检查（无需浏览器）
+make web-audit
+
+# 运行态元素级检查：先起后端，再起前端，最后扫描
+go run ./cmd/agentmem serve  # 仓库根目录，监听 :8080
+cd web && bun run dev        # Vite 开发服务器 :5173
+bun run audit:live           # 等价：bun x impeccable detect http://localhost:5173
+
+# 保存报告（重定向输出；检测结论默认打印到终端）
 bun x impeccable detect http://localhost:5173 --json > impeccable-report.json
-
-# 或纯文本落盘
 bun x impeccable detect http://localhost:5173 > impeccable-report.txt
-
-# 只看失败数（CI/快速判断）
 bun x impeccable detect http://localhost:5173 --quiet
 ```
 

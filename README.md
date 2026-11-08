@@ -307,25 +307,22 @@ combinations, request/response samples, conventions and error codes).
 - Methods, paths, field names and JSON samples render verbatim in every locale;
   only prose is translated. Endpoint data mirrors `internal/handlers/http.go`.
 - Web rendering is checked with
-  [impeccable](https://github.com/pbakaus/impeccable): `make web-audit` runs a
-  source-level `impeccable detect` over `web/` with no browser; the full
-  element-level pass (contrast, tiny-text, spacing) needs a running app plus a
-  local Chrome/Edge — `cd web && bun run dev` then `bun run audit:live`. The
-  monochrome invariant is kept; the `.notice` side-accent border is
-  intentionally avoided as a known slop tell.
-
-Findings print to the terminal. Persist them by redirecting the output —
-`--json` yields a machine-readable report (recommended for review) and
-`--quiet` prints only the failure count (useful for CI / a quick check):
+  [impeccable](https://github.com/pbakaus/impeccable); the monochrome invariant
+  is kept and the `.notice` side-accent border (a known slop tell) is
+  intentionally avoided. Commands:
 
 ```bash
-# Machine-readable JSON report (recommended for review)
+# Source-level check (no browser needed)
+make web-audit
+
+# Live element-level check: backend → dev server → scan
+go run ./cmd/agentmem serve  # repo root, listens on :8080
+cd web && bun run dev        # Vite dev server on :5173
+bun run audit:live           # = bun x impeccable detect http://localhost:5173
+
+# Save the report (redirect output; findings print to the terminal by default)
 bun x impeccable detect http://localhost:5173 --json > impeccable-report.json
-
-# Or save plain text
 bun x impeccable detect http://localhost:5173 > impeccable-report.txt
-
-# Failure count only (CI / quick check)
 bun x impeccable detect http://localhost:5173 --quiet
 ```
 
