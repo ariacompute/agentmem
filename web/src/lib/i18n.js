@@ -34,9 +34,14 @@ export function detectLang(search, storage) {
   return 'en'
 }
 
+// Some test runners install a minimal `window` stub (no `location` or
+// `localStorage`) shared across the process. Guard both so module evaluation
+// never throws before the real browser environment is in place.
+const browserWindow = typeof window !== 'undefined' ? window : undefined
+
 let langRef = detectLang(
-  typeof window !== 'undefined' ? window.location.search : '',
-  typeof window !== 'undefined' ? window.localStorage : null,
+  browserWindow?.location?.search ?? '',
+  browserWindow?.localStorage ?? null,
 )
 
 const listeners = new Set()
@@ -57,8 +62,8 @@ export function setLang(next) {
   const lang = isValidLang(next) ? next : 'en'
   langRef = lang
   cache.clear()
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(STORAGE_KEY, lang)
+  if (browserWindow && browserWindow.localStorage) {
+    browserWindow.localStorage.setItem(STORAGE_KEY, lang)
   }
   mirrorHtml(lang)
   for (const fn of listeners) fn(lang)

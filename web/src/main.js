@@ -12,7 +12,10 @@ const root = document.getElementById('app')
 
 const statusState = { health: {}, decisions: [], error: '', loaded: false }
 const docsState = { open: {} }
-const initialView = new URLSearchParams(window.location.search).get('view')
+const initialView =
+  typeof window !== 'undefined' && window.location
+    ? new URLSearchParams(window.location.search).get('view')
+    : null
 let view = initialView === 'docs' ? 'docs' : 'status'
 let langMenuOpen = false
 
