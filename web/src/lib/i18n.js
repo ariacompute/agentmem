@@ -47,8 +47,12 @@ let langRef = detectLang(
 const listeners = new Set()
 const cache = new Map()
 
-function mirrorHtml(lang) {
-  if (typeof document === 'undefined') return
+/** Reflect the active language onto <html lang|dir>. Safe to call repeatedly:
+ *  it is invoked once at module load and again on boot so that a cached module
+ *  (evaluated before a DOM existed, e.g. when a sibling test imports first) still
+ *  mirrors correctly once the document is in place. */
+export function mirrorHtml(lang) {
+  if (typeof document === 'undefined' || !document.documentElement) return
   document.documentElement.lang = lang
   document.documentElement.dir = isRTL(lang) ? 'rtl' : 'ltr'
 }
