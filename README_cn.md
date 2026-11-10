@@ -1,60 +1,80 @@
-<a id="readme-top"></a>
-
-[![][image-banner]][repo-link]
+<div align="center">
+<a name="readme-top"></a>
 
 # agentmem
 
 **面向 Agent 的知识中枢**
 
-以 **OKF + Git** 保存唯一权威、可版本化的知识正文，用可插拔的 **RAG 通道**（LlamaIndex / PageIndex / GraphRAG / LightRAG / pgvector）覆盖长尾检索，并由 **规则优先的智能路由** 同时管住两个方向：每条知识写向哪里、每次提问从哪里取回。服务端自身的结构化数据存放在 **PostgreSQL（GORM）**；**Attested Computation** 把 Git 中受批准的 SQL 变成经过验证、可审计的数值。
+以 **OKF + Git** 保存唯一权威、可版本化的知识正文，用可插拔的<br/>
+**RAG 通道**（LlamaIndex / PageIndex / GraphRAG / LightRAG / pgvector）覆盖长尾检索，<br/>
+再由 **规则优先的智能路由** 同时管住两个方向：每条知识写向哪里、每次提问从哪里取回。<br/>
+服务端自身的结构化数据存放在 **PostgreSQL（GORM）**；**Attested Computation** 把 Git 中<br/>
+受批准的 SQL 变成经过验证、可审计的数值。
 
 [English](./README.md) · **简体中文** · [文档](./docs/architecture.md) · [发布说明](./releasenotes_cn.md) · [安全策略](./SECURITY.md)
 
 [![][release-shield]][release-link] [![][go-shield]][go-link] [![][license-shield]][license-link] [![][lastcommit-shield]][lastcommit-link]
-
+<br/>
 [![][httpapi-shield]][httpapi-link] [![][tests-shield]][tests-link] [![][docs-shield]][docs-link] [![][i18n-shield]][web-console-link]
+</div>
 
-#### 目录
+<details>
+<summary><kbd>Table of contents</kbd></summary>
 
-- [👋 agentmem 是什么](#-agentmem-是什么)
+#### TOC
+
+**上手**
+
+- [✨ 功能](#-功能)
 - [💾 存储职责](#-存储职责)
 - [🚀 快速开始](#-快速开始)
 - [🧰 命令行](#-命令行)
 - [🔧 配置](#-配置)
+
+**部署与服务**
+
 - [🛳 部署](#-部署)
   - [`A` 源码运行](#a-源码运行)
   - [`B` Docker Compose](#b-docker-compose)
 - [🔌 HTTP API](#-http-api)
+- [🔐 身份认证与访问控制](#-身份认证与访问控制)
+
+**内部机制**
+
 - [🧭 智能路由](#-智能路由)
 - [🧩 引擎插件](#-引擎插件)
 - [🧮 受批准计算](#-受批准计算)
 - [📊 评测](#-评测)
 - [🌐 Web 控制台](#-web-控制台)
-- [🔐 身份认证与访问控制](#-身份认证与访问控制)
+
+**信任与治理**
+
 - [🔏 信任库安全](#-信任库安全)
 - [🔨 开发](#-开发)
 - [📚 文档](#-文档)
-- [🤝 工程约定](#-工程约定)
 - [📝 许可证](#-许可证)
+- [🤝 工程约定](#-工程约定)
 
-## 👋 agentmem 是什么
+</details>
+
+## ✨ 功能
 
 agentmem 只回答 Agent 的一个问题：*这份知识的哪一份副本才算数，这个问题又该由谁回答？* 答案绝不是「两份状态」。正文以 **OKF bundle** 形式活在 Git 里，PostgreSQL 只保存以 `content_hash` + `commit_sha` 为键的元数据，每个 RAG 索引都是可以随时丢弃重建的投影。
 
 设计参考 [HKUDS/DeepTutor][deeptutor-link]（可插拔检索、索引版本化、离线检索评测）与 [GoogleCloudPlatform/open-knowledge-format][okf-link]（OKF v0.2 frontmatter、渐进式披露、Git 治理）。
 
-**差异化的六个支点**
+- 📜 **Git 是正文唯一权威** —— 知识可评审、可 diff、可回滚；Postgres 不存第二份正文，因此不存在双正文一致性问题。
+- 🧭 **规则先于 System One** —— 概率选择永远不能覆盖确定性的权威判断；只有真正模糊的任务才交给模型。
+- 🔒 **失败关闭而非失败放行** —— 路由超时或报错一律回落到主干正文，且不存在关闭该行为的开关。
+- 🧪 **离线测试是硬约束** —— `go test ./...` 无需 Postgres、网络或凭据即可通过，每个外部依赖都有 fake。
+- 🧩 **显式引擎注册表** —— 插件由 `plugin.yaml` 声明，`sdk_boundary` 由机器校验；刻意不使用 Go `.so` 动态插件。
+- 🪶 **零依赖控制台** —— `web/` 是原生 ES module，单色、13 语言、无运行时框架、无 CDN 资源。
 
-| 支点 | 带来的收益 |
-|---|---|
-| 📜 **Git 是正文唯一权威** | 知识可评审、可 diff、可回滚；Postgres 不存第二份正文，因此不存在双正文一致性问题。 |
-| 🧭 **规则先于 System One** | 概率选择永远不能覆盖确定性的权威判断；只有真正模糊的任务才交给模型。 |
-| 🔒 **失败关闭而非失败放行** | 路由超时或报错一律回落到主干正文，且不存在关闭该行为的开关。 |
-| 🧪 **离线测试是硬约束** | `go test ./...` 无需 Postgres、网络或凭据即可通过，每个外部依赖都有 fake。 |
-| 🧩 **显式引擎注册表** | 插件由 `plugin.yaml` 声明，`sdk_boundary` 由机器校验；刻意不使用 Go `.so` 动态插件。 |
-| 🪶 **零依赖控制台** | `web/` 是原生 ES module，单色、13 语言、无运行时框架、无 CDN 资源。 |
+<div align="right">
 
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 💾 存储职责
 
@@ -66,7 +86,11 @@ agentmem 只回答 Agent 的一个问题：*这份知识的哪一份副本才算
 
 两者通过 `content_hash` + `commit_sha` 关联；库内不复制正文，因此不存在双正文一致性问题。结论冲突时 **OKF 优先**，且显式标注、绝不隐藏。详见 [docs/storage.md](./docs/storage.md)。
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🚀 快速开始
 
@@ -87,7 +111,11 @@ go run ./cmd/agentmem decisions --limit 10
 
 > `make validate` 校验的是 `.env.example`，不是 `.env`。要校验真实配置，请用 `go run ./cmd/agentmem validate --env .env`。
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🧰 命令行
 
@@ -106,7 +134,11 @@ go run ./cmd/agentmem decisions --limit 10
 
 `serve`、`put`、`query`、`migrate`、`decisions`、`concepts`、`compute`、`computations`、`validate` 均支持 `--env`；`AGENTMEM_ENV_FILE` 指定默认 env 文件。`eval` 是唯一不读配置的命令。
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🔧 配置
 
@@ -149,7 +181,11 @@ go run ./cmd/agentmem decisions --limit 10
 
 `AGENTMEM_COMPUTE_TIMEOUT_MS` / `AGENTMEM_COMPUTE_MAX_ROWS` 限定执行边界；`0` 使用内置默认值（5000 ms / 100 行）。`AGENTMEM_ADAPTERS` 接受 JSON 数组，例如 `[{"name":"okf","kind":"okf","enabled":true}]`；仅 `"enabled":true` 的条目会被装配。`health:read` 是被接受的权限名，但当前没有路由需要它。
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🛳 部署
 
@@ -213,7 +249,11 @@ go run ./cmd/agentmem validate --env .env
 
 日志：`docker compose logs -f agentmem`。停止：`docker compose down`（加 `-v` 同时删除卷）。
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🔌 HTTP API
 
@@ -231,98 +271,11 @@ go run ./cmd/agentmem validate --env .env
 
 除 `GET /healthz` 外每条路由都需要上表中的权限，同一矩阵在 [身份认证与访问控制](#-身份认证与访问控制) 处复述。`401` / `403` / `429` 与控制台里的错误码表一致；路径存在但方法不支持返回 `405`。`POST /v1/computations` 验证通过返回 `200`；attestation 失败或 runtime 未实现返回 `422`；契约/参数非法返回 `400`；执行器故障返回 `502`。失败响应一律不携带 `display_value`，错误体也不会回显 SQL、DSN 或驱动信息。
 
-[![][back-to-top]](#readme-top)
-
-## 🧭 智能路由
-
-确定性规则按顺序求值，首个命中即短路：
-
-| 规则 | 触发条件 | 结果 |
-|---|---|---|
-| `R1` 权威写入 | 写入 + authoritative | 仅主干（置信度 1.0） |
-| `R2` 敏感写入 | 写入 + sensitive | 仅主干（0.95） |
-| `R3` 定义查询 | 读取 + definition | 仅主干（1.0） |
-| `R4` 主干更新 | 写入 + 已存在权威副本 | 主干 + 首个非主干通道（0.9） |
-| `R5` 大文档 | 写入 + 正文 ≥ 4096 字节 | 主干 + 所有非主干通道（0.85） |
-| `R6` 探索查询 | 读取 + exploratory | 非主干通道，主干兜底（0.8） |
-| `R7` 聚合双读 | 读取 + aggregate | 主干 + 非主干通道（0.75） |
-
-仅模糊样本进入 **AFM-D System One** 决策服务。客户端在 `AGENTMEM_SYSTEMONE_ENDPOINT` 后追加 `/v1/systemone` —— 该路径是出向调用，不是本服务的路由。其配置为 5000 ms 超时、256 条决策缓存、`min_confidence` 低分保护、`max_choices` 候选上限，以及失败关闭回落到主干。失败关闭是结构性的：在构造时硬编码，无法通过配置关闭。
-
-路由为**读写双程**：写入决定投影，读取决定查询通道，迁移负责存量知识双向对账。详见 [docs/routing.md](./docs/routing.md)。
+<div align="right">
 
 [![][back-to-top]](#readme-top)
 
-## 🧩 引擎插件
-
-`internal/adapter` 定义 `Adapter` 端口。内置实现覆盖权威正文与本地投影；四个 Python 生态引擎是 `internal/plugins/<engine>/` 下的一等 Go 插件包。
-
-| 引擎 | kind | 线协议 | 能力标签 |
-|---|---|---|---|
-| OKF（内置） | `okf` | 进程内 | 权威查找，仅查询 |
-| Memory（内置） | `memory` | 进程内 | vector / semantic |
-| pgvector（内置） | `pgvector` | 参数化 SQL | vector / semantic |
-| LlamaIndex | `llamaindex` | HTTP | vector / semantic |
-| PageIndex | `pageindex` | HTTP | semantic / page_level |
-| GraphRAG | `graphrag` | CLI stdio | graph |
-| LightRAG | `lightrag` | HTTP | vector / semantic / graph |
-
-每个插件持有严格校验的 `plugin.yaml`，以声明式 `sdk_boundary` 描述 sidecar、`agentmem-bridge/v1` 线协议、端点、能力映射与凭据引用，并实现 `Adapter` + `Lifecycle`、健康检查与版本化协议指纹。真实 SDK 连接位于该边界之后（由 sidecar 实现线协议），而不是写在代码注释里。刻意不使用 Go `.so` 动态插件，注册表为显式配置驱动；`endpoint` 留空即选择确定性离线 mock，`make check-boundaries` 保证边界始终结构化。泛型 `http` 与 `cli` kind 仍可用于自定义引擎。详见 [docs/plugins.md](./docs/plugins.md) 与 [docs/adapters.md](./docs/adapters.md)。
-
-[![][back-to-top]](#readme-top)
-
-## 🧮 受批准计算
-
-`POST /v1/computations` 与 `agentmem compute` 从 OKF+Git 加载受批准计算，只绑定声明参数值，经 `postgres` runtime 执行；只有确定性 Go attester 校验 SQL provenance 与展示值 fidelity 通过后才返回数值。`bigquery` / `dbt` / `python` / `looker` 为正式契约骨架并返回 `Unsupported` —— 目前只有 `postgres` 有执行器。成功、拒绝与错误都写入 `computation_runs` 审计（离线为 `data/meta.fake.json`）。
-
-```bash
-go run ./cmd/agentmem compute --id computations/revenue-postgres --param year=2026
-go run ./cmd/agentmem computations --limit 10
-```
-
-`testdata/bundle/computations/revenue-postgres.md` 是可运行示例；详见 [docs/computations.md](./docs/computations.md)。
-
-[![][back-to-top]](#readme-top)
-
-## 📊 评测
-
-```bash
-go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
-```
-
-输出 Recall@k、Precision@k、nDCG@k、MRR、MAP、HitRate@k，全部为纯函数、无 LLM 裁判。两套口径（覆盖率 Recall 与二值 HitRate）的区别见 [docs/architecture.md](./docs/architecture.md)。
-
-[![][back-to-top]](#readme-top)
-
-## 🌐 Web 控制台
-
-`web/` 是零运行时依赖的原生 ES module 控制台，包含两个视图：**状态**（健康状态 + 最近路由决策）与 **API 文档**（全部 9 个 HTTP method + path 组合、请求/响应样例、通用约定与错误码）。
-
-- 13 种语言，与 agenthub 一致：`en`、`zh`、`zh-TW`、`es`、`fr`、`de`、`it`、`ru`、`ja`、`ko`、`pt`、`ar`、`hi`。优先级为 `?lang=` > 本地存储 > 浏览器语言 > 英文；缺失键回退英文，阿拉伯语自动切换 RTL。
-- light / dark 双主题共用一套纯黑白灰灰阶。主题在首屏绘制前解析，未选择时跟随系统，仅显式切换才写入 `agentmem.theme`。
-- `?view=docs` 可直接打开 API 文档视图。
-- 方法、路径、字段名与 JSON 样例在所有语言下逐字呈现，仅说明文字翻译；端点数据与 `internal/handlers/http.go` 保持一致。
-- 页面自带 `Content-Security-Policy` meta（`default-src 'none'`、仅同源资源、内联首屏主题脚本以 SHA-256 白名单放行），`web/tests/security.test.mjs` 会在摘要与脚本文本不一致时失败。
-- Web 渲染质量使用 [impeccable][impeccable-link] 检查，单色不变式保持不变；`.notice` 的侧边强调边框作为已知「AI 痕迹」被刻意避免。
-
-```bash
-# 源码级检查（无需浏览器）
-make web-audit
-
-# 运行态元素级检查：先起后端，再起前端，最后扫描
-go run ./cmd/agentmem serve  # 仓库根目录，监听 :8080
-cd web && bun run dev        # Vite 开发服务器 :5173
-bun run audit:live           # 等价：bun x impeccable detect http://localhost:5173
-
-# 保存报告（重定向输出；检测结论默认打印到终端）
-bun x impeccable detect http://localhost:5173 --json > impeccable-report.json
-bun x impeccable detect http://localhost:5173 > impeccable-report.txt
-bun x impeccable detect http://localhost:5173 --quiet
-```
-
-可直接用任意静态服务器托管 `web/`；有 Bun 时也可用 Vite 打包（`cd web && bun install --frozen-lockfile && bun run build`）。Go 二进制不依赖 Bun 或任何 JS 运行时。前端校验使用 Bun 内置测试运行器，离线执行且无新增依赖：`cd web && bun test`。
-
-[![][back-to-top]](#readme-top)
+</div>
 
 ## 🔐 身份认证与访问控制
 
@@ -352,7 +305,122 @@ AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 位十六进制>","subject":"console
 
 令牌是静态的：轮换需修改 `.env` 并重启。`AGENTMEM_MODE=production` 时，缺少鉴权、没有令牌、DSN 含 `sslmode=disable`，或存在出向端点却没有 `AGENTMEM_EGRESS_ALLOWED_HOSTS`，都会拒绝启动。身份只在 Handler 边界确立一次：请求体或查询串里的 subject 一律忽略、从不采信。威胁模型见 [docs/security.md](./docs/security.md)。
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧭 智能路由
+
+确定性规则按顺序求值，首个命中即短路：
+
+| 规则 | 触发条件 | 结果 |
+|---|---|---|
+| `R1` 权威写入 | 写入 + authoritative | 仅主干（置信度 1.0） |
+| `R2` 敏感写入 | 写入 + sensitive | 仅主干（0.95） |
+| `R3` 定义查询 | 读取 + definition | 仅主干（1.0） |
+| `R4` 主干更新 | 写入 + 已存在权威副本 | 主干 + 首个非主干通道（0.9） |
+| `R5` 大文档 | 写入 + 正文 ≥ 4096 字节 | 主干 + 所有非主干通道（0.85） |
+| `R6` 探索查询 | 读取 + exploratory | 非主干通道，主干兜底（0.8） |
+| `R7` 聚合双读 | 读取 + aggregate | 主干 + 非主干通道（0.75） |
+
+仅模糊样本进入 **AFM-D System One** 决策服务。客户端在 `AGENTMEM_SYSTEMONE_ENDPOINT` 后追加 `/v1/systemone` —— 该路径是出向调用，不是本服务的路由。其配置为 5000 ms 超时、256 条决策缓存、`min_confidence` 低分保护、`max_choices` 候选上限，以及失败关闭回落到主干。失败关闭是结构性的：在构造时硬编码，无法通过配置关闭。
+
+路由为**读写双程**：写入决定投影，读取决定查询通道，迁移负责存量知识双向对账。详见 [docs/routing.md](./docs/routing.md)。
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧩 引擎插件
+
+`internal/adapter` 定义 `Adapter` 端口。内置实现覆盖权威正文与本地投影；四个 Python 生态引擎是 `internal/plugins/<engine>/` 下的一等 Go 插件包。
+
+| 引擎 | kind | 线协议 | 能力标签 |
+|---|---|---|---|
+| OKF（内置） | `okf` | 进程内 | 权威查找，仅查询 |
+| Memory（内置） | `memory` | 进程内 | vector / semantic |
+| pgvector（内置） | `pgvector` | 参数化 SQL | vector / semantic |
+| LlamaIndex | `llamaindex` | HTTP | vector / semantic |
+| PageIndex | `pageindex` | HTTP | semantic / page_level |
+| GraphRAG | `graphrag` | CLI stdio | graph |
+| LightRAG | `lightrag` | HTTP | vector / semantic / graph |
+
+每个插件持有严格校验的 `plugin.yaml`，以声明式 `sdk_boundary` 描述 sidecar、`agentmem-bridge/v1` 线协议、端点、能力映射与凭据引用，并实现 `Adapter` + `Lifecycle`、健康检查与版本化协议指纹。真实 SDK 连接位于该边界之后（由 sidecar 实现线协议），而不是写在代码注释里。刻意不使用 Go `.so` 动态插件，注册表为显式配置驱动；`endpoint` 留空即选择确定性离线 mock，`make check-boundaries` 保证边界始终结构化。泛型 `http` 与 `cli` kind 仍可用于自定义引擎。详见 [docs/plugins.md](./docs/plugins.md) 与 [docs/adapters.md](./docs/adapters.md)。
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧮 受批准计算
+
+`POST /v1/computations` 与 `agentmem compute` 从 OKF+Git 加载受批准计算，只绑定声明参数值，经 `postgres` runtime 执行；只有确定性 Go attester 校验 SQL provenance 与展示值 fidelity 通过后才返回数值。`bigquery` / `dbt` / `python` / `looker` 为正式契约骨架并返回 `Unsupported` —— 目前只有 `postgres` 有执行器。成功、拒绝与错误都写入 `computation_runs` 审计（离线为 `data/meta.fake.json`）。
+
+```bash
+go run ./cmd/agentmem compute --id computations/revenue-postgres --param year=2026
+go run ./cmd/agentmem computations --limit 10
+```
+
+`testdata/bundle/computations/revenue-postgres.md` 是可运行示例；详见 [docs/computations.md](./docs/computations.md)。
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 📊 评测
+
+```bash
+go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
+```
+
+输出 Recall@k、Precision@k、nDCG@k、MRR、MAP、HitRate@k，全部为纯函数、无 LLM 裁判。两套口径（覆盖率 Recall 与二值 HitRate）的区别见 [docs/architecture.md](./docs/architecture.md)。
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🌐 Web 控制台
+
+`web/` 是零运行时依赖的原生 ES module 控制台，包含两个视图：**状态**（健康状态 + 最近路由决策）与 **API 文档**（全部 9 个 HTTP method + path 组合、请求/响应样例、通用约定与错误码）。
+
+- 13 种语言，与 agenthub 一致：`en`、`zh`、`zh-TW`、`es`、`fr`、`de`、`it`、`ru`、`ja`、`ko`、`pt`、`ar`、`hi`。优先级为 `?lang=` > 本地存储 > 浏览器语言 > 英文；缺失键回退英文，阿拉伯语自动切换 RTL。
+- light / dark 双主题共用一套纯黑白灰灰阶。主题在首屏绘制前解析，未选择时跟随系统，仅显式切换才写入 `agentmem.theme`。
+- `?view=docs` 可直接打开 API 文档视图。
+- 方法、路径、字段名与 JSON 样例在所有语言下逐字呈现，仅说明文字翻译；端点数据与 `internal/handlers/http.go` 保持一致。
+- 页面自带 `Content-Security-Policy` meta（`default-src 'none'`、仅同源资源、内联首屏主题脚本以 SHA-256 白名单放行），`web/tests/security.test.mjs` 会在摘要与脚本文本不一致时失败。
+- Web 渲染质量使用 [impeccable][impeccable-link] 检查，单色不变式保持不变；`.notice` 的侧边强调边框作为已知「AI 痕迹」被刻意避免。
+
+```bash
+# 源码级检查（无需浏览器）
+make web-audit
+
+# 运行态元素级检查：先起后端，再起前端，最后扫描
+go run ./cmd/agentmem serve  # 仓库根目录，监听 :8080
+cd web && bun run dev        # Vite 开发服务器 :5173
+bun run audit:live           # 等价：bun x impeccable detect http://localhost:5173
+
+# 保存报告（重定向输出；检测结论默认打印到终端）
+bun x impeccable detect http://localhost:5173 --json > impeccable-report.json
+bun x impeccable detect http://localhost:5173 > impeccable-report.txt
+bun x impeccable detect http://localhost:5173 --quiet
+```
+
+可直接用任意静态服务器托管 `web/`；有 Bun 时也可用 Vite 打包（`cd web && bun install --frozen-lockfile && bun run build`）。Go 二进制不依赖 Bun 或任何 JS 运行时。前端校验使用 Bun 内置测试运行器，离线执行且无新增依赖：`cd web && bun test`。
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🔏 信任库安全
 
@@ -364,7 +432,11 @@ docker run --rm --entrypoint cat <image> /etc/ssl/certs/ca-certificates.crt > /t
 scripts/check-emudhra.sh /tmp/image-ca.crt
 ```
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🔨 开发
 
@@ -384,7 +456,11 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 
 `go test ./...` 无需 Postgres、网络或凭据即可通过。设置 `AGENTMEM_TEST_PG_DSN` 可启用可选的真实 PostgreSQL 集成测试。
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 📚 文档
 
@@ -401,7 +477,21 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 | [受批准计算](./docs/computations.md) | 契约、参数绑定、attester 链路、verdict 审计 |
 | [路由](./docs/routing.md) | 规则优先决策、System One、双程对账 |
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
+
+## 📝 许可证
+
+MIT，详见 [LICENSE](./LICENSE)。
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🤝 工程约定
 
@@ -412,24 +502,27 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 - [`task.md`](./task.md) —— 实施清单
 - [`SECURITY.md`](./SECURITY.md) —— 漏洞报告方式
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ---
 
-## 📝 许可证
+<div align="center">
 
-MIT，详见 [LICENSE](./LICENSE)。
+Copyright © 2026 [ariacompute][org]. <br/>
+This project is [MIT](./LICENSE) licensed.
 
-[![][back-to-top]](#readme-top)
+</div>
 
 <!-- 链接定义 -->
 
-[repo-link]: https://github.com/ariacompute/agentmem
+[org]: https://github.com/ariacompute
 [deeptutor-link]: https://github.com/HKUDS/DeepTutor
 [okf-link]: https://github.com/GoogleCloudPlatform/open-knowledge-format
 [impeccable-link]: https://github.com/pbakaus/impeccable
-
-[image-banner]: ./docs/assets/banner.svg
 
 [release-shield]: https://img.shields.io/github/v/release/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
 [release-link]: https://github.com/ariacompute/agentmem/releases
@@ -448,14 +541,5 @@ MIT，详见 [LICENSE](./LICENSE)。
 [docs-link]: ./docs
 [i18n-shield]: https://img.shields.io/badge/console-13_locales-555?style=flat-square&labelColor=black
 [web-console-link]: #-web-控制台
-
-[stars-shield]: https://img.shields.io/github/stars/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
-[stars-link]: https://github.com/ariacompute/agentmem/stargazers
-[forks-shield]: https://img.shields.io/github/forks/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
-[forks-link]: https://github.com/ariacompute/agentmem/network/members
-[issues-shield]: https://img.shields.io/github/issues/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
-[issues-link]: https://github.com/ariacompute/agentmem/issues
-[contributors-shield]: https://img.shields.io/github/contributors/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
-[contributors-link]: https://github.com/ariacompute/agentmem/graphs/contributors
 
 [back-to-top]: https://img.shields.io/badge/-BACK_TO_TOP-151515?style=flat-square

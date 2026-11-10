@@ -1,60 +1,80 @@
-<a id="readme-top"></a>
-
-[![][image-banner]][repo-link]
+<div align="center">
+<a name="readme-top"></a>
 
 # agentmem
 
 **A knowledge hub for AI agents**
 
-It keeps one authoritative, versioned knowledge body in **OKF + Git**, exposes pluggable **RAG channels** (LlamaIndex / PageIndex / GraphRAG / LightRAG / pgvector) for the long tail, and puts a **rule-first smart router** in front of both directions: it decides where every write lands and where every read is answered from. Server-side structured state lives in **PostgreSQL via GORM**, and **Attested Computations** turn sanctioned SQL kept in Git into verified, auditable numbers.
+It keeps one authoritative, versioned knowledge body in **OKF + Git** and exposes pluggable<br/>
+**RAG channels** (LlamaIndex / PageIndex / GraphRAG / LightRAG / pgvector) for the long tail, with a<br/>
+**rule-first smart router** in front of both directions: it decides where every write lands and<br/>
+where every read is answered from. Server-side structured state lives in **PostgreSQL via GORM**,<br/>
+and **Attested Computations** turn sanctioned SQL kept in Git into verified, auditable numbers.
 
 **English** · [简体中文](./README_cn.md) · [Docs](./docs/architecture.md) · [Release notes](./releasenotes.md) · [Security policy](./SECURITY.md)
 
 [![][release-shield]][release-link] [![][go-shield]][go-link] [![][license-shield]][license-link] [![][lastcommit-shield]][lastcommit-link]
-
+<br/>
 [![][httpapi-shield]][httpapi-link] [![][tests-shield]][tests-link] [![][docs-shield]][docs-link] [![][i18n-shield]][web-console-link]
+</div>
+
+<details>
+<summary><kbd>Table of contents</kbd></summary>
 
 #### TOC
 
-- [👋 What is agentmem](#-what-is-agentmem)
+**Get started**
+
+- [✨ Features](#-features)
 - [💾 Storage split](#-storage-split)
 - [🚀 Quick start](#-quick-start)
 - [🧰 Command line](#-command-line)
 - [🔧 Configuration](#-configuration)
+
+**Deploy & serve**
+
 - [🛳 Deployment](#-deployment)
   - [`A` Run from source](#a-run-from-source)
   - [`B` Docker Compose](#b-docker-compose)
 - [🔌 HTTP API](#-http-api)
+- [🔐 Authentication and access control](#-authentication-and-access-control)
+
+**Internals**
+
 - [🧭 Smart routing](#-smart-routing)
 - [🧩 Engine plugins](#-engine-plugins)
 - [🧮 Attested Computations](#-attested-computations)
 - [📊 Evaluation](#-evaluation)
 - [🌐 Web console](#-web-console)
-- [🔐 Authentication and access control](#-authentication-and-access-control)
+
+**Trust & governance**
+
 - [🔏 Trust store security](#-trust-store-security)
 - [🔨 Development](#-development)
 - [📚 Documentation](#-documentation)
-- [🤝 Engineering conventions](#-engineering-conventions)
 - [📝 License](#-license)
+- [🤝 Engineering conventions](#-engineering-conventions)
 
-## 👋 What is agentmem
+</details>
+
+## ✨ Features
 
 agentmem answers one question for an agent: *which copy of this knowledge is the real one, and where should this question be answered?* The answer is never duplicated state. The body lives in Git as an **OKF bundle**, PostgreSQL holds only metadata keyed by `content_hash` + `commit_sha`, and every RAG index is a rebuildable projection that can be thrown away and recomputed.
 
 The design draws on [HKUDS/DeepTutor][deeptutor-link] (pluggable retrievers, versioned indexes, offline retrieval evaluation) and [GoogleCloudPlatform/open-knowledge-format][okf-link] (OKF v0.2 frontmatter, progressive disclosure, Git as governance).
 
-**WHAT MAKES IT DIFFERENT**
+- 📜 **Git is the only authority for bodies** — Knowledge is reviewable, diffable and revertible. Postgres never stores a second copy, so there is no dual-body consistency problem.
+- 🧭 **Rules run before System One** — A probabilistic choice can never override a deterministic authoritative decision. Ambiguity reaches the model; everything else short-circuits.
+- 🔒 **Fail closed, not fail open** — Routing timeouts and errors land on the canonical body. There is no switch to disable that fallback.
+- 🧪 **Offline tests are a hard constraint** — `go test ./...` passes without Postgres, network or credentials. Every external dependency has a fake.
+- 🧩 **Explicit engine registry** — Plugins are declared in `plugin.yaml` with a machine-checked `sdk_boundary`. Go `.so` plugins are deliberately avoided.
+- 🪶 **Zero-dependency console** — `web/` is plain ES modules, monochrome, 13 locales, no runtime framework and no CDN asset.
 
-| Pillar | What it buys you |
-|---|---|
-| 📜 **Git is the only authority for bodies** | Knowledge is reviewable, diffable and revertible. Postgres never stores a second copy, so there is no dual-body consistency problem. |
-| 🧭 **Rules run before System One** | A probabilistic choice can never override a deterministic authoritative decision. Ambiguity reaches the model; everything else short-circuits. |
-| 🔒 **Fail closed, not fail open** | Routing timeouts and errors land on the canonical body. There is no switch to disable that fallback. |
-| 🧪 **Offline tests are a hard constraint** | `go test ./...` passes without Postgres, network or credentials. Every external dependency has a fake. |
-| 🧩 **Explicit engine registry** | Plugins are declared in `plugin.yaml` with a machine-checked `sdk_boundary`. Go `.so` plugins are deliberately avoided. |
-| 🪶 **Zero-dependency console** | `web/` is plain ES modules, monochrome, 13 locales, no runtime framework and no CDN asset. |
+<div align="right">
 
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 💾 Storage split
 
@@ -66,7 +86,11 @@ The design draws on [HKUDS/DeepTutor][deeptutor-link] (pluggable retrievers, ver
 
 The two stores are linked by `content_hash` + `commit_sha`. PostgreSQL never copies a knowledge body, so there is no dual-body consistency problem. Conflicts are resolved **OKF-first** and explicitly surfaced, never hidden. See [docs/storage.md](./docs/storage.md).
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🚀 Quick start
 
@@ -87,7 +111,11 @@ The example bundle under `testdata/bundle/` contains a runnable Attested Computa
 
 > `make validate` validates `.env.example`, not `.env`. Use `go run ./cmd/agentmem validate --env .env` to check a real configuration.
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🧰 Command line
 
@@ -106,7 +134,11 @@ The example bundle under `testdata/bundle/` contains a runnable Attested Computa
 
 `serve`, `put`, `query`, `migrate`, `decisions`, `concepts`, `compute`, `computations` and `validate` all accept `--env`; `AGENTMEM_ENV_FILE` selects the default env file. `eval` is the one command that reads no configuration.
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🔧 Configuration
 
@@ -149,7 +181,11 @@ Fail-closed routing is unconditional: there is no switch to disable the fallback
 
 `AGENTMEM_COMPUTE_TIMEOUT_MS` / `AGENTMEM_COMPUTE_MAX_ROWS` bound execution; `0` selects the built-in defaults (5000 ms / 100 rows). `AGENTMEM_ADAPTERS` takes a JSON array such as `[{"name":"okf","kind":"okf","enabled":true}]`; only entries with `"enabled":true` are assembled. `health:read` is an accepted scope but no route currently requires it.
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🛳 Deployment
 
@@ -213,7 +249,11 @@ The image ships the built console at `/app/web/dist`, but the Go binary neither 
 
 Logs: `docker compose logs -f agentmem`. Stop: `docker compose down` (add `-v` to also remove volumes).
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🔌 HTTP API
 
@@ -231,98 +271,11 @@ Logs: `docker compose logs -f agentmem`. Stop: `docker compose down` (add `-v` t
 
 Every route except `GET /healthz` requires the scope above; the same matrix is reproduced in [Authentication and access control](#-authentication-and-access-control). `401` / `403` / `429` match the error table in the console; a registered path with an unsupported method answers `405`. `POST /v1/computations` returns `200` for a verified value, `422` for an attestation failure or an unsupported runtime, `400` for an invalid contract or parameters, and `502` for an executor failure. Failed responses never carry `display_value`, and error bodies never echo SQL, DSNs or driver text.
 
-[![][back-to-top]](#readme-top)
-
-## 🧭 Smart routing
-
-Deterministic rules run first, in order, and the first match short-circuits:
-
-| Rule | When | Result |
-|---|---|---|
-| `R1` authoritative write | write + authoritative | canonical only (confidence 1.0) |
-| `R2` sensitive write | write + sensitive | canonical only (0.95) |
-| `R3` definition query | read + definition | canonical only (1.0) |
-| `R4` canonical update | write + existing canonical | canonical + first non-canonical channel (0.9) |
-| `R5` large document | write + body ≥ 4096 bytes | canonical + every non-canonical channel (0.85) |
-| `R6` exploratory query | read + exploratory | non-canonical channels, canonical as fallback (0.8) |
-| `R7` aggregate dual read | read + aggregate | canonical + non-canonical channels (0.75) |
-
-Only ambiguous tasks reach the **AFM-D System One** choice service. The client appends `/v1/systemone` to `AGENTMEM_SYSTEMONE_ENDPOINT` — that path is outbound, it is not a route of this service. It runs with a 5000 ms timeout, a 256-entry decision cache, `min_confidence` low-score protection, a `max_choices` candidate cap, and a fail-closed fallback to the canonical body. The fail-closed fallback is structural: it is hard-set at construction and cannot be configured away.
-
-Routing is **dual-path**: writes decide projections, reads decide query channels, and migration reconciles existing knowledge in both directions. See [docs/routing.md](./docs/routing.md).
+<div align="right">
 
 [![][back-to-top]](#readme-top)
 
-## 🧩 Engine plugins
-
-`internal/adapter` defines the `Adapter` port. Built-ins cover the canonical body and local projections; the four Python-ecosystem engines are first-class Go plugin packages under `internal/plugins/<engine>/`.
-
-| Engine | kind | Wire protocol | Capabilities |
-|---|---|---|---|
-| OKF (built-in) | `okf` | in-process | canonical lookup, query only |
-| Memory (built-in) | `memory` | in-process | vector / semantic |
-| pgvector (built-in) | `pgvector` | parameterized SQL | vector / semantic |
-| LlamaIndex | `llamaindex` | HTTP | vector / semantic |
-| PageIndex | `pageindex` | HTTP | semantic / page_level |
-| GraphRAG | `graphrag` | CLI stdio | graph |
-| LightRAG | `lightrag` | HTTP | vector / semantic / graph |
-
-Each plugin owns a validated `plugin.yaml` with a declarative `sdk_boundary` (sidecar, `agentmem-bridge/v1` wire protocol, endpoints, capability mapping, credential reference), an `Adapter` + `Lifecycle` implementation, health checks and a versioned protocol fingerprint. The real SDK connection lives behind that boundary — a sidecar implements the line protocol — rather than in a code comment. Go `.so` plugins are deliberately avoided; the registry is explicit and configuration-driven. An empty `endpoint` selects the deterministic offline mock, and `make check-boundaries` keeps the boundary declarative. The generic `http` and `cli` kinds remain available for custom engines. See [docs/plugins.md](./docs/plugins.md) and [docs/adapters.md](./docs/adapters.md).
-
-[![][back-to-top]](#readme-top)
-
-## 🧮 Attested Computations
-
-`POST /v1/computations` and `agentmem compute` load a sanctioned computation from OKF+Git, bind only declared parameter values, execute it through the `postgres` runtime, and return a value **only after** a deterministic Go attester verifies SQL provenance and display-value fidelity. `bigquery`, `dbt`, `python` and `looker` are formal contract skeletons returning `Unsupported` — only `postgres` has an executor today. Every outcome (pass, rejection, error) is audited in `computation_runs` (offline: `data/meta.fake.json`).
-
-```bash
-go run ./cmd/agentmem compute --id computations/revenue-postgres --param year=2026
-go run ./cmd/agentmem computations --limit 10
-```
-
-`testdata/bundle/computations/revenue-postgres.md` is a runnable example; see [docs/computations.md](./docs/computations.md).
-
-[![][back-to-top]](#readme-top)
-
-## 📊 Evaluation
-
-```bash
-go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
-```
-
-Reports Recall@k, Precision@k, nDCG@k, MRR, MAP and HitRate@k as pure functions with no LLM judge. See [docs/architecture.md](./docs/architecture.md) for the metric conventions (coverage recall vs binary hit rate).
-
-[![][back-to-top]](#readme-top)
-
-## 🌐 Web console
-
-`web/` is a dependency-free ES module console with two views: **Status** (health + recent routing decisions) and **API docs** (all 9 HTTP method + path combinations, request/response samples, conventions and error codes).
-
-- 13 languages, matching agenthub: `en`, `zh`, `zh-TW`, `es`, `fr`, `de`, `it`, `ru`, `ja`, `ko`, `pt`, `ar`, `hi`. Resolution order is `?lang=` > local storage > browser language > English; English is the fallback for a missing key. Arabic flips the layout to RTL.
-- Light and dark themes share one monochrome grey scale. The theme is resolved before the first paint, follows the OS until the visitor picks one, and only an explicit choice is stored in `agentmem.theme`.
-- `?view=docs` opens the API documentation directly.
-- Methods, paths, field names and JSON samples render verbatim in every locale; only prose is translated. Endpoint data mirrors `internal/handlers/http.go`.
-- The page ships its own CSP meta (`default-src 'none'`, same-origin assets, the inline theme bootstrap allowed by SHA-256) and `web/tests/security.test.mjs` fails if the digest and the script ever drift.
-- Web rendering is checked with [impeccable][impeccable-link]; the monochrome invariant is kept and the `.notice` side-accent border (a known slop tell) is intentionally avoided.
-
-```bash
-# Source-level check (no browser needed)
-make web-audit
-
-# Live element-level check: backend → dev server → scan
-go run ./cmd/agentmem serve  # repo root, listens on :8080
-cd web && bun run dev        # Vite dev server on :5173
-bun run audit:live           # = bun x impeccable detect http://localhost:5173
-
-# Save the report (redirect output; findings print to the terminal by default)
-bun x impeccable detect http://localhost:5173 --json > impeccable-report.json
-bun x impeccable detect http://localhost:5173 > impeccable-report.txt
-bun x impeccable detect http://localhost:5173 --quiet
-```
-
-Serve `web/` directly with any static file server, or bundle it with Vite (`cd web && bun install --frozen-lockfile && bun run build`). No runtime framework is required, and the Go binary does not depend on a JS runtime. Frontend checks run offline with `cd web && bun test` (Bun's built-in test runner, no extra dependencies).
-
-[![][back-to-top]](#readme-top)
+</div>
 
 ## 🔐 Authentication and access control
 
@@ -352,7 +305,122 @@ Missing or unknown credentials answer `401` with `WWW-Authenticate: Bearer`; a v
 
 Tokens are static: rotating one means editing `.env` and restarting. `AGENTMEM_MODE=production` refuses to start without authentication, without at least one token, with a DSN containing `sslmode=disable`, or with an outbound endpoint but no `AGENTMEM_EGRESS_ALLOWED_HOSTS`. Identity is established once, at the handler boundary: a subject in a request body or query string is ignored, never trusted. See [docs/security.md](./docs/security.md) for the threat model.
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧭 Smart routing
+
+Deterministic rules run first, in order, and the first match short-circuits:
+
+| Rule | When | Result |
+|---|---|---|
+| `R1` authoritative write | write + authoritative | canonical only (confidence 1.0) |
+| `R2` sensitive write | write + sensitive | canonical only (0.95) |
+| `R3` definition query | read + definition | canonical only (1.0) |
+| `R4` canonical update | write + existing canonical | canonical + first non-canonical channel (0.9) |
+| `R5` large document | write + body ≥ 4096 bytes | canonical + every non-canonical channel (0.85) |
+| `R6` exploratory query | read + exploratory | non-canonical channels, canonical as fallback (0.8) |
+| `R7` aggregate dual read | read + aggregate | canonical + non-canonical channels (0.75) |
+
+Only ambiguous tasks reach the **AFM-D System One** choice service. The client appends `/v1/systemone` to `AGENTMEM_SYSTEMONE_ENDPOINT` — that path is outbound, it is not a route of this service. It runs with a 5000 ms timeout, a 256-entry decision cache, `min_confidence` low-score protection, a `max_choices` candidate cap, and a fail-closed fallback to the canonical body. The fail-closed fallback is structural: it is hard-set at construction and cannot be configured away.
+
+Routing is **dual-path**: writes decide projections, reads decide query channels, and migration reconciles existing knowledge in both directions. See [docs/routing.md](./docs/routing.md).
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧩 Engine plugins
+
+`internal/adapter` defines the `Adapter` port. Built-ins cover the canonical body and local projections; the four Python-ecosystem engines are first-class Go plugin packages under `internal/plugins/<engine>/`.
+
+| Engine | kind | Wire protocol | Capabilities |
+|---|---|---|---|
+| OKF (built-in) | `okf` | in-process | canonical lookup, query only |
+| Memory (built-in) | `memory` | in-process | vector / semantic |
+| pgvector (built-in) | `pgvector` | parameterized SQL | vector / semantic |
+| LlamaIndex | `llamaindex` | HTTP | vector / semantic |
+| PageIndex | `pageindex` | HTTP | semantic / page_level |
+| GraphRAG | `graphrag` | CLI stdio | graph |
+| LightRAG | `lightrag` | HTTP | vector / semantic / graph |
+
+Each plugin owns a validated `plugin.yaml` with a declarative `sdk_boundary` (sidecar, `agentmem-bridge/v1` wire protocol, endpoints, capability mapping, credential reference), an `Adapter` + `Lifecycle` implementation, health checks and a versioned protocol fingerprint. The real SDK connection lives behind that boundary — a sidecar implements the line protocol — rather than in a code comment. Go `.so` plugins are deliberately avoided; the registry is explicit and configuration-driven. An empty `endpoint` selects the deterministic offline mock, and `make check-boundaries` keeps the boundary declarative. The generic `http` and `cli` kinds remain available for custom engines. See [docs/plugins.md](./docs/plugins.md) and [docs/adapters.md](./docs/adapters.md).
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🧮 Attested Computations
+
+`POST /v1/computations` and `agentmem compute` load a sanctioned computation from OKF+Git, bind only declared parameter values, execute it through the `postgres` runtime, and return a value **only after** a deterministic Go attester verifies SQL provenance and display-value fidelity. `bigquery`, `dbt`, `python` and `looker` are formal contract skeletons returning `Unsupported` — only `postgres` has an executor today. Every outcome (pass, rejection, error) is audited in `computation_runs` (offline: `data/meta.fake.json`).
+
+```bash
+go run ./cmd/agentmem compute --id computations/revenue-postgres --param year=2026
+go run ./cmd/agentmem computations --limit 10
+```
+
+`testdata/bundle/computations/revenue-postgres.md` is a runnable example; see [docs/computations.md](./docs/computations.md).
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 📊 Evaluation
+
+```bash
+go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
+```
+
+Reports Recall@k, Precision@k, nDCG@k, MRR, MAP and HitRate@k as pure functions with no LLM judge. See [docs/architecture.md](./docs/architecture.md) for the metric conventions (coverage recall vs binary hit rate).
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🌐 Web console
+
+`web/` is a dependency-free ES module console with two views: **Status** (health + recent routing decisions) and **API docs** (all 9 HTTP method + path combinations, request/response samples, conventions and error codes).
+
+- 13 languages, matching agenthub: `en`, `zh`, `zh-TW`, `es`, `fr`, `de`, `it`, `ru`, `ja`, `ko`, `pt`, `ar`, `hi`. Resolution order is `?lang=` > local storage > browser language > English; English is the fallback for a missing key. Arabic flips the layout to RTL.
+- Light and dark themes share one monochrome grey scale. The theme is resolved before the first paint, follows the OS until the visitor picks one, and only an explicit choice is stored in `agentmem.theme`.
+- `?view=docs` opens the API documentation directly.
+- Methods, paths, field names and JSON samples render verbatim in every locale; only prose is translated. Endpoint data mirrors `internal/handlers/http.go`.
+- The page ships its own CSP meta (`default-src 'none'`, same-origin assets, the inline theme bootstrap allowed by SHA-256) and `web/tests/security.test.mjs` fails if the digest and the script ever drift.
+- Web rendering is checked with [impeccable][impeccable-link]; the monochrome invariant is kept and the `.notice` side-accent border (a known slop tell) is intentionally avoided.
+
+```bash
+# Source-level check (no browser needed)
+make web-audit
+
+# Live element-level check: backend → dev server → scan
+go run ./cmd/agentmem serve  # repo root, listens on :8080
+cd web && bun run dev        # Vite dev server on :5173
+bun run audit:live           # = bun x impeccable detect http://localhost:5173
+
+# Save the report (redirect output; findings print to the terminal by default)
+bun x impeccable detect http://localhost:5173 --json > impeccable-report.json
+bun x impeccable detect http://localhost:5173 > impeccable-report.txt
+bun x impeccable detect http://localhost:5173 --quiet
+```
+
+Serve `web/` directly with any static file server, or bundle it with Vite (`cd web && bun install --frozen-lockfile && bun run build`). No runtime framework is required, and the Go binary does not depend on a JS runtime. Frontend checks run offline with `cd web && bun test` (Bun's built-in test runner, no extra dependencies).
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🔏 Trust store security
 
@@ -364,7 +432,11 @@ docker run --rm --entrypoint cat <image> /etc/ssl/certs/ca-certificates.crt > /t
 scripts/check-emudhra.sh /tmp/image-ca.crt
 ```
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🔨 Development
 
@@ -384,7 +456,11 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 
 `go test ./...` passes without Postgres, network or credentials. Set `AGENTMEM_TEST_PG_DSN` to enable the optional real-PostgreSQL integration test.
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ## 📚 Documentation
 
@@ -401,7 +477,21 @@ All detailed docs live under [`docs/`](./docs) and are written in Chinese:
 | [Attested Computation](./docs/computations.md) | Contract, parameter binding, attester chain, verdict audit |
 | [Routing](./docs/routing.md) | Rule-first decision, System One, dual-path reconciliation |
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
+
+## 📝 License
+
+MIT. See [LICENSE](./LICENSE).
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
 
 ## 🤝 Engineering conventions
 
@@ -412,24 +502,27 @@ This repository follows the Harness Engineering philosophy: the repository is th
 - [`task.md`](./task.md) — implementation task checklist
 - [`SECURITY.md`](./SECURITY.md) — how to report a vulnerability
 
+<div align="right">
+
 [![][back-to-top]](#readme-top)
+
+</div>
 
 ---
 
-## 📝 License
+<div align="center">
 
-MIT. See [LICENSE](./LICENSE).
+Copyright © 2026 [ariacompute][org]. <br/>
+This project is [MIT](./LICENSE) licensed.
 
-[![][back-to-top]](#readme-top)
+</div>
 
-<!-- link definitions -->
+<!-- LINK GROUP -->
 
-[repo-link]: https://github.com/ariacompute/agentmem
+[org]: https://github.com/ariacompute
 [deeptutor-link]: https://github.com/HKUDS/DeepTutor
 [okf-link]: https://github.com/GoogleCloudPlatform/open-knowledge-format
 [impeccable-link]: https://github.com/pbakaus/impeccable
-
-[image-banner]: ./docs/assets/banner.svg
 
 [release-shield]: https://img.shields.io/github/v/release/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
 [release-link]: https://github.com/ariacompute/agentmem/releases
@@ -448,14 +541,5 @@ MIT. See [LICENSE](./LICENSE).
 [docs-link]: ./docs
 [i18n-shield]: https://img.shields.io/badge/console-13_locales-555?style=flat-square&labelColor=black
 [web-console-link]: #-web-console
-
-[stars-shield]: https://img.shields.io/github/stars/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
-[stars-link]: https://github.com/ariacompute/agentmem/stargazers
-[forks-shield]: https://img.shields.io/github/forks/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
-[forks-link]: https://github.com/ariacompute/agentmem/network/members
-[issues-shield]: https://img.shields.io/github/issues/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
-[issues-link]: https://github.com/ariacompute/agentmem/issues
-[contributors-shield]: https://img.shields.io/github/contributors/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
-[contributors-link]: https://github.com/ariacompute/agentmem/graphs/contributors
 
 [back-to-top]: https://img.shields.io/badge/-BACK_TO_TOP-151515?style=flat-square
