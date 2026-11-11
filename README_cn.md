@@ -67,6 +67,7 @@ agentmem 只回答 Agent 的一个问题：*这份知识的哪一份副本才算
 - 🧭 **规则先于 System One** —— 概率选择永远不能覆盖确定性的权威判断；只有真正模糊的任务才交给模型。
 - 🔒 **失败关闭而非失败放行** —— 路由超时或报错一律回落到主干正文，且不存在关闭该行为的开关。
 - 🧪 **离线测试是硬约束** —— `go test ./...` 无需 Postgres、网络或凭据即可通过，每个外部依赖都有 fake。
+- ✅ **用户视角验收** —— `make e2e` 离线驱动真实二进制与 HTTP API，覆盖 10 条 CLI 命令、9 条路由、鉴权、配置故障关闭与 Web 控制台。
 - 🧩 **显式引擎注册表** —— 插件由 `plugin.yaml` 声明，`sdk_boundary` 由机器校验；刻意不使用 Go `.so` 动态插件。
 - 🪶 **零依赖控制台** —— `web/` 是原生 ES module，单色、13 语言、无运行时框架、无 CDN 资源。
 
@@ -103,6 +104,7 @@ go run ./cmd/agentmem put --id metrics/churn --type Metric \
 go run ./cmd/agentmem query --q "define churn" --subject alice
 go run ./cmd/agentmem migrate --direction canonical_to_rag --target memory
 go run ./cmd/agentmem decisions --limit 10
+make e2e  # 用户视角离线黑盒验收
 ```
 
 未设置 `AGENTMEM_PG_DSN` 时，服务使用**文件持久化**的 `MetaStore` fake（快照位于 `data/meta.fake.json`，使多个 CLI 进程共享状态）、内存向量库与确定性 System One stub，不需要数据库、网络或任何密钥。该快照仅为离线 fallback，生产路径完全走 PostgreSQL。此路径也不需要 `.env`：文件缺失时 `config.Load` 回退 `Default()`。
@@ -453,8 +455,19 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 | `make web` | 安装并用 Vite 构建控制台 |
 | `make web-audit` | 通过 impeccable 做源码级 web 渲染/反模式检查 |
 | `make clean` | 清理 `bin/` 与 `web/dist` |
+| `make e2e` | 用户视角离线黑盒验收（`scripts/e2e.sh`） |
 
 `go test ./...` 无需 Postgres、网络或凭据即可通过。设置 `AGENTMEM_TEST_PG_DSN` 可启用可选的真实 PostgreSQL 集成测试。
+
+`make e2e` 运行 [`scripts/e2e.sh`](./scripts/e2e.sh)，从用户视角做黑盒验收：编译真实二进制，逐条走通全部 10 个 CLI 命令与 9 条 HTTP 路由，并校验 scope 权限矩阵、ACL、限流、配置故障关闭、Web 控制台静态检查与跨进程状态，最后串联 `go vet` / `go test` / `make validate` / `make check-trust-store` 等既有门禁。全程离线（`GOPROXY=off`、文件版 fake 存储、无 Postgres / 网络 / 凭据）；可选工具 `bun`、`openssl` 缺失时明确记为 `SKIP`，绝不静默通过。
+
+```bash
+make e2e
+make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
+./scripts/e2e.sh --filter '^H' --keep  # 只报告 HTTP 组；保留临时目录
+```
+
+完整用例矩阵、退出码与排错方式见 [docs/e2e.md](./docs/e2e.md)。
 
 <div align="right">
 
@@ -476,6 +489,7 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 | [引擎插件](./docs/plugins.md) | 四个引擎作为 Go 包，声明式 `sdk_boundary` |
 | [受批准计算](./docs/computations.md) | 契约、参数绑定、attester 链路、verdict 审计 |
 | [路由](./docs/routing.md) | 规则优先决策、System One、双程对账 |
+| [端到端验收](./docs/e2e.md) | 用户视角离线黑盒套件、用例矩阵与排错 |
 
 <div align="right">
 

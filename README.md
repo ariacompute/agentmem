@@ -67,6 +67,7 @@ The design draws on [HKUDS/DeepTutor][deeptutor-link] (pluggable retrievers, ver
 - 🧭 **Rules run before System One** — A probabilistic choice can never override a deterministic authoritative decision. Ambiguity reaches the model; everything else short-circuits.
 - 🔒 **Fail closed, not fail open** — Routing timeouts and errors land on the canonical body. There is no switch to disable that fallback.
 - 🧪 **Offline tests are a hard constraint** — `go test ./...` passes without Postgres, network or credentials. Every external dependency has a fake.
+- ✅ **User-perspective acceptance** — `make e2e` drives the real binary and HTTP API offline: 10 CLI commands, 9 routes, auth, config fail-closed rules and the web console.
 - 🧩 **Explicit engine registry** — Plugins are declared in `plugin.yaml` with a machine-checked `sdk_boundary`. Go `.so` plugins are deliberately avoided.
 - 🪶 **Zero-dependency console** — `web/` is plain ES modules, monochrome, 13 locales, no runtime framework and no CDN asset.
 
@@ -103,6 +104,7 @@ go run ./cmd/agentmem put --id metrics/churn --type Metric \
 go run ./cmd/agentmem query --q "define churn" --subject alice
 go run ./cmd/agentmem migrate --direction canonical_to_rag --target memory
 go run ./cmd/agentmem decisions --limit 10
+make e2e  # user-perspective offline acceptance
 ```
 
 Without `AGENTMEM_PG_DSN` the service uses a file-backed `MetaStore` fake (snapshot at `data/meta.fake.json`, so separate CLI processes share state), an in-memory vector store and a deterministic System One stub. No network, Postgres or API keys are needed. The snapshot is only an offline fallback; the production path is entirely PostgreSQL. No `.env` is required either: `config.Load` falls back to `Default()` when the file is absent.
@@ -453,8 +455,19 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 | `make web` | install the console and build it with Vite |
 | `make web-audit` | source-level web rendering/slop check via impeccable |
 | `make clean` | remove `bin/` and `web/dist` |
+| `make e2e` | user-perspective offline black-box acceptance (`scripts/e2e.sh`) |
 
 `go test ./...` passes without Postgres, network or credentials. Set `AGENTMEM_TEST_PG_DSN` to enable the optional real-PostgreSQL integration test.
+
+`make e2e` runs [`scripts/e2e.sh`](./scripts/e2e.sh), a user-perspective acceptance suite: it compiles the real binary, drives all 10 CLI commands and all 9 HTTP routes, then checks the scope matrix, ACL, rate limiting, config fail-closed rules, Web console static checks and cross-process state. It ends with the existing `go vet` / `go test` / `make validate` / `make check-trust-store` gates. Everything stays offline (`GOPROXY=off`, file-fake store, no Postgres, network or credentials); a missing optional `bun` or `openssl` is reported as `SKIP`, never silently passed.
+
+```bash
+make e2e
+make e2e E2E_ARGS='--no-gates'         # black-box cases only
+./scripts/e2e.sh --filter '^H' --keep  # HTTP cases only; keep the temp workspace
+```
+
+See [docs/e2e.md](./docs/e2e.md) for the full case matrix, exit codes and troubleshooting.
 
 <div align="right">
 
@@ -476,6 +489,7 @@ All detailed docs live under [`docs/`](./docs) and are written in Chinese:
 | [Engine plugins](./docs/plugins.md) | Four engines as Go packages, declarative `sdk_boundary` |
 | [Attested Computation](./docs/computations.md) | Contract, parameter binding, attester chain, verdict audit |
 | [Routing](./docs/routing.md) | Rule-first decision, System One, dual-path reconciliation |
+| [E2E acceptance](./docs/e2e.md) | User-perspective offline black-box suite, case matrix and troubleshooting |
 
 <div align="right">
 

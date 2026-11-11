@@ -1,4 +1,4 @@
-.PHONY: build test vet eval validate check-boundaries check-trust-store run clean web web-audit
+.PHONY: build test vet eval validate check-boundaries check-trust-store run clean web web-audit e2e
 
 BINARY := bin/agentmem
 PKG := ./...
@@ -44,6 +44,12 @@ web:
 #   cd web && bun run dev   # then: bun run audit:live
 web-audit:
 	cd web && bun x impeccable@latest detect src index.html
+
+# 用户视角黑盒验收：编译真实二进制、驱动 CLI 与真实 HTTP 服务。
+# 全程离线（GOPROXY=off），不需要 Postgres、网络或凭据；临时产物自动回收。
+# 例：make e2e / make e2e E2E_ARGS='--no-gates' / make e2e E2E_ARGS='--filter ^H --keep'
+e2e:
+	./scripts/e2e.sh $(E2E_ARGS)
 
 clean:
 	rm -rf bin web/dist
