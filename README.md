@@ -50,6 +50,7 @@ and **Attested Computations** turn sanctioned SQL kept in Git into verified, aud
 **Trust & governance**
 
 - [🔏 Trust store security](#-trust-store-security)
+- [🧪 Test](#-test)
 - [🔨 Development](#-development)
 - [📚 Documentation](#-documentation)
 - [📝 License](#-license)
@@ -104,7 +105,6 @@ go run ./cmd/agentmem put --id metrics/churn --type Metric \
 go run ./cmd/agentmem query --q "define churn" --subject alice
 go run ./cmd/agentmem migrate --direction canonical_to_rag --target memory
 go run ./cmd/agentmem decisions --limit 10
-make e2e  # user-perspective offline acceptance
 ```
 
 Without `AGENTMEM_PG_DSN` the service uses a file-backed `MetaStore` fake (snapshot at `data/meta.fake.json`, so separate CLI processes share state), an in-memory vector store and a deterministic System One stub. No network, Postgres or API keys are needed. The snapshot is only an offline fallback; the production path is entirely PostgreSQL. No `.env` is required either: `config.Load` falls back to `Default()` when the file is absent.
@@ -440,6 +440,26 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 
 </div>
 
+## 🧪 Test
+
+agentmem ships a user-perspective black-box acceptance suite that drives the compiled binary and the real HTTP API — no unit tests, no internal packages, fully offline.
+
+```bash
+make e2e                               # full run, including existing gates
+make e2e E2E_ARGS='--no-gates'         # black-box cases only
+./scripts/e2e.sh --filter '^H' --keep  # HTTP cases only; keep the temp workspace
+```
+
+What it covers: all 10 CLI commands and all 9 HTTP routes end-to-end, plus the auth/scope matrix, ACL, rate limiting, config fail-closed rules, Web console static checks and cross-process state. It finishes with the existing `go vet` / `go test` / `make validate` / `make check-trust-store` gates.
+
+Everything runs offline (`GOPROXY=off`, file-fake store, no Postgres/network/credentials). A missing optional `bun` or `openssl` is reported as `SKIP`, never silently passed. See [docs/e2e.md](./docs/e2e.md) for the full case matrix, exit codes and troubleshooting.
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
 ## 🔨 Development
 
 | Target | Effect |
@@ -455,19 +475,9 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 | `make web` | install the console and build it with Vite |
 | `make web-audit` | source-level web rendering/slop check via impeccable |
 | `make clean` | remove `bin/` and `web/dist` |
-| `make e2e` | user-perspective offline black-box acceptance (`scripts/e2e.sh`) |
+| `make e2e` | user-perspective offline black-box acceptance ([Test](#-test)) |
 
 `go test ./...` passes without Postgres, network or credentials. Set `AGENTMEM_TEST_PG_DSN` to enable the optional real-PostgreSQL integration test.
-
-`make e2e` runs [`scripts/e2e.sh`](./scripts/e2e.sh), a user-perspective acceptance suite: it compiles the real binary, drives all 10 CLI commands and all 9 HTTP routes, then checks the scope matrix, ACL, rate limiting, config fail-closed rules, Web console static checks and cross-process state. It ends with the existing `go vet` / `go test` / `make validate` / `make check-trust-store` gates. Everything stays offline (`GOPROXY=off`, file-fake store, no Postgres, network or credentials); a missing optional `bun` or `openssl` is reported as `SKIP`, never silently passed.
-
-```bash
-make e2e
-make e2e E2E_ARGS='--no-gates'         # black-box cases only
-./scripts/e2e.sh --filter '^H' --keep  # HTTP cases only; keep the temp workspace
-```
-
-See [docs/e2e.md](./docs/e2e.md) for the full case matrix, exit codes and troubleshooting.
 
 <div align="right">
 

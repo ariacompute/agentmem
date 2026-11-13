@@ -50,6 +50,7 @@
 **信任与治理**
 
 - [🔏 信任库安全](#-信任库安全)
+- [🧪 测试](#-测试)
 - [🔨 开发](#-开发)
 - [📚 文档](#-文档)
 - [📝 许可证](#-许可证)
@@ -104,7 +105,6 @@ go run ./cmd/agentmem put --id metrics/churn --type Metric \
 go run ./cmd/agentmem query --q "define churn" --subject alice
 go run ./cmd/agentmem migrate --direction canonical_to_rag --target memory
 go run ./cmd/agentmem decisions --limit 10
-make e2e  # 用户视角离线黑盒验收
 ```
 
 未设置 `AGENTMEM_PG_DSN` 时，服务使用**文件持久化**的 `MetaStore` fake（快照位于 `data/meta.fake.json`，使多个 CLI 进程共享状态）、内存向量库与确定性 System One stub，不需要数据库、网络或任何密钥。该快照仅为离线 fallback，生产路径完全走 PostgreSQL。此路径也不需要 `.env`：文件缺失时 `config.Load` 回退 `Default()`。
@@ -440,6 +440,26 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 
 </div>
 
+## 🧪 测试
+
+agentmem 内置一套用户视角黑盒验收套件：驱动编译后的真实二进制与 HTTP API，不做单元测试、不引用内部包，全程离线。
+
+```bash
+make e2e                               # 完整运行（含既有门禁）
+make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
+./scripts/e2e.sh --filter '^H' --keep  # 只报告 HTTP 组；保留临时目录
+```
+
+覆盖范围：全部 10 个 CLI 命令与 9 条 HTTP 路由的端到端流程，外加 scope 权限矩阵、ACL、限流、配置故障关闭、Web 控制台静态检查与跨进程状态，最后串联 `go vet` / `go test` / `make validate` / `make check-trust-store` 等既有门禁。
+
+全程离线（`GOPROXY=off`、文件版 fake 存储、无 Postgres / 网络 / 凭据）；可选工具 `bun`、`openssl` 缺失时明确记为 `SKIP`，绝不静默通过。完整用例矩阵、退出码与排错方式见 [docs/e2e.md](./docs/e2e.md)。
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
 ## 🔨 开发
 
 | 目标 | 作用 |
@@ -455,19 +475,9 @@ scripts/check-emudhra.sh /tmp/image-ca.crt
 | `make web` | 安装并用 Vite 构建控制台 |
 | `make web-audit` | 通过 impeccable 做源码级 web 渲染/反模式检查 |
 | `make clean` | 清理 `bin/` 与 `web/dist` |
-| `make e2e` | 用户视角离线黑盒验收（`scripts/e2e.sh`） |
+| `make e2e` | 用户视角离线黑盒验收（见[测试](#-测试)） |
 
 `go test ./...` 无需 Postgres、网络或凭据即可通过。设置 `AGENTMEM_TEST_PG_DSN` 可启用可选的真实 PostgreSQL 集成测试。
-
-`make e2e` 运行 [`scripts/e2e.sh`](./scripts/e2e.sh)，从用户视角做黑盒验收：编译真实二进制，逐条走通全部 10 个 CLI 命令与 9 条 HTTP 路由，并校验 scope 权限矩阵、ACL、限流、配置故障关闭、Web 控制台静态检查与跨进程状态，最后串联 `go vet` / `go test` / `make validate` / `make check-trust-store` 等既有门禁。全程离线（`GOPROXY=off`、文件版 fake 存储、无 Postgres / 网络 / 凭据）；可选工具 `bun`、`openssl` 缺失时明确记为 `SKIP`，绝不静默通过。
-
-```bash
-make e2e
-make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
-./scripts/e2e.sh --filter '^H' --keep  # 只报告 HTTP 组；保留临时目录
-```
-
-完整用例矩阵、退出码与排错方式见 [docs/e2e.md](./docs/e2e.md)。
 
 <div align="right">
 
