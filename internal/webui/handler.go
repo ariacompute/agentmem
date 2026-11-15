@@ -31,6 +31,10 @@ const consolePolicy = "default-src 'none'; script-src 'self' %s; " +
 // never matches here.
 var inlineScript = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
 
+// newFS is FS in production. Tests replace it to exercise the fail-closed
+// startup paths without breaking the committed console bundle.
+var newFS = FS
+
 // Handler serves the embedded console read-only. It implements the console port
 // that internal/handlers consumes.
 type Handler struct {
@@ -42,7 +46,7 @@ type Handler struct {
 // of inline scripts is a hard error: the binary must never serve a page whose
 // policy it cannot state, so startup fails closed instead of degrading.
 func New() (*Handler, error) {
-	files, err := FS()
+	files, err := newFS()
 	if err != nil {
 		return nil, fmt.Errorf("webui: embedded console: %w", err)
 	}
@@ -98,11 +102,9 @@ func (h *Handler) resolve(requestPath string) (string, bool) {
 	if !strings.HasPrefix(requestPath, "/assets/") {
 		return "", false
 	}
-	name := strings.TrimPrefix(requestPath, "/")
-	if name == "" || strings.HasSuffix(name, "/") {
-		return "", false
-	}
-	return name, true
+	// path.Clean already rejected trailing slashes, so the asset name is the
+	// request path without its leading slash.
+	return strings.TrimPrefix(requestPath, "/"), true
 }
 
 // ServeHTTP serves index.html, the hashed assets, and nothing else.

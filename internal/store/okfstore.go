@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -126,21 +127,24 @@ func (s *OKFStore) commitFiles(clean string) (map[string][]byte, error) {
 		return nil, err
 	}
 	dir := filepath.Dir(p)
-	candidates := []string{p, filepath.Join(dir, "index.md"), filepath.Join(dir, "log.md")}
+	// clean is already a validated, slash-separated concept id, so the commit
+	// keys are derived from it directly instead of from the absolute paths.
+	relDir := path.Dir(clean)
+	candidates := []struct{ file, rel string }{
+		{p, clean + ".md"},
+		{filepath.Join(dir, "index.md"), path.Join(relDir, "index.md")},
+		{filepath.Join(dir, "log.md"), path.Join(relDir, "log.md")},
+	}
 	out := map[string][]byte{}
 	for _, c := range candidates {
-		data, err := os.ReadFile(c)
+		data, err := os.ReadFile(c.file)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return nil, err
 		}
-		rel, err := filepath.Rel(s.Bundle.Root, c)
-		if err != nil {
-			return nil, err
-		}
-		out[filepath.ToSlash(rel)] = data
+		out[c.rel] = data
 	}
 	return out, nil
 }

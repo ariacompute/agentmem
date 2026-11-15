@@ -86,8 +86,11 @@ func Hash(data []byte) string {
 const (
 	maxResourceBytes = 1 << 20
 	maxDocumentBytes = 8 << 20
-	maxBundleEntries = 100000
 )
+
+// maxBundleEntries bounds one directory walk. It is a variable so the traversal
+// budget can be exercised without materialising a 100k-entry bundle.
+var maxBundleEntries = 100000
 
 // ReadResource reads a non-Markdown bundle resource (for example a sanctioned
 // .sql file) referenced by an Attested Computation. It applies its own path
@@ -190,7 +193,9 @@ func (b *Bundle) Delete(id string) error {
 func (b *Bundle) List() ([]string, error) {
 	var out []string
 	scanned := 0
-	err := filepath.WalkDir(b.Root, func(p string, d fs.DirEntry, err error) error {
+	// Walking a filesystem rooted at the bundle keeps every path relative, so
+	// ids are derived from the walk itself instead of from a second Rel.
+	err := fs.WalkDir(os.DirFS(b.Root), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -204,11 +209,7 @@ func (b *Bundle) List() ([]string, error) {
 		if reserved[base] {
 			return nil
 		}
-		rel, err := filepath.Rel(b.Root, p)
-		if err != nil {
-			return err
-		}
-		out = append(out, filepath.ToSlash(strings.TrimSuffix(rel, ".md")))
+		out = append(out, filepath.ToSlash(strings.TrimSuffix(p, ".md")))
 		return nil
 	})
 	sort.Strings(out)
@@ -348,6 +349,21 @@ func cleanID(id string) string {
 	return c
 }
 
+// tmpFile is the subset of *os.File the atomic write needs.
+type tmpFile interface {
+	Name() string
+	Chmod(os.FileMode) error
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+}
+
+// createTemp creates the temporary file next to the target. It is a seam so the
+// durability failure paths (chmod, write, fsync, close) stay testable.
+var createTemp = func(dir string) (tmpFile, error) {
+	return os.CreateTemp(dir, ".agentmem-*.tmp")
+}
+
 // atomicWrite uses a unique, non-world-readable temporary file in the target
 // directory. A fixed ".tmp" name would be raceable and could follow a symlink
 // planted next to the concept. fsync before rename keeps the body durable.
@@ -356,7 +372,7 @@ func atomicWrite(p string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, ".agentmem-*.tmp")
+	f, err := createTemp(dir)
 	if err != nil {
 		return err
 	}

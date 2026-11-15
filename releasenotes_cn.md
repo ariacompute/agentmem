@@ -15,6 +15,7 @@
 - **Web 渲染检查（impeccable）**：接入 [pbakaus/impeccable](https://github.com/pbakaus/impeccable) 做设计与反模式检测。`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器），`bun run audit:live` 针对运行中站点加本地 Chrome/Edge 做完整元素级检查（对比度、过小字号、间距）。保持单色不变式：移除被标记为「AI 痕迹」的 `.notice` 侧边强调边框，并提升三级文字对比度以满足 WCAG AA。
 - **`.env` 配置**：唯一配置文件为被 git 忽略的 `.env`（模板 `.env.example`），采用封闭 `AGENTMEM_*` 键白名单、进程环境覆盖与零依赖解析；Docker Compose 通过 `env_file` 与 `${...}` 插值复用同一文件，版本化文件不含凭据。
 - **安全加固（不兼容变更）**：请求不再能自报身份。Bearer 令牌以 SHA-256 摘要配置，映射到主体与权限，六个权限覆盖全部 9 条路由（`401` / `403` / `429` 进入对外契约）。私有正文仅 owner 可读，被拒读取与文档不存在不可区分。错误体统一脱敏，出向调用走主机白名单并逐跳复检重定向，bundle 写入防符号链接逃逸且以 `0600` 原子落盘，OKF/YAML 解析与计算执行均有资源上限，危险 SQL 函数被拒，CLI 桥接只允许裸可执行程序名。生产环境缺少鉴权、缺少令牌、DSN 含 `sslmode=disable` 或未配出向白名单时拒绝启动。容器以非 root 运行且发布端口仅绑回环，CI/release 采用最小 `permissions`，`make check-trust-store` 离线扫描 CA bundle 中的 eMudhra（emSign）弱证书指纹。
+- **离线可测性**：所有外部依赖都收敛到可注入的接缝——内嵌清单与 SQL 迁移、GORM 连接、bundle 临时文件创建、插件表，以及 `os.Exit` / 装配 / serve 循环入口——因此过去必须有真实 PostgreSQL、10 万条目 bundle 或损坏清单才能走到的分支，现在只靠 `go test ./...` 即可覆盖，无需数据库、网络或凭据。`safepath.Clean`、`nodeFromYAML` 与 `vcs` 的提交键推导取代了重复的路径 / Rel 逻辑；不可能失败的保护性分支直接删除，而不是留在未测试状态。router 包语句覆盖率 99.6%，剩余两条语句可证明不可达。
 
 ## 已知限制
 

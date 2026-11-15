@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -63,6 +64,12 @@ func gormLogLevel(s string) logger.LogLevel {
 	}
 }
 
+// openGorm opens the GORM connection. Tests replace it to drive the pool, ping
+// and migration steps against an in-memory driver instead of a live PostgreSQL.
+var openGorm = func(dsn string, gl logger.Interface) (*gorm.DB, error) {
+	return gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gl})
+}
+
 // OpenPostgres connects, configures the pool and applies versioned migrations.
 func OpenPostgres(ctx context.Context, o Options) (*PostgresStore, error) {
 	if strings.TrimSpace(o.DSN) == "" {
@@ -78,7 +85,7 @@ func OpenPostgres(ctx context.Context, o Options) (*PostgresStore, error) {
 			Colorful:                  false,
 		},
 	)
-	db, err := gorm.Open(postgres.Open(o.DSN), &gorm.Config{Logger: gl})
+	db, err := openGorm(o.DSN, gl)
 	if err != nil {
 		return nil, fmt.Errorf("meta: open postgres: %w", redactConnectionError(err, o.DSN))
 	}
@@ -134,7 +141,7 @@ func (s *PostgresStore) Migrate(ctx context.Context) error {
 			if count > 0 {
 				return nil
 			}
-			raw, err := migrationFS.ReadFile(name)
+			raw, err := fs.ReadFile(migrationFS, name)
 			if err != nil {
 				return err
 			}

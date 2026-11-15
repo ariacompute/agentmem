@@ -3,8 +3,10 @@ package bridges
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"sort"
 	"strings"
 
@@ -14,7 +16,11 @@ import (
 )
 
 //go:embed engines/*.yaml
-var engineFS embed.FS
+var embeddedEngines embed.FS
+
+// engineFS is the declaration source. Production reads the embedded YAML;
+// tests replace it to exercise the fail-closed parse and validation paths.
+var engineFS fs.FS = embeddedEngines
 
 type engineCaps struct {
 	Vector    bool `yaml:"vector"`
@@ -48,7 +54,7 @@ type EngineSpec struct {
 
 // EngineSpecs loads and validates the embedded engine declarations.
 func EngineSpecs() ([]EngineSpec, error) {
-	entries, err := engineFS.ReadDir("engines")
+	entries, err := fs.ReadDir(engineFS, "engines")
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +67,7 @@ func EngineSpecs() ([]EngineSpec, error) {
 	sort.Strings(names)
 	out := make([]EngineSpec, 0, len(names))
 	for _, name := range names {
-		data, err := engineFS.ReadFile("engines/" + name)
+		data, err := fs.ReadFile(engineFS, "engines/"+name)
 		if err != nil {
 			return nil, err
 		}
@@ -107,28 +113,38 @@ func SpecFor(name string) (EngineSpec, error) {
 	return EngineSpec{}, fmt.Errorf("bridges: no engine spec for %q", name)
 }
 
+// kindFactories is the bridge kind table in registration order.
+var kindFactories = []struct {
+	kind    string
+	factory adapter.Factory
+}{
+	{"http", func(cfg config.AdapterConfig, _ adapter.Deps) (adapter.Adapter, error) {
+		spec, err := SpecFor(cfg.Name)
+		if err != nil {
+			return nil, err
+		}
+		return NewHTTPBridge(cfg, spec)
+	}},
+	{"cli", func(cfg config.AdapterConfig, _ adapter.Deps) (adapter.Adapter, error) {
+		spec, err := SpecFor(cfg.Name)
+		if err != nil {
+			return nil, err
+		}
+		return NewCLIBridge(cfg, spec)
+	}},
+}
+
 // RegisterKinds adds HTTP/CLI factories to the plugin registry. It is
 // idempotent so the CLI and server entry points can both call it.
 func RegisterKinds(r *adapter.Registry) error {
-	if !r.HasKind("http") {
-		if err := r.RegisterKind("http", func(cfg config.AdapterConfig, _ adapter.Deps) (adapter.Adapter, error) {
-			spec, err := SpecFor(cfg.Name)
-			if err != nil {
-				return nil, err
-			}
-			return NewHTTPBridge(cfg, spec)
-		}); err != nil {
-			return err
-		}
+	if r == nil {
+		return errors.New("bridges: nil registry")
 	}
-	if !r.HasKind("cli") {
-		if err := r.RegisterKind("cli", func(cfg config.AdapterConfig, _ adapter.Deps) (adapter.Adapter, error) {
-			spec, err := SpecFor(cfg.Name)
-			if err != nil {
-				return nil, err
-			}
-			return NewCLIBridge(cfg, spec)
-		}); err != nil {
+	for _, k := range kindFactories {
+		if r.HasKind(k.kind) {
+			continue
+		}
+		if err := r.RegisterKind(k.kind, k.factory); err != nil {
 			return err
 		}
 	}

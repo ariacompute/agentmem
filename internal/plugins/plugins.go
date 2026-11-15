@@ -42,13 +42,17 @@ func Kinds() []string {
 	return out
 }
 
+// entries is the compiled-in plugin table. Tests replace it to exercise the
+// failure paths of RegisterAll and Descriptors without a broken manifest.
+var entries = All
+
 // RegisterAll registers every plugin kind. It is idempotent so the CLI and
 // server entry points can both call it.
 func RegisterAll(r *adapter.Registry) error {
 	if r == nil {
 		return fmt.Errorf("plugins: nil registry")
 	}
-	for _, e := range All() {
+	for _, e := range entries() {
 		if r.HasKind(e.Name) {
 			continue
 		}
@@ -61,10 +65,10 @@ func RegisterAll(r *adapter.Registry) error {
 
 // Descriptors returns all validated manifests in stable name order.
 func Descriptors() ([]manifest.Descriptor, error) {
-	entries := All()
-	out := make([]manifest.Descriptor, 0, len(entries))
+	list := entries()
+	out := make([]manifest.Descriptor, 0, len(list))
 	seen := map[string]bool{}
-	for _, e := range entries {
+	for _, e := range list {
 		d, err := e.Descriptor()
 		if err != nil {
 			return nil, fmt.Errorf("plugins: %s: %w", e.Name, err)

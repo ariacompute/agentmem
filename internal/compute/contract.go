@@ -94,10 +94,7 @@ func LoadContract(b *okf.Bundle, conceptID string) (Contract, error) {
 		attester = a.Attester.Resource
 	}
 	sort.Slice(params, func(i, j int) bool { return params[i].Name < params[j].Name })
-	hash, err := contractHash(a.RuntimeID(), kind, sql, params, attester)
-	if err != nil {
-		return Contract{}, err
-	}
+	hash := contractHash(a.RuntimeID(), kind, sql, params, attester)
 	return Contract{
 		ConceptID: conceptID, Runtime: a.RuntimeID(), Kind: kind, Parameters: params,
 		SQL: sql, Source: source, ContractHash: hash,
@@ -220,7 +217,7 @@ func SafeBody(kind, text string) (string, error) {
 	return s, nil
 }
 
-func contractHash(runtime, kind, sql string, params []okf.Parameter, attester string) (string, error) {
+func contractHash(runtime, kind, sql string, params []okf.Parameter, attester string) string {
 	type paramShape struct {
 		Name     string `json:"name"`
 		Type     string `json:"type"`
@@ -230,11 +227,9 @@ func contractHash(runtime, kind, sql string, params []okf.Parameter, attester st
 	for _, p := range params {
 		shapes = append(shapes, paramShape{Name: p.Name, Type: p.Type, Required: p.Required})
 	}
-	raw, err := json.Marshal(shapes)
-	if err != nil {
-		return "", fail(ErrContract, "parameter shape is not serialisable")
-	}
+	// A paramShape holds only strings and a bool, so encoding cannot fail.
+	raw, _ := json.Marshal(shapes)
 	return okf.Hash([]byte(strings.Join([]string{
 		runtime, kind, CanonicalBody(kind, sql), string(raw), attester,
-	}, "\x00"))), nil
+	}, "\x00")))
 }

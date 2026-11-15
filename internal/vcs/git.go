@@ -69,7 +69,11 @@ func (g *GitRepository) Commit(ctx context.Context, message string, files map[st
 		// The shared path boundary cleans the name, rejects NUL/absolute/
 		// traversal/Windows-reserved segments and verifies that neither the
 		// target nor any existing parent symlink escapes the repository.
-		p, err := safepath.Resolve(g.root, name)
+		clean, err := safepath.Clean(name)
+		if err != nil {
+			return "", fmt.Errorf("vcs: path escapes repository %q: %w", name, err)
+		}
+		p, err := safepath.Resolve(g.root, clean)
 		if err != nil {
 			return "", fmt.Errorf("vcs: path escapes repository %q: %w", name, err)
 		}
@@ -79,13 +83,9 @@ func (g *GitRepository) Commit(ctx context.Context, message string, files map[st
 		if err := os.WriteFile(p, files[name], 0o600); err != nil {
 			return "", err
 		}
-		// Stage exactly the resolved path instead of the caller's spelling, so
+		// Stage exactly the validated name instead of the caller's spelling, so
 		// go-git cannot re-join a name that resolved elsewhere.
-		staged, err := filepath.Rel(g.root, p)
-		if err != nil {
-			return "", fmt.Errorf("vcs: stage %s: %w", name, err)
-		}
-		if _, err := w.Add(filepath.ToSlash(staged)); err != nil {
+		if _, err := w.Add(clean); err != nil {
 			return "", fmt.Errorf("vcs: stage %s: %w", name, err)
 		}
 	}
@@ -181,10 +181,9 @@ func (g *GitRepository) Diff(ctx context.Context, from, to string) (string, erro
 		}
 		from = c.ParentHashes[0].String()
 	}
-	fromH, err := g.resolve(from)
-	if err != nil {
-		return "", err
-	}
+	// from is always a commit hash here: either passed explicitly or taken from
+	// the destination commit's parent list above.
+	fromH := plumbing.NewHash(from)
 	cFrom, err := g.repo.CommitObject(fromH)
 	if err != nil {
 		return "", err

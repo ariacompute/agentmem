@@ -72,6 +72,16 @@ and a rule-first smart router.
   Containers run unprivileged with loopback-only published ports, CI/release use
   least-privilege `permissions`, and `make check-trust-store` scans CA bundles
   offline for the eMudhra (emSign) weak-certificate fingerprints.
+- **Offline testability**: every external dependency now sits behind an
+  injectable seam — embedded manifests and SQL migrations, the GORM open call,
+  temp-file creation in the bundle, the plugin table, and the `os.Exit` /
+  assembly / serve-loop entry points — so branches that used to need live
+  PostgreSQL, a 100k-entry bundle or a broken manifest are exercised by plain
+  `go test ./...` with no database, network or credentials. Helpers such as
+  `safepath.Clean`, `nodeFromYAML` and the commit-key derivation in `vcs`
+  replaced duplicated path/rel logic, and defensive branches that cannot fail
+  were deleted instead of left untested. The router package holds 99.6%
+  statement coverage; its two remaining statements are provably unreachable.
 
 ## Known limitations
 

@@ -24,6 +24,48 @@ import (
 	"agentmem/internal/vcs"
 )
 
+// openMetadata returns the structured store, its vector view and a closer.
+// It is a seam so the fail-closed "not a SQLExecutor" path stays testable.
+var openMetadata = func(ctx context.Context, cfg *config.Config) (meta.MetaStore, meta.VectorStore, func() error, error) {
+	var m meta.MetaStore
+	var vectors meta.VectorStore
+	var closer func() error
+	if cfg.Postgres.DSN != "" {
+		lifetime, _ := time.ParseDuration(cfg.Postgres.ConnMaxLifetime)
+		pg, err := meta.OpenPostgres(ctx, meta.Options{
+			DSN: cfg.Postgres.DSN, MaxOpenConns: cfg.Postgres.MaxOpenConns,
+			MaxIdleConns: cfg.Postgres.MaxIdleConns, ConnMaxLifetime: lifetime,
+			LogLevel: cfg.Postgres.LogLevel,
+		})
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		m, vectors, closer = pg, pg, pg.Close
+		return m, vectors, closer, nil
+	}
+	// Offline fallback: persist the fake's structured state so separate CLI
+	// processes share ACL metadata, projections and the decision audit.
+	snapshot := filepath.Join(filepath.Dir(cfg.Git.Root), "meta.fake.json")
+	fake, err := meta.NewFileFakeStore(snapshot)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return fake, fake, fake.Close, nil
+}
+
+// configureRuntimes wires the declared sidecars. It is a seam for the same
+// reason openMetadata is.
+var configureRuntimes = func(rt *compute.RuntimeRegistry, specs []compute.SidecarSpec, hosts []string) error {
+	return rt.Configure(specs, hosts, nil)
+}
+
+// The two plugin tables are seams so the fail-closed registration paths stay
+// testable; production always uses the compiled-in tables.
+var (
+	registerBridges = bridges.RegisterKinds
+	registerPlugins = plugins.RegisterAll
+)
+
 // KnowledgeService is the single orchestration entry point.
 type KnowledgeService struct {
 	Config   *config.Config
@@ -79,36 +121,19 @@ func Assemble(ctx context.Context, cfg *config.Config) (*KnowledgeService, error
 	if err != nil {
 		return nil, err
 	}
-	var m meta.MetaStore
-	var vectors meta.VectorStore
-	var closer func() error
-	if cfg.Postgres.DSN != "" {
-		lifetime, _ := time.ParseDuration(cfg.Postgres.ConnMaxLifetime)
-		pg, err := meta.OpenPostgres(ctx, meta.Options{
-			DSN: cfg.Postgres.DSN, MaxOpenConns: cfg.Postgres.MaxOpenConns,
-			MaxIdleConns: cfg.Postgres.MaxIdleConns, ConnMaxLifetime: lifetime,
-			LogLevel: cfg.Postgres.LogLevel,
-		})
-		if err != nil {
-			return nil, err
-		}
-		m, vectors, closer = pg, pg, pg.Close
-	} else {
-		// Offline fallback: persist the fake's structured state so separate CLI
-		// processes share ACL metadata, projections and the decision audit.
-		snapshot := filepath.Join(filepath.Dir(cfg.Git.Root), "meta.fake.json")
-		fake, err := meta.NewFileFakeStore(snapshot)
-		if err != nil {
-			return nil, err
-		}
-		m, vectors, closer = fake, fake, fake.Close
+	m, vectors, closer, err := openMetadata(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if closer == nil {
+		closer = func() error { return nil }
 	}
 	registry := adapter.NewRegistry()
-	if err := bridges.RegisterKinds(registry); err != nil {
+	if err := registerBridges(registry); err != nil {
 		_ = closer()
 		return nil, err
 	}
-	if err := plugins.RegisterAll(registry); err != nil {
+	if err := registerPlugins(registry); err != nil {
 		_ = closer()
 		return nil, err
 	}
@@ -162,7 +187,7 @@ func Assemble(ctx context.Context, cfg *config.Config) (*KnowledgeService, error
 			Command: sc.Command, TimeoutMS: sc.TimeoutMS,
 		})
 	}
-	if err := runtimes.Configure(specs, cfg.Egress.AllowedHosts, nil); err != nil {
+	if err := configureRuntimes(runtimes, specs, cfg.Egress.AllowedHosts); err != nil {
 		_ = registry.Close(context.Background())
 		_ = closer()
 		return nil, err

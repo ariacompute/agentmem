@@ -88,6 +88,10 @@ func mustLoad(envPath string) (*config.Config, error) {
 	return config.Load(envPath)
 }
 
+// assemble builds the knowledge service for one command. Tests replace it to
+// exercise the per-command failure paths.
+var assemble = mustAssemble
+
 func mustAssemble(envPath string) (*service.KnowledgeService, error) {
 	cfg, err := mustLoad(envPath)
 	if err != nil {
@@ -100,6 +104,20 @@ func printJSON(out io.Writer, v any) error {
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// The server entry point composes four collaborators. They are variables so the
+// fail-closed startup paths can be tested without breaking the real binary.
+var (
+	assembleService = service.Assemble
+	buildAuth       = buildAuthenticator
+	newConsole      = webui.New
+)
+
+// runner is the part of *http.Server the serve loop needs.
+type runner interface {
+	ListenAndServe() error
+	Shutdown(context.Context) error
 }
 
 func cmdServe(args []string, out io.Writer) error {
@@ -116,18 +134,18 @@ func cmdServe(args []string, out io.Writer) error {
 	if *addr != "" {
 		cfg.Server.Addr = *addr
 	}
-	authenticator, err := buildAuthenticator(cfg)
+	authenticator, err := buildAuth(cfg)
 	if err != nil {
 		return err
 	}
-	svc, err := service.Assemble(context.Background(), cfg)
+	svc, err := assembleService(context.Background(), cfg)
 	if err != nil {
 		return err
 	}
 	defer svc.Close()
 	// The console is compiled in, so a failure here means the binary was built
 	// without a usable embed: fail closed rather than start API-only.
-	console, err := webui.New()
+	console, err := newConsole()
 	if err != nil {
 		return err
 	}
@@ -149,11 +167,16 @@ func cmdServe(args []string, out io.Writer) error {
 		MaxHeaderBytes:    1 << 20,
 	}
 	fmt.Fprintf(out, "agentmem listening on %s (postgres=%s)\n", cfg.Server.Addr, postgresMode(cfg))
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
+	return serveLoop(srv, sigCh)
+}
+
+// serveLoop runs the server until it fails or a shutdown signal arrives.
+func serveLoop(srv runner, sigCh <-chan os.Signal) error {
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
 	select {
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -217,7 +240,7 @@ func cmdPut(args []string, out io.Writer) error {
 	if *id == "" {
 		return fmt.Errorf("put: --id is required")
 	}
-	svc, err := mustAssemble(*envPath)
+	svc, err := assemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -248,7 +271,7 @@ func cmdQuery(args []string, out io.Writer) error {
 	if *q == "" {
 		return fmt.Errorf("query: --q is required")
 	}
-	svc, err := mustAssemble(*envPath)
+	svc, err := assemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -271,7 +294,7 @@ func cmdMigrate(args []string, out io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	svc, err := mustAssemble(*envPath)
+	svc, err := assemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -293,7 +316,7 @@ func cmdDecisions(args []string, out io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	svc, err := mustAssemble(*envPath)
+	svc, err := assemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -311,7 +334,7 @@ func cmdConcepts(args []string, out io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	svc, err := mustAssemble(*envPath)
+	svc, err := assemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -363,7 +386,7 @@ func cmdCompute(args []string, out io.Writer) error {
 	if *id == "" {
 		return fmt.Errorf("compute: --id is required")
 	}
-	svc, err := mustAssemble(*envPath)
+	svc, err := assemble(*envPath)
 	if err != nil {
 		return err
 	}
@@ -385,7 +408,7 @@ func cmdComputations(args []string, out io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	svc, err := mustAssemble(*envPath)
+	svc, err := assemble(*envPath)
 	if err != nil {
 		return err
 	}

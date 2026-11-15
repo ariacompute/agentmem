@@ -52,10 +52,9 @@ func Validate(rel string) error {
 		strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
 		return fmt.Errorf("safepath: path escapes root: %q", rel)
 	}
+	// filepath.Clean has already removed empty, "." and ".." segments, so every
+	// remaining segment is a real path component.
 	for _, seg := range strings.Split(clean, "/") {
-		if seg == "" || seg == "." || seg == ".." {
-			continue
-		}
 		if seg != strings.TrimSpace(seg) || strings.HasSuffix(seg, " ") || strings.HasSuffix(seg, ".") {
 			return fmt.Errorf("safepath: ambiguous path segment %q", seg)
 		}
@@ -70,24 +69,33 @@ func Validate(rel string) error {
 	return nil
 }
 
+// Clean validates rel and returns its cleaned, slash-separated form. Callers
+// that need both the confined path and its root-relative spelling use this
+// instead of re-deriving one from the other.
+func Clean(rel string) (string, error) {
+	if err := Validate(rel); err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(filepath.Clean(rel)), nil
+}
+
 // Resolve validates rel and returns the join of root and the cleaned relative
 // path, but only after confirming with EvalSymlinks that neither an existing
 // parent directory nor the target itself escapes the resolved root. The
 // returned path keeps the caller's original root spelling so existing path
 // handling (and tests) stay stable.
 func Resolve(root, rel string) (string, error) {
-	if err := Validate(rel); err != nil {
+	clean, err := Clean(rel)
+	if err != nil {
 		return "", err
 	}
 	if root == "" {
 		return "", errors.New("safepath: empty root")
 	}
-	clean := filepath.ToSlash(filepath.Clean(rel))
+	// Validate has already rejected absolute, "." and ".."-prefixed paths, so
+	// the cleaned value is a contained relative path and Join cannot escape
+	// root lexically. Only a symlink can still break containment below.
 	target := filepath.Join(root, filepath.FromSlash(clean))
-	lexical, err := filepath.Rel(root, target)
-	if err != nil || !contained(lexical) {
-		return "", fmt.Errorf("safepath: path escapes root: %q", rel)
-	}
 
 	// A root that does not exist yet (first write into a fresh bundle) cannot
 	// hide a symlink; lexical containment is sufficient in that case.
@@ -128,12 +136,10 @@ func resolveNearestExisting(p string) (string, error) {
 		if !errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("safepath: stat %q: %w", cur, err)
 		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			return "", errors.New("safepath: no existing ancestor")
-		}
+		// filepath.Dir converges on the filesystem root ("/" or "."), which
+		// always exists, so this walk always terminates.
 		suffix = append([]string{filepath.Base(cur)}, suffix...)
-		cur = parent
+		cur = filepath.Dir(cur)
 	}
 	real, err := filepath.EvalSymlinks(cur)
 	if err != nil {

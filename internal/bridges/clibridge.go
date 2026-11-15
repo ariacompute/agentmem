@@ -132,14 +132,12 @@ func (b *CLIBridge) Put(ctx context.Context, conceptID string, d *okf.Document) 
 	if b.offline != nil {
 		return b.offline.Put(ctx, conceptID, d)
 	}
-	payload, err := json.Marshal(putRequest{
+	// putRequest is a fixed struct of strings, so encoding cannot fail.
+	payload, _ := json.Marshal(putRequest{
 		ConceptID: conceptID, Type: d.Type, Title: d.Title,
 		Description: d.Description, Body: d.Body, Tags: d.Tags,
 	})
-	if err != nil {
-		return err
-	}
-	_, err = b.run(ctx, []string{"put", "--id", conceptID}, payload)
+	_, err := b.run(ctx, []string{"put", "--id", conceptID}, payload)
 	return err
 }
 

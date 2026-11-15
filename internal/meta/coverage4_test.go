@@ -2,6 +2,7 @@ package meta
 
 import (
 	"context"
+	"io/fs"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -22,7 +23,7 @@ func TestPostgresMigrateExecutesAll(t *testing.T) {
 		t.Fatal("no migrations embedded")
 	}
 	for _, name := range files {
-		raw, err := migrationFS.ReadFile(name)
+		raw, err := fs.ReadFile(migrationFS, name)
 		if err != nil {
 			t.Fatal(err)
 		}

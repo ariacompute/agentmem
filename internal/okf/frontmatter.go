@@ -229,10 +229,9 @@ func parseVerified(n *yaml.Node) []ActorEvent {
 		return nil
 	}
 	if n.Kind == yaml.MappingNode {
-		if e, ok := parseActor(n); ok {
-			return []ActorEvent{e}
-		}
-		return nil
+		// parseActor only rejects non-mappings, which the branch above rules out.
+		e, _ := parseActor(n)
+		return []ActorEvent{e}
 	}
 	if n.Kind != yaml.SequenceNode {
 		return nil
@@ -387,6 +386,11 @@ func nodeOf(v any) (*yaml.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	return nodeFromYAML(b)
+}
+
+// nodeFromYAML decodes one YAML value into a node.
+func nodeFromYAML(b []byte) (*yaml.Node, error) {
 	var n yaml.Node
 	if err := yaml.Unmarshal(b, &n); err != nil {
 		return nil, err
@@ -403,31 +407,34 @@ func (d *Document) Marshal() ([]byte, error) {
 		return nil, err
 	}
 	root := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	emitted := map[string]bool{}
 	appendPair := func(key string, node *yaml.Node) {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, node)
-		emitted[key] = true
 	}
+	// One ordered pass: the parsed key order first, then any known key the
+	// caller never wrote. Unknown keys keep their original node verbatim.
+	keys := make([]string, 0, len(d.order)+len(canonicalOrder))
+	seen := map[string]bool{}
 	for _, key := range d.order {
-		if knownKeys[key] {
-			v, ok := d.valueFor(key)
-			if !ok {
-				continue
-			}
-			n, err := nodeOf(v)
-			if err != nil {
-				return nil, err
-			}
-			appendPair(key, n)
-		} else if n, ok := d.extra[key]; ok && n != nil {
-			appendPair(key, n)
-		}
-	}
-	for _, key := range canonicalOrder {
-		if emitted[key] {
+		if seen[key] {
 			continue
 		}
+		seen[key] = true
+		if !knownKeys[key] {
+			if n, ok := d.extra[key]; ok && n != nil {
+				appendPair(key, n)
+			}
+			continue
+		}
+		keys = append(keys, key)
+	}
+	for _, key := range canonicalOrder {
+		if !seen[key] {
+			seen[key] = true
+			keys = append(keys, key)
+		}
+	}
+	for _, key := range keys {
 		v, ok := d.valueFor(key)
 		if !ok {
 			continue

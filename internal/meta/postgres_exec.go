@@ -2,6 +2,7 @@ package meta
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,37 +35,50 @@ func (s *PostgresStore) Query(ctx context.Context, statement string, args []any,
 			return err
 		}
 		defer rows.Close()
-		cols, err := rows.Columns()
+		scanned, err := scanRows(rows, maxRows)
 		if err != nil {
 			return err
 		}
-		out.Columns = append(out.Columns, cols...)
-		for rows.Next() {
-			if len(out.Values) >= maxRows {
-				break
-			}
-			cells := make([]any, len(cols))
-			ptrs := make([]any, len(cols))
-			for i := range cells {
-				ptrs[i] = &cells[i]
-			}
-			if err := rows.Scan(ptrs...); err != nil {
-				return err
-			}
-			row := make([]any, len(cells))
-			for i, v := range cells {
-				if b, ok := v.([]byte); ok {
-					row[i] = string(b)
-				} else {
-					row[i] = v
-				}
-			}
-			out.Values = append(out.Values, row)
-		}
-		return rows.Err()
+		out = scanned
+		return nil
 	})
 	if err != nil {
 		return SQLRows{}, fmt.Errorf("meta: computation query: %w", err)
 	}
 	return out, nil
+}
+
+// scanRows converts driver rows into the closed SQLRows shape and caps the
+// result before it ever leaves the metadata layer. It is a separate function so
+// the column and scan failure paths stay testable without a live database.
+func scanRows(rows *sql.Rows, maxRows int) (SQLRows, error) {
+	out := SQLRows{Columns: []string{}, Values: [][]any{}}
+	cols, err := rows.Columns()
+	if err != nil {
+		return SQLRows{}, err
+	}
+	out.Columns = append(out.Columns, cols...)
+	for rows.Next() {
+		if len(out.Values) >= maxRows {
+			break
+		}
+		cells := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range cells {
+			ptrs[i] = &cells[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return SQLRows{}, err
+		}
+		row := make([]any, len(cells))
+		for i, v := range cells {
+			if b, ok := v.([]byte); ok {
+				row[i] = string(b)
+			} else {
+				row[i] = v
+			}
+		}
+		out.Values = append(out.Values, row)
+	}
+	return out, rows.Err()
 }
