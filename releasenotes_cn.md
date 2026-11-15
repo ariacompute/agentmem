@@ -18,7 +18,7 @@
 ## 已知限制
 
 - Go 二进制内不链接 Python 原生 SDK：由 sidecar 实现各插件 `sdk_boundary` 声明的线协议。
-- Attested Computation 仅 `postgres` runtime 真实执行；`bigquery` / `dbt` / `python` / `looker` 为正式契约骨架，返回 `Unsupported`。
+- Attested Computation 覆盖全部五个 runtime：`postgres` 始终进程内执行；`bigquery` / `dbt` / `python` / `looker` 通过 `AGENTMEM_COMPUTE_SIDECARS` 声明的出向执行器（`http` 端点或 `cli` 裸命令，协议见 `docs/compute-sidecar.md`）真实执行。未配置 sidecar 的 runtime 保持 fail-closed 并返回 `Unsupported`；sidecar 回执必须回传所执行正文的 SHA-256，否则拒绝展示数值。
 - Web 控制台是静态页面，由反向代理或任意文件服务器提供，Go 二进制不托管；内置 API 文档为只读端点参考，不提供交互式试调用。
 - `002_pgvector.sql` 为尽力而为；扩展不可用时元数据层仍可启动并输出告警。
 - 令牌是静态的：轮换需修改 `.env` 并重启；分布式限流、OIDC/SSO、mTLS 与 actions/镜像的完整 SHA 钉住仍属后续项，见 `SECURITY.md`。

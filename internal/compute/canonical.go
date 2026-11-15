@@ -61,6 +61,23 @@ func CanonicalSQL(s string) string {
 	return out
 }
 
+// CanonicalBody normalises a sanctioned body for provenance comparison. SQL
+// reuses the full SQL normaliser; scripts, model selectors and query references
+// only normalise line endings and trailing whitespace, because leading
+// indentation is significant in a script and a selector is not SQL at all.
+func CanonicalBody(kind, text string) string {
+	if kind == KindSQL {
+		return CanonicalSQL(text)
+	}
+	s := strings.ReplaceAll(text, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
+	}
+	return strings.Trim(strings.Join(lines, "\n"), "\n")
+}
+
 func canonicalSQL(s string) string {
 	var toks []string
 	var buf strings.Builder

@@ -67,9 +67,16 @@ func Bind(c Contract, values map[string]any) (BoundComputation, error) {
 		}
 		args = append(args, v)
 	}
-	statement, err := bindStatement(c.SQL, c.Parameters)
-	if err != nil {
-		return BoundComputation{}, err
+	// Only SQL carries named holes. A script, model selector or query
+	// reference is opaque text: parameters travel alongside it as typed
+	// values, never interpolated into it.
+	statement := c.SQL
+	if c.Kind == KindSQL || c.Kind == "" {
+		bound, err := bindStatement(c.SQL, c.Parameters)
+		if err != nil {
+			return BoundComputation{}, err
+		}
+		statement = bound
 	}
 	return BoundComputation{
 		Contract: c, Statement: statement, Args: args,

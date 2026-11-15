@@ -361,7 +361,7 @@ Each plugin owns a validated `plugin.yaml` with a declarative `sdk_boundary` (si
 
 ## 🧮 Attested Computations
 
-`POST /v1/computations` and `agentmem compute` load a sanctioned computation from OKF+Git, bind only declared parameter values, execute it through the `postgres` runtime, and return a value **only after** a deterministic Go attester verifies SQL provenance and display-value fidelity. `bigquery`, `dbt`, `python` and `looker` are formal contract skeletons returning `Unsupported` — only `postgres` has an executor today. Every outcome (pass, rejection, error) is audited in `computation_runs` (offline: `data/meta.fake.json`).
+`POST /v1/computations` and `agentmem compute` load a sanctioned computation from OKF+Git, bind only declared parameter values, execute it through the `postgres` runtime, and return a value **only after** a deterministic Go attester verifies provenance and display-value fidelity. `bigquery`, `dbt`, `python` and `looker` execute through an outbound sidecar declared in `AGENTMEM_COMPUTE_SIDECARS` (`http` endpoint or bare `cli` command); with no sidecar they stay fail-closed and return `Unsupported`. A sidecar receipt must echo the SHA-256 of the body it ran, and job id, result and display value are always recomputed in Go. Protocol: [docs/compute-sidecar.md](docs/compute-sidecar.md). Every outcome (pass, rejection, error) is audited in `computation_runs` (offline: `data/meta.fake.json`).
 
 ```bash
 go run ./cmd/agentmem compute --id computations/revenue-postgres --param year=2026

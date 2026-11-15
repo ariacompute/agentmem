@@ -75,6 +75,28 @@ func adaptersSetter(c *Config, v string) error {
 	return nil
 }
 
+// computeSidecarsSetter decodes the outbound executor list with the same strict
+// JSON discipline as adaptersSetter. An empty value means "no sidecars", so an
+// unconfigured deployment keeps the fail-closed Unsupported behaviour.
+func computeSidecarsSetter(c *Config, v string) error {
+	if strings.TrimSpace(v) == "" {
+		c.Compute.Sidecars = nil
+		return nil
+	}
+	dec := json.NewDecoder(strings.NewReader(v))
+	dec.DisallowUnknownFields()
+	var list []ComputeSidecarConfig
+	if err := dec.Decode(&list); err != nil {
+		return fmt.Errorf("expected a JSON array of compute sidecars: %w", err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return errors.New("unexpected trailing data after the compute sidecars array")
+	}
+	c.Compute.Sidecars = list
+	return nil
+}
+
 // tokensSetter uses the same strict JSON discipline as adaptersSetter: unknown
 // fields and trailing data are hard errors, and an empty value means "no
 // tokens" so the documented .env.example placeholder stays loadable.
@@ -144,6 +166,7 @@ var envSpecs = []struct {
 	{"AGENTMEM_SYSTEMONE_FALLBACK", strSetter(func(c *Config) *string { return &c.Router.SystemOne.Fallback })},
 	{"AGENTMEM_COMPUTE_TIMEOUT_MS", intSetter(func(c *Config) *int { return &c.Compute.TimeoutMS })},
 	{"AGENTMEM_COMPUTE_MAX_ROWS", intSetter(func(c *Config) *int { return &c.Compute.MaxRows })},
+	{"AGENTMEM_COMPUTE_SIDECARS", computeSidecarsSetter},
 	{AdaptersVar, adaptersSetter},
 	{"AGENTMEM_ACL_DEFAULT_VISIBILITY", strSetter(func(c *Config) *string { return &c.ACL.DefaultVisibility })},
 	{"AGENTMEM_ACL_DEFAULT_OWNER", strSetter(func(c *Config) *string { return &c.ACL.DefaultOwner })},

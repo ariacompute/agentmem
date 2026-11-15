@@ -222,8 +222,11 @@ func TestEnginePluginKindsAndComputeBounds(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatalf("engine plugin kinds must be accepted: %v", err)
 	}
-	if c.Compute != DefaultCompute() {
+	if c.Compute.TimeoutMS != DefaultCompute().TimeoutMS || c.Compute.MaxRows != DefaultCompute().MaxRows {
 		t.Fatalf("compute defaults drifted: %+v", c.Compute)
+	}
+	if len(c.Compute.Sidecars) != 0 {
+		t.Fatalf("default compute sidecars must stay empty (fail-closed): %+v", c.Compute.Sidecars)
 	}
 	c.Compute.MaxRows = 10001
 	if err := c.Validate(); err == nil {

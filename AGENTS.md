@@ -78,11 +78,21 @@ upward import: `internal/auth` (consumed by `handlers` / `cli`),
   and JSON samples are machine data and are never translated.
 - **Web rendering is checked with impeccable.** `make web-audit` runs
   `impeccable detect` on the `web/` source (no browser required) and fails the
-  build on any anti-pattern. The full element-level pass — contrast, tiny-text,
-  spacing — needs a running app plus a local Chrome/Edge: `cd web && bun run
-  dev` then `bun run audit:live`. Keep the monochrome invariant; the `.notice`
-  side-accent border is a known slop tell and is intentionally avoided. Shared
-  config lives in `web/.impeccable/config.json` (telemetry disabled).
+  build on any anti-pattern. The CLI version is pinned exactly in
+  `web/package.json` (`devDependencies`, mirrored in `bun.lock`); never run
+  `impeccable@latest` — CI installs from the lockfile and then runs
+  `bun run audit`. The full element-level pass — contrast, tiny-text, spacing —
+  needs a running app plus a local Chrome/Edge: `cd web && bun run dev` then
+  `bun run audit:live`. Keep the monochrome invariant; the `.notice` side-accent
+  border is a known slop tell and is intentionally avoided. Shared config lives
+  in `web/.impeccable/config.json` (telemetry disabled).
+- **Outbound computation is a declared sidecar, never an in-process SDK.**
+  `postgres` always executes locally through `meta.SQLExecutor`. `bigquery`,
+  `dbt`, `python` and `looker` execute only through a sidecar declared in
+  `AGENTMEM_COMPUTE_SIDECARS` (`http` endpoint or bare `cli` command, protocol in
+  `docs/compute-sidecar.md`); with no sidecar they stay fail-closed and return
+  `Unsupported`. A sidecar receipt must echo the SHA-256 of the body it ran, and
+  job id, result and display value are always recomputed in Go.
 - **The web page carries its own CSP.** `web/index.html` is served as a static
   file, so the policy is a `Content-Security-Policy` meta with
   `default-src 'none'` and the single inline theme script admitted by SHA-256.
@@ -107,6 +117,7 @@ just for this check.
 make test        # go test ./... -count=1
 make vet         # go vet ./...
 make build       # single binary
+make e2e         # black-box acceptance: real binary, CLI + HTTP, fully offline
 make eval        # ranking metrics from testdata/eval.jsonl
 make validate    # strict validation of .env.example
 make check-boundaries  # SDK boundaries stay declarative; no inline annotations
@@ -128,6 +139,7 @@ cd web && bun run build  # optional Vite bundle of the same static page
 | HTTP/CLI bridges | `internal/bridges/` |
 | Engine plugins & SDK boundary | `internal/plugins/manifest/`, `internal/plugins/<engine>/plugin.yaml` |
 | Attested Computation | `internal/compute/`, `internal/meta/postgres_exec.go` |
+| Compute sidecars (bigquery/dbt/looker/python) | `internal/compute/sidecar.go`, `internal/compute/runtime.go`, `internal/bridges/outbound.go`, `docs/compute-sidecar.md` |
 | Routing rules | `internal/router/rules.go` |
 | System One | `internal/router/systemone.go` |
 | Write / read / migrate | `internal/router/write.go`, `read.go`, `migrate.go` |

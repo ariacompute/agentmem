@@ -43,7 +43,7 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 |---|---|---|
 | 构建 | `G01` | 离线编译真实二进制 |
 | 配置 | `F01`–`F19` | `validate` 正向（基准配置、`.env.example`、缺失文件回退、完整 production、egress 白名单）；故障关闭（未知文件键、未知进程环境键、非法 mode/数值/布尔/ADAPTERS/scope、重复键、畸形行、production 缺 DSN/缺鉴权/`sslmode=disable`、出向端点缺白名单、未实现冲突策略） |
-| CLI | `C01`–`C28` | `help`/无参数/未知命令；`put` `query` `migrate`（含 `--dry-run`）`decisions` `concepts` `compute`（含重复 `--param`）`computations` `validate` `eval` 的正常链路；缺参、匿名写入、owner 不匹配、非法 visibility、非法参数、不支持 runtime、坏 JSONL、缺失数据集、`eval --env` 与未知 flag 等异常路径 |
+| CLI | `C01`–`C32` | `help`/无参数/未知命令；`put` `query` `migrate`（含 `--dry-run`）`decisions` `concepts` `compute`（含重复 `--param`）`computations` `validate` `eval` 的正常链路；缺参、匿名写入、owner 不匹配、非法 visibility、非法参数、不支持 runtime、坏 JSONL、缺失数据集、`eval --env` 与未知 flag 等异常路径；计算面 sidecar（`C29`–`C32`）：CLI 通道、本地 HTTP 回环通道、sidecar 失败不展示数值且不回显正文、未配置 sidecar 仍 fail-closed |
 | HTTP | `H01`–`H35` | 9 条 method+path 全部端到端（写→读→查询→迁移→决策审计→计算→计算审计→概念列表→健康检查）；405、Content-Type、未知字段、trailing data、畸形 JSON、4 MiB 上限、`top_k`/`limit`/必填字段边界；计算 400/422 且不展示 `display_value`；错误脱敏、安全响应头、404、二进制不托管 Web |
 | 安全 | `S01`–`S20` | 6 个 scope 的权限矩阵（正反向）、公开 `/healthz`、401 + `WWW-Authenticate`、未知令牌、`health:read` 不足、全 scope 令牌；请求体与查询串 `subject` 伪造；私有文档 ACL（owner 可读 / 他人统一 404）；`Origin: null`、跨站未授权/白名单放行；405 在鉴权之后；错误体不回显凭据 |
 | 限流 | `R01` | 独立低限额档位，突发请求触发 429 及固定错误体 |
@@ -51,7 +51,7 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 | Web | `W01`–`W05` | 自带 CSP、无外链 CDN、API 文档镜像 9 条端点、13 语言与 7 个离线测试文件、`bun test` |
 | 门禁 | `G02`–`G08` | `go vet`、`go test ./... -count=1`、`go build ./...`、`make validate`、`make check-boundaries`、`make eval`、`make check-trust-store` |
 
-不含真实浏览器 UI 自动化；`make web-audit` 需要联网，因此不纳入离线验收。
+不含真实浏览器 UI 自动化。`make web-audit` 不在脚本内执行（impeccable 在 CI 的 `web` job 中按 lockfile 固定版本运行），但 `W02` 之类静态检查仍在离线套件内。
 
 ## 实现要点
 

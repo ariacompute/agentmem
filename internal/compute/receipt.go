@@ -6,15 +6,18 @@ import (
 	"agentmem/internal/meta"
 )
 
-// Receipt is the evidence returned by a runtime. ExecutedSQL keeps positional
-// placeholders (never inlined values) so provenance can be compared without
-// leaking parameter values into logs or the audit trail.
+// Receipt is the evidence returned by a runtime. ExecutedSQL carries the
+// sanctioned body (SQL with positional placeholders, or the script/selector a
+// sidecar ran) so provenance can be compared without leaking parameter values
+// into logs or the audit trail. BodyDigest is what an outbound sidecar must
+// echo: an in-process runtime leaves it empty.
 type Receipt struct {
 	JobID        string
 	Runtime      string
 	ContractHash string
 	ParamsDigest string
 	ExecutedSQL  string
+	BodyDigest   string
 	Result       string
 	DisplayValue string
 	Rows         meta.SQLRows
@@ -25,7 +28,7 @@ type Receipt struct {
 // It is recomputed by the attester, so a runtime cannot invent a job id.
 func JobIDFor(b BoundComputation) string {
 	return "job-" + meta.DigestBytes(
-		b.Contract.ContractHash, b.ParamsDigest, CanonicalSQL(b.Statement),
+		b.Contract.ContractHash, b.ParamsDigest, CanonicalBody(b.Contract.Kind, b.Statement),
 	)[:24]
 }
 

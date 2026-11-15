@@ -103,6 +103,17 @@
 - [x] `web/src/style.css`：提升三级文字 `--text-3` 透明度（暗色 `0.44 → 0.55`、亮色 `0.52 → 0.6`），使三级文字在 `#050505` / `#f5f5f5` 上满足 WCAG AA 对比度。
 - [x] `AGENTS.md` / `README.md` / `README_cn.md` / `requirements.md`：补充 impeccable 渲染检查工作流与 `make web-audit` 说明。
 
+## 阶段 13 · 门禁闭环与计算面扩展
+
+- [x] `ci.yml`：`go` job 末尾新增离线黑盒验收 `make e2e E2E_ARGS='--no-gates'`；`web` job 新增 `bun run audit`，`bun-version` 对齐 `1.4.4`。
+- [x] `web/package.json` 精确固定 `impeccable: 4.9.1` 并刷新 `web/bun.lock`；`Makefile` 的 `web-audit` 改为 `bun run audit`，不再使用 `@latest`（阶段 12 的 `@latest` 由此取代）。
+- [x] `SECURITY.md` 新增「CLI trust boundary」小节（自声明主体、本地可信运维面、存储层仍拒绝匿名写与 owner 不匹配、缓解建议）；`docs/security.md` 信任边界与威胁模型同步。
+- [x] 计算面：`AGENTMEM_COMPUTE_SIDECARS` 声明 `bigquery` / `dbt` / `python` / `looker` 的 `http` 或 `cli` sidecar；`internal/compute/sidecar.go` 实现线协议 v1，`body_digest` 由 Go 侧重算，未配置 runtime 保持 `ErrUnsupported`。
+- [x] 正文泛化：`body_kind`（`sql` / `script` / `model` / `query`）驱动围栏语言、资源后缀、`SafeBody` 与 `CanonicalBody`；SQL 仍保留只读 SELECT/WITH 与危险函数黑名单。
+- [x] 出向复用：`internal/bridges/outbound.go` 的 `PostJSON`（白名单、逐跳复检、1 MiB 请求 / 4 MiB 响应、5xx 重试 1 次、错误仅留类型），装配期与调用前双重校验端点。
+- [x] 测试：`internal/compute/sidecar*_test.go`（HTTP/CLI、digest 不符、非标量单元格、行截断、命令校验）、`internal/bridges/outbound_test.go`、`internal/config/sidecar_test.go`；`scripts/e2e.sh` 新增 C29–C32（CLI sidecar、HTTP sidecar、失败不泄漏正文、未配置仍 fail-closed）。
+- [x] 文档：新增 `docs/compute-sidecar.md`；`requirements.md`、`releasenotes*`、`README*`、`docs/computations.md`、`docs/okf-conformance.md`、`docs/architecture.md`、`docs/e2e.md`、`.env.example`、`AGENTS.md` 同步。
+
 ## 验收
 
 ```bash
@@ -114,8 +125,9 @@ go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
 make check-boundaries
 make check-trust-store
 make web-audit
+make e2e
 cd web && bun test
 cd web && bun run build
 ```
 
-验收条件：以上命令全部成功；不启动 Postgres、不访问网络、不需要密钥；四个插件在离线 mock 下可装配、可写、可查、可启停；`postgres` 计算链路离线可执行且 attestation 失败拒绝展示；鉴权矩阵、越权、伪造主体、错误脱敏与限流均有离线用例；系统/镜像 CA bundle 不含 eMudhra 弱证书指纹；13 语言文案完整、端点表与 `http.go` 一致（含 401/403/429）、CSP 哈希自洽、单色守卫通过，web 仍可用任意静态服务器直接托管。
+验收条件：以上命令全部成功；不启动 Postgres、不访问网络、不需要密钥；四个插件在离线 mock 下可装配、可写、可查、可启停；`postgres` 计算链路离线可执行且 attestation 失败拒绝展示，四个出向 runtime 经 sidecar 可执行且 `body_digest` 不符时拒绝展示；鉴权矩阵、越权、伪造主体、错误脱敏与限流均有离线用例；系统/镜像 CA bundle 不含 eMudhra 弱证书指纹；13 语言文案完整、端点表与 `http.go` 一致（含 401/403/429）、CSP 哈希自洽、单色守卫通过，web 仍可用任意静态服务器直接托管。

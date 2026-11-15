@@ -69,7 +69,9 @@ var allowedParamTypes = map[string]bool{
 	"integer": true, "number": true, "string": true, "boolean": true, "date": true,
 }
 
-var sqlFence = regexp.MustCompile("(?s)```(?:sql|SQL)\\s*\\n(.*?)```")
+// blockFence matches a fenced block and captures its info string and body.
+// The closing fence may be any fence: extraction is permissive on purpose.
+var blockFence = regexp.MustCompile("(?s)```([A-Za-z0-9_+.-]*)[ \t]*\r?\n(.*?)```")
 
 // RuntimeID is the normalised runtime name used by the runtime registry.
 func (a *Attested) RuntimeID() string {
@@ -97,14 +99,26 @@ func ValidParameterTypes() []string {
 	return out
 }
 
-// ExtractInlineSQL returns the first fenced ```sql block in a document body.
-// It is used when `computation` is absent or set to `inline`.
-func ExtractInlineSQL(body string) string {
-	m := sqlFence.FindStringSubmatch(body)
-	if len(m) < 2 {
-		return ""
+// ExtractInlineBlock returns the first fenced block whose info string matches
+// one of langs (case-insensitive). It is used when `computation` is absent or
+// set to `inline`; the language list is chosen by the runtime, because a
+// python script or a dbt selector is as legitimate a sanctioned body as SQL.
+func ExtractInlineBlock(body string, langs ...string) string {
+	want := make(map[string]bool, len(langs))
+	for _, l := range langs {
+		want[strings.ToLower(strings.TrimSpace(l))] = true
 	}
-	return strings.TrimSpace(m[1])
+	for _, m := range blockFence.FindAllStringSubmatch(body, -1) {
+		if want[strings.ToLower(m[1])] {
+			return strings.TrimSpace(m[2])
+		}
+	}
+	return ""
+}
+
+// ExtractInlineSQL returns the first fenced ```sql block in a document body.
+func ExtractInlineSQL(body string) string {
+	return ExtractInlineBlock(body, "sql")
 }
 
 // Validate checks an Attested Computation contract before execution. It is

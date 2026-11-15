@@ -50,6 +50,18 @@ func validateCommand(command string) error {
 	return nil
 }
 
+// ValidateCommand reports whether command is a bare executable name. It is
+// exported so other outbound callers (compute sidecars) reuse the same rule
+// instead of re-implementing it.
+func ValidateCommand(command string) error { return validateCommand(command) }
+
+// SafeArgument reports whether an argument may be passed to a sidecar: no
+// control characters and no shell/expansion metacharacters, UTF-8 otherwise.
+func SafeArgument(arg string) bool { return safeArgument(arg) }
+
+// NewRunner returns the default no-shell process runner with the given timeout.
+func NewRunner(timeout time.Duration) Runner { return defaultRunner(timeout) }
+
 func defaultRunner(timeout time.Duration) Runner {
 	return func(ctx context.Context, command string, args []string, stdin []byte) ([]byte, error) {
 		ctx, cancel := context.WithTimeout(ctx, timeout)

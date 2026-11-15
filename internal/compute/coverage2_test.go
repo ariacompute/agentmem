@@ -53,16 +53,24 @@ func TestSafeStatementEmptyAndMultiple(t *testing.T) {
 }
 
 func TestComputationBodyBranches(t *testing.T) {
-	sql, source, err := computationBody(nil, "", "```sql\nSELECT 1\n```")
+	sql, source, err := computationBody(nil, "", "```sql\nSELECT 1\n```", KindSQL)
 	if err != nil || sql != "SELECT 1" || source != "inline" {
 		t.Fatalf("inline = %q %q %v", sql, source, err)
 	}
-	if _, _, err := computationBody(nil, "foo bar", ""); err == nil {
+	if _, _, err := computationBody(nil, "foo bar", "", KindSQL); err == nil {
 		t.Fatal("invalid ref must error")
 	}
-	sql, source, err = computationBody(nil, "SELECT 1\nSELECT 2", "")
+	sql, source, err = computationBody(nil, "SELECT 1\nSELECT 2", "", KindSQL)
 	if err != nil || source != "inline-frontmatter" || !strings.Contains(sql, "\n") {
 		t.Fatalf("frontmatter = %q %q %v", sql, source, err)
+	}
+	// Non-SQL kinds read their own fence language, not ```sql.
+	script, source, err := computationBody(nil, "inline", "```python\nprint(1)\n```", KindScript)
+	if err != nil || script != "print(1)" || source != "inline" {
+		t.Fatalf("script = %q %q %v", script, source, err)
+	}
+	if _, _, err := computationBody(nil, "inline", "```sql\nSELECT 1\n```", KindScript); err == nil {
+		t.Fatal("a sql fence must not satisfy a python contract")
 	}
 }
 

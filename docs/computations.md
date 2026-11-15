@@ -8,9 +8,9 @@ Attested Computation 把「受批准的计算」与「Agent 的自由发挥」�
 POST /v1/computations 或 agentmem compute
   -> ContractLoader  : 从 OKF 文档读 runtime/parameters/computation/executor/attester
   -> ParameterBinder : 类型校验、必填校验、拒绝未声明参数与计算体改写
-  -> RuntimeRegistry : 五 runtime 契约，只有 postgres 有 executor
-  -> SQLExecutor     : 只读事务、参数化绑定、行数上限、超时
-  -> Receipt         : job_id / executed_sql / result / rows
+  -> RuntimeRegistry : 五 runtime 契约；postgres 进程内执行，其余四个按配置装 sidecar
+  -> Executor        : SQLExecutor（只读事务、参数化、行数上限、超时）或 sidecar（http / cli）
+  -> Receipt         : job_id / executed_sql(正文) / body_digest / result / rows
   -> Attester        : SQL 规范化 provenance + 展示值 fidelity（确定性 Go，无 LLM）
   -> Gate            : 失败则不返回 display_value
   -> Audit           : computation_runs（成功、拒绝、错误都留痕）
@@ -22,10 +22,10 @@ POST /v1/computations 或 agentmem compute
 
 | `computation` 值 | 来源 |
 |---|---|
-| `references/revenue.sql` 等 `.sql` 相对路径 | `Bundle.ReadResource` 读取 bundle 内资源（路径穿越/绝对路径/符号链接逃逸均被拒，1 MiB 上限） |
-| `inline` | 文档正文首个 ```sql 围栏代码块 |
+| 资源相对路径（`.sql` / `.py` / `.yaml` / `.yml` / `.json`） | `Bundle.ReadResource` 读取 bundle 内资源（路径穿越/绝对路径/符号链接逃逸均被拒，1 MiB 上限） |
+| `inline` | 文档正文中与 runtime 匹配的围栏代码块：`sql` → ```sql，`python` → ```python，`dbt` / `looker` → ```yaml / ```json |
 
-OKF 解析仍然宽松：未知键、未知 runtime、缺失 executor/attester 都不会让 bundle 被拒绝。严格校验发生在 `Attested.Validate()`，即**执行前**，不是解析时。
+围栏语言与资源后缀由 runtime 推导出的 `body_kind` 决定（`sql` / `script` / `model` / `query`）。OKF 解析仍然宽松：未知键、未知 runtime、缺失 executor/attester 都不会让 bundle 被拒绝。严格校验发生在 `Attested.Validate()` 与 `SafeBody`，即**执行前**，不是解析时。
 
 ## 参数绑定
 
@@ -37,23 +37,23 @@ OKF 解析仍然宽松：未知键、未知 runtime、缺失 executor/attester �
 
 ## Runtime 矩阵
 
-| Runtime | 状态 | 行为 |
+| Runtime | 正文 kind | 行为 |
 |---|---|---|
-| `postgres` | 可执行 | 通过 `meta.SQLExecutor` 端口执行；生产为 `internal/meta/postgres_exec.go` 的 GORM 只读事务，离线为 `meta.FakeStore` / `compute.FakeExecutor` 的确定性结果 |
-| `bigquery` | 契约骨架 | `ErrUnsupported` |
-| `dbt` | 契约骨架 | `ErrUnsupported` |
-| `python` | 契约骨架 | `ErrUnsupported` |
-| `looker` | 契约骨架 | `ErrUnsupported` |
+| `postgres` | `sql` | 通过 `meta.SQLExecutor` 端口执行；生产为 `internal/meta/postgres_exec.go` 的 GORM 只读事务，离线为 `meta.FakeStore` / `compute.FakeExecutor` 的确定性结果 |
+| `bigquery` | `sql` | 通过 `bridge: http` 或 `bridge: cli` 的 sidecar 执行；未配置时 `ErrUnsupported` |
+| `dbt` | `model` | 同上（正文是 model selector，不是 SQL） |
+| `python` | `script` | 同上（正文是脚本，绝不进入命令行） |
+| `looker` | `query` | 同上（正文是 explore + query 引用） |
 
-`errors.Is(err, compute.ErrUnsupported)` 可判定。未知 runtime 不会静默落到其他执行器。
+`AGENTMEM_COMPUTE_SIDECARS` 声明出向执行器；`postgres` 不接受 sidecar。`errors.Is(err, compute.ErrUnsupported)` 可判定「未配置执行器」，未知 runtime 不会静默落到其他执行器。线协议、大小/超时预算与 `body_digest` 语义见 [compute-sidecar.md](compute-sidecar.md)。
 
 ## Receipt 与 Attester
 
-`Receipt` 字段：`JobID`、`Runtime`、`ContractHash`、`ParamsDigest`、`ExecutedSQL`（保留 `$N` 占位符，不含明文值）、`Result`、`DisplayValue`、`Rows`、`RowCount`。
+`Receipt` 字段：`JobID`、`Runtime`、`ContractHash`、`ParamsDigest`、`ExecutedSQL`（SQL 保留 `$N` 占位符；非 SQL runtime 为受批准正文）、`BodyDigest`（sidecar 回执的正文 SHA-256，进程内 postgres 为空）、`Result`、`DisplayValue`、`Rows`、`RowCount`。
 
 `Attester` 是纯 Go 判定，无 LLM、无网络：
 
-- **Provenance**：`contract_hash`、`params_digest`、`runtime`、`job_id` 一致，且 `CanonicalSQL(receipt.ExecutedSQL) == CanonicalSQL(bound.Statement)`。`CanonicalSQL` 去注释、折叠空白、统一关键字大小写、命名占位符归一，但保留 `$N` 顺序，因此参数重排不能冒充同一语句。
+- **Provenance**：`contract_hash`、`params_digest`、`runtime`、`job_id` 一致，且 `CanonicalBody(kind, receipt.ExecutedSQL) == CanonicalBody(kind, bound.Statement)`。`sql` kind 走 `CanonicalSQL`（去注释、折叠空白、统一关键字大小写、命名占位符归一，保留 `$N` 顺序，因此参数重排不能冒充同一语句）；其它 kind 只归一换行与行尾空白，保留脚本缩进。非 `postgres` runtime 还要求 `receipt.BodyDigest == sha256(bound.Statement)`，sidecar 无法声称执行了另一段正文。
 - **Fidelity**：从 `receipt.rows` 重新派生规范结果，要求 `receipt.result`、`receipt.display_value` 与派生值完全一致，且行数一致。
 - **Staleness**：`stale_after` 过期即 fail closed（拒绝展示并写入审计）。文档级 `verified`（人类确认）与运行级 attestation 正交，互不替代。
 
@@ -102,7 +102,13 @@ go run ./cmd/agentmem computations --id computations/revenue-postgres --limit 20
 # 0 使用内置默认 5000 ms / 100 行
 AGENTMEM_COMPUTE_TIMEOUT_MS=5000
 AGENTMEM_COMPUTE_MAX_ROWS=100
+# 出向执行器（postgres 始终进程内执行，不接受 sidecar）
+AGENTMEM_COMPUTE_SIDECARS='[{"runtime":"python","bridge":"cli","command":"agentmem-py","timeout_ms":8000}]'
+# bridge=http 的端点同时受出向白名单约束
+AGENTMEM_EGRESS_ALLOWED_HOSTS=bq-sidecar.internal
 ```
+
+`bridge=cli` 只接受裸可执行程序名（不经 shell，正文与参数走 stdin）；`bridge=http` 必须命中 `AGENTMEM_EGRESS_ALLOWED_HOSTS`，装配期与每次调用前都会复核。
 
 整轮执行共用一个超时 context（契约加载、绑定与执行都在其中）；超时按失败处理，拒绝展示。
 
@@ -112,4 +118,6 @@ AGENTMEM_COMPUTE_MAX_ROWS=100
 
 ## 离线验收
 
-`go test ./internal/compute/... ./internal/meta/... ./internal/handlers/... ./internal/cli/...` 在无 Postgres、无网络、无凭据下覆盖：参数篡改、SQL 伪造、展示值篡改、job id 伪造、过期契约、四 runtime `Unsupported`、成功链路、失败留痕、HTTP 与 CLI 入口、快照往返。
+`go test ./internal/compute/... ./internal/meta/... ./internal/handlers/... ./internal/cli/...` 在无 Postgres、无网络、无凭据下覆盖：参数篡改、SQL 伪造、展示值篡改、job id 伪造、过期契约、未配置 runtime 的 `Unsupported`、sidecar 的 HTTP 与 CLI 双通道（`httptest` 与注入的 `Runner`）、`body_digest` 不符拒展示、非标量单元格拒绝、行数截断、成功链路、失败留痕、HTTP 与 CLI 入口、快照往返。
+
+`make e2e` 另用本地 `python3` 桩端到端验证真实二进制：CLI sidecar（C29）、HTTP sidecar（C30）、sidecar 失败不泄漏正文（C31）、未配置 sidecar 仍 fail-closed（C32）。

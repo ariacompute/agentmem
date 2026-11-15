@@ -36,10 +36,11 @@
 
 ## 5. Attested Computation
 
-- 受批准计算体存于 OKF+Git（bundle 内 `.sql` 资源或正文 ```sql 内联块）；Agent 只能填声明参数值，不得改写计算体。
-- 参数类型 `integer/number/string/boolean/date`；`:name` 转 `$N` 参数化绑定；拒绝多语句与变更 SQL。
-- 五 runtime 契约骨架：`bigquery / postgres / dbt / python / looker`；仅 `postgres` 真实执行（只读事务、参数化、超时、行数上限），其余返回 `Unsupported`。
-- `executor → receipt`；确定性 Go attester 做 SQL 规范化 provenance 与展示值 fidelity 校验；失败拒绝展示 `display_value`。
+- 受批准计算体存于 OKF+Git（bundle 内资源文件或正文内联块）；围栏语言与资源后缀由 runtime 推导：`sql`（`.sql`）、`script`（```python / `.py`）、`model` / `query`（```yaml）。Agent 只能填声明参数值，不得改写计算体。
+- 参数类型 `integer/number/string/boolean/date`；SQL runtime 做 `:name` 转 `$N` 参数化绑定并拒绝多语句与变更 SQL；非 SQL runtime 的正文原样传给 sidecar，参数只以类型化值随行。
+- 五 runtime：`bigquery / postgres / dbt / python / looker`；`postgres` 始终进程内执行（只读事务、参数化、超时、行数上限），其余四个通过 `AGENTMEM_COMPUTE_SIDECARS` 声明的出向执行器（`http` 端点或 `cli` 裸命令）真实执行；未配置的 runtime 保持 fail-closed，返回 `Unsupported` 而不是静默降级。
+- 线协议 v1：请求携带 `runtime / concept_id / contract_hash / body_kind / body / parameters`；响应只允许 `columns / rows / body_digest`。`body_digest`（正方体 SHA-256）由 Go 侧重算比对，job id、result、display value 一律由 Go 侧重算，sidecar 无权提供。
+- `executor → receipt`；确定性 Go attester 做正文规范化 provenance（含 sidecar 正文摘要）与展示值 fidelity 校验；失败拒绝展示 `display_value`。
 - HTTP `POST /v1/computations` + `GET /v1/computations`；CLI `compute`（可重复 `--param`）与 `computations`；成功/拒绝/错误都写入 PG 审计。
 
 ## 6. `.env` 配置加载
@@ -56,7 +57,7 @@
 - HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`。
 - 评测：Recall@k / Precision@k / nDCG / MRR / MAP / HitRate@k 纯函数；显式区分覆盖率 Recall 与二值 HitRate。
 - 文档、CI、Docker、compose；`web/` 零运行时依赖原生 ES module 控制台（详见第 8 节）。
-- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`make check-trust-store`、`make web-audit`、`cd web && bun test`、`cd web && bun run build` 全绿，离线无外部服务（`make web-audit` 源码级渲染检查 0 反模式）。
+- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`make check-trust-store`、`make web-audit`（impeccable 版本由 `web/package.json` 精确固定）、`make e2e`、`cd web && bun test`、`cd web && bun run build` 全绿，离线无外部服务（`make web-audit` 源码级渲染检查 0 反模式；`make e2e` 以真实二进制驱动 CLI 与 HTTP 服务）。上述门禁全部在 CI 中执行。
 
 ## 8. Web 控制台
 

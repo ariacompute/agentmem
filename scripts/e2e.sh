@@ -82,6 +82,63 @@ CLI_ERR="$WORK/cli.err"
 SERVER_PID=""
 PORT=""
 
+# --- 计算面 sidecar 桩（本地 python3 实现线协议 v1，绝不联网） ----------------
+SIDECAR_DIR="$WORK/sidecar"
+mkdir -p "$SIDECAR_DIR" || exit 2
+cat > "$SIDECAR_DIR/agentmem-py" <<'PY'
+#!/usr/bin/env python3
+"""CLI sidecar stub: reads the JSON request on stdin, writes the JSON reply."""
+import hashlib
+import json
+import sys
+
+req = json.load(sys.stdin)
+body = req.get("body", "")
+print(json.dumps({
+    "columns": ["revenue"],
+    "rows": [[1250]],
+    "body_digest": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+}))
+PY
+cat > "$SIDECAR_DIR/agentmem-fail" <<'SH'
+#!/bin/sh
+# Always fails: the CLI sidecar channel must surface a typed, redacted error.
+exit 3
+SH
+cat > "$SIDECAR_DIR/http_sidecar.py" <<'PY'
+#!/usr/bin/env python3
+"""HTTP sidecar stub implementing POST /run of the v1 wire protocol."""
+import hashlib
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        req = json.loads(self.rfile.read(length) or b"{}")
+        body = req.get("body", "")
+        payload = json.dumps({
+            "columns": ["revenue"],
+            "rows": [[1250]],
+            "body_digest": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        }).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *args):
+        pass
+
+
+HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+PY
+chmod +x "$SIDECAR_DIR/agentmem-py" "$SIDECAR_DIR/agentmem-fail"
+SIDECAR_PID=""
+
 # --- 报告框架 ---------------------------------------------------------------
 PASS=0
 FAIL=0
@@ -308,7 +365,16 @@ stop_server() {
   fi
 }
 
+stop_http_sidecar() {
+  if [[ -n "$SIDECAR_PID" ]]; then
+    kill -TERM "$SIDECAR_PID" 2>/dev/null || true
+    wait "$SIDECAR_PID" 2>/dev/null || true
+    SIDECAR_PID=""
+  fi
+}
+
 cleanup() {
+  stop_http_sidecar
   stop_server
   if [[ "$KEEP" -eq 1 ]]; then
     printf '\n临时工作目录已保留: %s\n' "$WORK"
@@ -324,13 +390,13 @@ trap 'exit 143' TERM
 PORTS="$(python3 -c '
 import socket
 socks = []
-for _ in range(3):
+for _ in range(4):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
     socks.append(s)
 print(" ".join(str(s.getsockname()[1]) for s in socks))
 ')" || { echo "error: 无法分配本地端口" >&2; exit 2; }
-read -r PORT_BASE PORT_AUTH PORT_RATE <<< "$PORTS"
+read -r PORT_BASE PORT_AUTH PORT_RATE PORT_SIDE <<< "$PORTS"
 
 BASE_ENV="$WORK/base.env"
 AUTH_ENV="$WORK/auth.env"
@@ -397,7 +463,20 @@ make_env "$AUTH_ENV" "$PORT_AUTH" 100000 1000000 \
   'AGENTMEM_ALLOWED_ORIGINS=https://console.example.test'
 make_env "$RATE_ENV" "$PORT_RATE" 1 5
 
+# 计算面 sidecar 配置：python runtime 分别走 CLI 子进程与本地 HTTP 回环桩。
+SIDECAR_ENV="$WORK/sidecar-cli.env"
+SIDECAR_HTTP_ENV="$WORK/sidecar-http.env"
+SIDECAR_FAIL_ENV="$WORK/sidecar-fail.env"
+make_env "$SIDECAR_ENV" "$PORT_BASE" 100000 1000000 \
+  "AGENTMEM_COMPUTE_SIDECARS='[{\"runtime\":\"python\",\"bridge\":\"cli\",\"command\":\"agentmem-py\",\"timeout_ms\":5000}]'"
+make_env "$SIDECAR_HTTP_ENV" "$PORT_BASE" 100000 1000000 \
+  'AGENTMEM_EGRESS_ALLOWED_HOSTS=127.0.0.1' \
+  "AGENTMEM_COMPUTE_SIDECARS='[{\"runtime\":\"python\",\"bridge\":\"http\",\"endpoint\":\"http://127.0.0.1:$PORT_SIDE\",\"timeout_ms\":5000}]'"
+make_env "$SIDECAR_FAIL_ENV" "$PORT_BASE" 100000 1000000 \
+  "AGENTMEM_COMPUTE_SIDECARS='[{\"runtime\":\"python\",\"bridge\":\"cli\",\"command\":\"agentmem-fail\",\"timeout_ms\":5000}]'"
+
 ENVARG=(--env "$BASE_ENV")
+PY_COMPUTE_ID='computations/revenue-python'
 HTTP_DOC='e2e/http-doc'
 CLI_DOC='e2e/cli-doc'
 COMPUTE_ID='computations/revenue-postgres'
@@ -741,6 +820,70 @@ begin_case C26 "eval 数据集不存在报错"
 run_cli eval --dataset "$WORK/missing.jsonl"
 a_rc 1
 a_cli_err 'no such file or directory'
+end_case
+
+start_http_sidecar() {
+  python3 "$SIDECAR_DIR/http_sidecar.py" "$PORT_SIDE" >"$WORK/sidecar-http.log" 2>&1 &
+  SIDECAR_PID=$!
+  local i code
+  for i in $(seq 1 100); do
+    code="$(curl -sS --max-time 1 -o /dev/null -w '%{http_code}' -X POST \
+      -H 'Content-Type: application/json' --data '{"body":"probe"}' \
+      "http://127.0.0.1:$PORT_SIDE/run" 2>/dev/null || true)"
+    if [[ "$code" == "200" ]]; then return 0; fi
+    if ! kill -0 "$SIDECAR_PID" 2>/dev/null; then SIDECAR_PID=""; return 1; fi
+    sleep 0.1
+  done
+  stop_http_sidecar
+  return 1
+}
+
+# --- 计算面 sidecar（离线 python3 桩） --------------------------------------
+begin_case C29 "compute 经 CLI sidecar 执行 python runtime"
+PATH="$SIDECAR_DIR:$PATH" "$BIN" compute --env "$SIDECAR_ENV" --id "$PY_COMPUTE_ID" \
+  --subject alice --param year=2026 >"$CLI_OUT" 2>"$CLI_ERR"
+CLI_RC=$?
+a_rc 0
+a_cli_json_eq runtime python
+a_cli_json_eq display_allowed true
+a_cli_json_has display_value
+a_cli_json_eq verdict.passed true
+a_cli_json_eq verdict.fidelity true
+a_cli_json_absent error_class
+end_case
+
+begin_case C30 "compute 经 HTTP sidecar 执行 python runtime"
+if start_http_sidecar; then
+  run_cli compute --env "$SIDECAR_HTTP_ENV" --id "$PY_COMPUTE_ID" --subject alice --param year=2026
+  a_rc 0
+  a_cli_json_eq runtime python
+  a_cli_json_eq display_allowed true
+  a_cli_json_has display_value
+  a_cli_json_eq verdict.passed true
+  stop_http_sidecar
+else
+  ck 1 "本地 HTTP sidecar 桩未能启动"
+fi
+end_case
+
+begin_case C31 "sidecar 失败不展示数值且不回显正文"
+PATH="$SIDECAR_DIR:$PATH" "$BIN" compute --env "$SIDECAR_FAIL_ENV" --id "$PY_COMPUTE_ID" \
+  --subject alice --param year=2026 >"$CLI_OUT" 2>"$CLI_ERR"
+CLI_RC=$?
+a_rc 1
+a_cli_err 'sidecar process failed'
+a_cli_json_absent display_value
+if grep -q 'import json' "$CLI_OUT" "$CLI_ERR" 2>/dev/null; then
+  ck 1 "sidecar 失败时回显了脚本正文"
+else
+  ck 0 ""
+fi
+end_case
+
+begin_case C32 "未配置 sidecar 的 runtime 仍 fail-closed"
+run_cli compute "${ENVARG[@]}" --id "$PY_COMPUTE_ID" --subject alice --param year=2026
+a_rc 1
+a_cli_err 'has a contract but no executor'
 end_case
 
 begin_case C27 "eval 不接受 --env（唯一不读配置的命令）"

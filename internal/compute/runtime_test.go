@@ -22,7 +22,10 @@ func TestRuntimeRegistryCoversAllFiveContracts(t *testing.T) {
 	}
 }
 
-func TestOnlyPostgresExecutes(t *testing.T) {
+// TestUnconfiguredRuntimesStayUnsupported: NewRuntimeRegistry installs only the
+// in-process postgres executor. Every outbound runtime is a skeleton until
+// Configure installs a sidecar, and a skeleton never invents evidence.
+func TestUnconfiguredRuntimesStayUnsupported(t *testing.T) {
 	b, _ := validPair(t)
 	r := NewRuntimeRegistry(FakeExecutor{}, 100)
 	for _, name := range RuntimeNames {

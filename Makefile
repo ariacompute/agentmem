@@ -39,11 +39,13 @@ run: build
 web:
 	cd web && bun install --frozen-lockfile && bun run build
 
-# Source-level rendering/slop check (no browser needed). The full element-level
-# pass (contrast, tiny-text) needs a running app + local Chrome/Edge:
+# Source-level rendering/slop check (no browser needed). The CLI version is
+# pinned by web/package.json's devDependency, so `bun run audit` resolves the
+# lockfile copy instead of drifting with @latest. The full element-level pass
+# (contrast, tiny-text) needs a running app + local Chrome/Edge:
 #   cd web && bun run dev   # then: bun run audit:live
 web-audit:
-	cd web && bun x impeccable@latest detect src index.html
+	cd web && bun run audit
 
 # 用户视角黑盒验收：编译真实二进制、驱动 CLI 与真实 HTTP 服务。
 # 全程离线（GOPROXY=off），不需要 Postgres、网络或凭据；临时产物自动回收。

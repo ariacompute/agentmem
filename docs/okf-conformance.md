@@ -54,7 +54,7 @@ actor 约定：`agent/模型`（含 `/`）、`human:` 前缀、`process:` 前缀
 
 `internal/okf/attested.go` 建模契约：`runtime`、typed `parameters`、`computation`、`executor.receipt`、`attester.resource`。OKF 只负责**声明**，执行与验证在 `internal/compute`：Agent 只能按声明参数填值，受批准计算体始终来自 OKF+Git（正文内联块或 bundle 内资源文件），不得改写；`postgres` runtime 参数化执行并产出 receipt；确定性 Go attester 做 SQL 规范化 provenance 校验与展示值 fidelity 校验，失败即拒绝展示并写审计。完整链路见 [`computations.md`](computations.md)。
 
-`verified`（文档级人类确认）与运行级 attestation 是正交信号；`stale_after` 过期触发 fail closed 复核。其余 runtime 目前为正式契约骨架，返回 `Unsupported`。OKF 解析仍是宽松的：未知键、未知 runtime、缺失 executor/attester 都不会让 bundle 被拒绝。
+`verified`（文档级人类确认）与运行级 attestation 是正交信号；`stale_after` 过期触发 fail closed 复核。其余 runtime 通过 `AGENTMEM_COMPUTE_SIDECARS` 声明的出向执行器执行，未配置时返回 `Unsupported`（见 `docs/compute-sidecar.md`）。OKF 解析仍是宽松的：未知键、未知 runtime、缺失 executor/attester 都不会让 bundle 被拒绝。
 
 ## agentmem 扩展字段
 

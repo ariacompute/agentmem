@@ -62,6 +62,15 @@ func Assemble(ctx context.Context, cfg *config.Config) (*KnowledgeService, error
 			}
 		}
 	}
+	// Same rule for outbound compute sidecars: an http executor outside the
+	// allowlist must stop the process at start, not at the first calculation.
+	for _, sc := range cfg.Compute.Sidecars {
+		if strings.EqualFold(strings.TrimSpace(sc.Bridge), "http") {
+			if err := netsafe.ValidateEndpoint(sc.Endpoint, cfg.Egress.AllowedHosts); err != nil {
+				return nil, fmt.Errorf("service: compute sidecar %q endpoint: %w", sc.Runtime, err)
+			}
+		}
+	}
 	bundle, err := okf.Open(cfg.Git.Root)
 	if err != nil {
 		return nil, err
@@ -145,8 +154,20 @@ func Assemble(ctx context.Context, cfg *config.Config) (*KnowledgeService, error
 			computeCfg.MaxRows = def.MaxRows
 		}
 	}
-	computeSvc := compute.NewService(bundle,
-		compute.NewRuntimeRegistry(sqlExec, computeCfg.MaxRows), m,
+	runtimes := compute.NewRuntimeRegistry(sqlExec, computeCfg.MaxRows)
+	specs := make([]compute.SidecarSpec, 0, len(computeCfg.Sidecars))
+	for _, sc := range computeCfg.Sidecars {
+		specs = append(specs, compute.SidecarSpec{
+			Runtime: sc.Runtime, Bridge: sc.Bridge, Endpoint: sc.Endpoint,
+			Command: sc.Command, TimeoutMS: sc.TimeoutMS,
+		})
+	}
+	if err := runtimes.Configure(specs, cfg.Egress.AllowedHosts, nil); err != nil {
+		_ = registry.Close(context.Background())
+		_ = closer()
+		return nil, err
+	}
+	computeSvc := compute.NewService(bundle, runtimes, m,
 		time.Duration(computeCfg.TimeoutMS)*time.Millisecond, computeCfg.MaxRows)
 	return &KnowledgeService{
 		Config: cfg, Store: s, Registry: registry,

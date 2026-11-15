@@ -50,7 +50,13 @@ func (a Attester) Attest(b BoundComputation, r Receipt) (Verdict, error) {
 	check(r.ParamsDigest == b.ParamsDigest, "parameter digest mismatch")
 	check(r.Runtime == b.Contract.Runtime, "runtime mismatch")
 	check(r.JobID == JobIDFor(b), "job id mismatch")
-	check(CanonicalSQL(r.ExecutedSQL) == CanonicalSQL(b.Statement), "executed SQL differs from sanctioned SQL")
+	check(CanonicalBody(b.Contract.Kind, r.ExecutedSQL) == CanonicalBody(b.Contract.Kind, b.Statement),
+		"executed body differs from the sanctioned body")
+	// An outbound runtime must prove which body it ran, otherwise its receipt is
+	// just a number nobody can trace back to Git.
+	if b.Contract.Runtime != "postgres" {
+		check(r.BodyDigest == BodyDigest(b.Statement), "sidecar body digest mismatch")
+	}
 
 	fidelity := true
 	derived := DeriveResult(r.Rows)

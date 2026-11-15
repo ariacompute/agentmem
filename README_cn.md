@@ -361,7 +361,7 @@ AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 位十六进制>","subject":"console
 
 ## 🧮 受批准计算
 
-`POST /v1/computations` 与 `agentmem compute` 从 OKF+Git 加载受批准计算，只绑定声明参数值，经 `postgres` runtime 执行；只有确定性 Go attester 校验 SQL provenance 与展示值 fidelity 通过后才返回数值。`bigquery` / `dbt` / `python` / `looker` 为正式契约骨架并返回 `Unsupported` —— 目前只有 `postgres` 有执行器。成功、拒绝与错误都写入 `computation_runs` 审计（离线为 `data/meta.fake.json`）。
+`POST /v1/computations` 与 `agentmem compute` 从 OKF+Git 加载受批准计算，只绑定声明参数值，经 `postgres` runtime 执行；只有确定性 Go attester 校验 provenance 与展示值 fidelity 通过后才返回数值。`bigquery` / `dbt` / `python` / `looker` 通过 `AGENTMEM_COMPUTE_SIDECARS` 声明的出向 sidecar 执行（`http` 端点或 `cli` 裸命令）；未配置 sidecar 时保持 fail-closed 并返回 `Unsupported`。sidecar 回执必须回传所执行正文的 SHA-256，job id、result 与 display value 始终由 Go 侧重算；协议见 [docs/compute-sidecar.md](docs/compute-sidecar.md)。成功、拒绝与错误都写入 `computation_runs` 审计（离线为 `data/meta.fake.json`）。
 
 ```bash
 go run ./cmd/agentmem compute --id computations/revenue-postgres --param year=2026

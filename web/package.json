@@ -16,6 +16,7 @@
     "audit:live": "bun x impeccable detect http://localhost:5173"
   },
   "devDependencies": {
+    "impeccable": "4.9.1",
     "vite": "^6.0.5"
   }
 }

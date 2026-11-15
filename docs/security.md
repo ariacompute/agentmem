@@ -17,6 +17,14 @@
 - 下层沿用既有的 `subject string` 签名，不把 `Principal` 穿透到端口定义；权限判定集中在 `internal/handlers`。
 - 因此只有**经 Handler 的流量**被视为可信。CLI 是本地可信操作：`AGENTMEM_AUTH_ENABLED=false` 时本地主体取 `AGENTMEM_ACL_DEFAULT_OWNER`，并携带全部权限。
 
+### CLI 信任边界
+
+CLI **没有** Bearer 通道，主体由 `--subject` 自声明，令牌、权限矩阵、限流与 Origin 校验全部只覆盖 HTTP Handler 边界：
+
+- 存储层仍强制执行匿名写入拒绝（`router: anonymous write rejected`）、owner 匹配与 ACL 过滤，所以 CLI 不能绕过「能写什么 / 能读什么」的授权语义，只能「声称自己是谁」。
+- 能读 `.env`（含令牌摘要、DSN、bundle 根）与能写 bundle 的本地进程，本就具备等效或更高权限；真正的边界是文件系统与操作系统账户权限。
+- 部署建议：CLI 只在本机或受控跳板运行，不把 shell 交给不受信调用方；多租户或远程访问一律走 HTTP + 令牌；审计以 `internal/meta` 落库的主体为准。详见 `SECURITY.md` 的 “CLI trust boundary” 小节。
+
 ## 2. 权限矩阵
 
 | 路由 | 所需权限 |
@@ -71,8 +79,9 @@ AGENTMEM_AUTH_TOKENS='[
 - 主机必须命中 `AGENTMEM_EGRESS_ALLOWED_HOSTS`：裸主机名只匹配自身，`*.example.com` 只匹配子域（不包含 `example.com` 本身）。
 - IP 字面量若为回环、链路本地（含 `169.254.169.254` 元数据地址）、私网、未指定或组播地址，**只有在该地址被逐字点名**时才允许——通配条目不能给它授权，本地 sidecar 场景除外。
 - 校验期不做 DNS 解析，保证判定确定且离线；域名解析出的私网地址不在这一层拦截（见第 9 节剩余风险）。
-- `RedirectPolicy` 限制跳数（默认 3）并对每一跳重新校验目标，禁止 `https → http` 降级；`HTTPBridge` 与 System One 的 `http.Client` 都设置该策略。
-- 非空出向端点（System One 或非 `cli` 适配器）而未配置任何主机时，`config.Load` 直接失败。
+- `RedirectPolicy` 限制跳数（默认 3）并对每一跳重新校验目标，禁止 `https → http` 降级；`HTTPBridge`、System One 与计算面 sidecar 的 `http.Client` 都设置该策略。
+- 非空出向端点（System One、非 `cli` 适配器或 `bridge: http` 的计算 sidecar）而未配置任何主机时，`config.Load` 直接失败；装配期用 `netsafe.ValidateEndpoint` 再校验一次，运行期每次调用前复核。
+- 计算 sidecar 的出向调用统一走 `bridges.PostJSON`：请求体 1 MiB、响应体 4 MiB、仅传输错误与 `5xx` 重试 1 次，错误只保留类型，不带 URL 或主机。协议见 `docs/compute-sidecar.md`。
 - `cli` 适配器的 `endpoint` 是可执行程序名，不是 URL，因此不参与主机白名单；它受第 6 节的命令规则约束。
 
 ## 5. 限流、超时与来源校验
@@ -89,7 +98,8 @@ AGENTMEM_AUTH_TOKENS='[
 | OKF 路径 | `internal/safepath` 拒绝 NUL、反斜杠、绝对路径、`..` 段、Windows 保留名、冒号、控制字符、尾部空格/点与超长 id；`Resolve` 做 `Clean` + `EvalSymlinks` + root 包含性校验，符号链接逃逸（文件本身或任一父目录）都会失败 |
 | 原子写 | `os.CreateTemp`（`0o600`）+ `fsync` + `rename`，写完再提交 Git 路径 |
 | 解析资源上限 | frontmatter 文档大小、YAML 节点数/深度、别名展开、目录条目数与总字节数都有上限；**不加 `KnownFields(true)`**，未知键与未知类型仍被接受（OKF 宽松兼容是硬约束） |
-| 计算体 | 只允许单条 `SELECT` / `WITH`；分号即拒绝；`pg_read_file`、`pg_ls_dir`、`dblink`、`lo_export`、`pg_sleep`、`set_config` 等副作用函数在词法层被拒；执行走只读事务与参数化绑定，行数上限来自 `AGENTMEM_COMPUTE_MAX_ROWS`（默认 100），整轮耗时由 `AGENTMEM_COMPUTE_TIMEOUT_MS` 的 context 兜住 |
+| 计算体（`sql`） | 只允许单条 `SELECT` / `WITH`；分号即拒绝；`pg_read_file`、`pg_ls_dir`、`dblink`、`lo_export`、`pg_sleep`、`set_config` 等副作用函数在词法层被拒；执行走只读事务与参数化绑定，行数上限来自 `AGENTMEM_COMPUTE_MAX_ROWS`（默认 100），整轮耗时由 `AGENTMEM_COMPUTE_TIMEOUT_MS` 的 context 兜住 |
+| 计算体（`script` / `model` / `query`） | 正文只作为数据经 stdin 或 JSON 字段交给 sidecar，绝不进入命令行或 shell；限制为 1 MiB、拒绝 NUL，YAML 正文拒绝多文档；`body_digest` 不符则拒绝展示数值。**sidecar 即执行沙箱边界**：以最小权限运行、凭据最小化，正文不会在本进程执行 |
 | CLI 桥接 | 命令必须是裸可执行程序名（`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`），永不经过 shell；参数拒绝控制字符与 shell 元字符但允许 UTF-8；外部进程 stderr 不进入错误、日志或响应 |
 | 请求体 | `Content-Type: application/json` 必需，`MaxBytesReader` 4 MiB，`DisallowUnknownFields`，拒绝尾随数据；`top_k` 上限 100，`limit` 1–1000（默认 20） |
 
@@ -135,9 +145,12 @@ AGENTMEM_AUTH_TOKENS='[
 | 路径穿越 / 符号链接逃逸 | 直接 `filepath.Join` | 已修复：`safepath` 双侧解析 |
 | 资源耗尽（解析、行数、连接） | 无上限 | 已修复：大小/节点/深度/行数/超时上限 |
 | 计算体内危险函数 | 仅关键字黑名单 | 已修复：补充文件、网络、会话与导出类函数 |
+| 计算 sidecar 越权执行 | 非 SQL 正文由外部进程解释 | **部分覆盖**：出向主机白名单、逐跳复检、`body_digest` 回执校验；sidecar 自身权限与沙箱由部署方保证 |
+| 计算回执伪造 | sidecar 可编造数值 | 缓解：job id / result / display value 全由 Go 侧重算，`body_digest` 不符即拒绝展示 |
 | 单点暴力破解 | 无限制 | 缓解：每客户端令牌桶 + 日志节流 |
 | 多实例限流绕过 | 单进程内存桶 | **未覆盖**：需前置网关或服务网格限流 |
 | 令牌热轮换/集中吊销 | `AGENTMEM_AUTH_TOKENS` 静态 | **未覆盖**：改配置后重启；多租户建议前置 IdP |
+| CLI 自声明主体 | `--subject` 不经令牌校验 | **设计取舍**：CLI 属本地可信运维面；存储层仍拒绝匿名写并校验 owner；不要把 CLI 暴露给不受信调用方 |
 | 供应链钉版本 | actions 仍为浮动 tag | 部分覆盖：最小权限 + dependabot；完整 commit SHA 需先核验 |
 | 基础镜像漂移 | 浮动 tag | 部分覆盖：固定 Alpine 主版本并每次构建刷新 CA；digest 钉住待补 |
 
@@ -150,7 +163,9 @@ go build -o bin/agentmem ./cmd/agentmem
 go run ./cmd/agentmem validate --env .env.example
 make check-boundaries
 make check-trust-store
+make e2e                                # 真实二进制驱动 CLI + HTTP，全离线
 cd web && bun test && bun run build     # 端点表镜像、13 语言译文、CSP 与单色守卫
+make web-audit                          # impeccable 源码级检查，版本由 lockfile 固定
 ```
 
 `internal/handlers/http_test.go` 覆盖匿名写、越权、伪造 `subject`、401/403、错误脱敏、限流、Origin、严格 JSON 与参数边界；`internal/okf`、`internal/vcs`、`internal/bridges`、`internal/compute`、`internal/meta` 各自带有对应的离线回归用例。

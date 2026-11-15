@@ -11,5 +11,5 @@ func (u *unsupportedRuntime) Name() string { return u.name }
 
 func (u *unsupportedRuntime) Execute(_ context.Context, _ BoundComputation) (Receipt, error) {
 	return Receipt{}, fail(ErrUnsupported,
-		"runtime %q has a contract but no executor; only postgres executes", u.name)
+		"runtime %q has a contract but no executor is configured", u.name)
 }

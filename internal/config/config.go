@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -33,14 +34,39 @@ type Config struct {
 	RateLimit RateLimitConfig `json:"rate_limit" yaml:"rate_limit"`
 }
 
+// ComputeSidecarConfig names one outbound executor for a non-postgres runtime.
+// Bridge is "http" (Endpoint is a URL) or "cli" (Command is a bare executable
+// name). The sidecar never receives a shell and never learns the contract hash
+// as an authority: it only runs the sanctioned body it is handed.
+type ComputeSidecarConfig struct {
+	Runtime   string `json:"runtime" yaml:"runtime"`
+	Bridge    string `json:"bridge" yaml:"bridge"`
+	Endpoint  string `json:"endpoint,omitempty" yaml:"endpoint"`
+	Command   string `json:"command,omitempty" yaml:"command"`
+	TimeoutMS int    `json:"timeout_ms,omitempty" yaml:"timeout_ms"`
+}
+
 // ComputeConfig bounds the Attested Computation executor. Zero values are
 // normalised to DefaultCompute() by the service layer.
 type ComputeConfig struct {
-	TimeoutMS int `json:"timeout_ms" yaml:"timeout_ms"`
-	MaxRows   int `json:"max_rows" yaml:"max_rows"`
+	TimeoutMS int                    `json:"timeout_ms" yaml:"timeout_ms"`
+	MaxRows   int                    `json:"max_rows" yaml:"max_rows"`
+	Sidecars  []ComputeSidecarConfig `json:"sidecars" yaml:"sidecars"`
 }
 
 func DefaultCompute() ComputeConfig { return ComputeConfig{TimeoutMS: 5000, MaxRows: 100} }
+
+// knownComputeRuntimes mirrors compute's non-postgres runtime names. config is
+// an L0 package and must not import compute, so the values are duplicated here
+// and pinned by config tests. postgres executes in-process and is rejected as a
+// sidecar: it must never be proxied to an external host.
+var knownComputeRuntimes = map[string]bool{
+	"bigquery": true, "dbt": true, "looker": true, "python": true,
+}
+
+// sidecarCommandRe pins bridges' CLI command rule (a bare executable name)
+// without importing bridges, which would invert the layering.
+var sidecarCommandRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
 
 type ServerConfig struct {
 	Addr string `json:"addr" yaml:"addr"`
@@ -193,6 +219,9 @@ func (c *Config) Validate() error {
 		c.Compute.MaxRows < 0 || c.Compute.MaxRows > 10000 {
 		return errors.New("config: compute.timeout_ms must be 0..120000 and compute.max_rows 0..10000")
 	}
+	if err := c.validateComputeSidecars(); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for _, a := range c.Adapters {
 		if strings.TrimSpace(a.Name) == "" || seen[a.Name] {
@@ -267,6 +296,46 @@ func (c *Config) validateAuth() error {
 	return nil
 }
 
+func (c *Config) validateComputeSidecars() error {
+	seen := make(map[string]bool, len(c.Compute.Sidecars))
+	for i, s := range c.Compute.Sidecars {
+		runtimeName := strings.ToLower(strings.TrimSpace(s.Runtime))
+		if !knownComputeRuntimes[runtimeName] {
+			return fmt.Errorf("%w: compute.sidecars[%d].runtime %q (postgres executes in-process; only bigquery, dbt, looker and python accept a sidecar)", ErrUnsupported, i, s.Runtime)
+		}
+		if seen[runtimeName] {
+			return fmt.Errorf("config: compute.sidecars[%d] duplicates runtime %q", i, runtimeName)
+		}
+		seen[runtimeName] = true
+		if s.TimeoutMS < 0 || s.TimeoutMS > 120000 {
+			return fmt.Errorf("config: compute.sidecars[%d].timeout_ms must be 0..120000", i)
+		}
+		switch strings.ToLower(strings.TrimSpace(s.Bridge)) {
+		case "http":
+			if strings.TrimSpace(s.Endpoint) == "" {
+				return fmt.Errorf("config: compute.sidecars[%d] bridge http requires an endpoint", i)
+			}
+			if strings.TrimSpace(s.Command) != "" {
+				return fmt.Errorf("config: compute.sidecars[%d] bridge http must not set a command", i)
+			}
+		case "cli":
+			command := strings.TrimSpace(s.Command)
+			if command == "" {
+				return fmt.Errorf("config: compute.sidecars[%d] bridge cli requires a bare command name", i)
+			}
+			if len(command) > 256 || !sidecarCommandRe.MatchString(command) {
+				return fmt.Errorf("config: compute.sidecars[%d].command %q must be a bare executable name", i, s.Command)
+			}
+			if strings.TrimSpace(s.Endpoint) != "" {
+				return fmt.Errorf("config: compute.sidecars[%d] bridge cli must not set an endpoint", i)
+			}
+		default:
+			return fmt.Errorf("%w: compute.sidecars[%d].bridge %q (use http or cli)", ErrUnsupported, i, s.Bridge)
+		}
+	}
+	return nil
+}
+
 func (c *Config) validateEgress() error {
 	for _, h := range c.Egress.AllowedHosts {
 		if strings.TrimSpace(h) == "" || strings.ContainsAny(h, "/: ") {
@@ -277,6 +346,12 @@ func (c *Config) validateEgress() error {
 	for _, a := range c.Adapters {
 		// A CLI bridge endpoint is an executable name, not a URL.
 		if a.Enabled && a.Kind != "cli" && strings.TrimSpace(a.Endpoint) != "" {
+			needsAllowlist = true
+		}
+	}
+	for _, s := range c.Compute.Sidecars {
+		// A CLI sidecar command is an executable name, not a URL.
+		if strings.EqualFold(strings.TrimSpace(s.Bridge), "http") && strings.TrimSpace(s.Endpoint) != "" {
 			needsAllowlist = true
 		}
 	}

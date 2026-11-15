@@ -58,7 +58,7 @@ flowchart TB
 1. `POST /v1/computations` / CLI `compute` 进入 `compute.Service.Run`。
 2. `LoadContract` 从 OKF+Git 读取受批准计算体（`.sql` 资源或正文内联块），计算 `contract_hash`。
 3. `Bind` 只接受声明参数值，`:name` 转为 `$N` 并生成 `params_digest`；任何计算体改写被拒。
-4. `RuntimeRegistry` 选择 runtime；仅 `postgres` 通过 `meta.SQLExecutor` 只读参数化执行，其余返回 `Unsupported`。
+4. `RuntimeRegistry` 选择 runtime；`postgres` 通过 `meta.SQLExecutor` 只读参数化执行，其余四个通过 `AGENTMEM_COMPUTE_SIDECARS` 声明的出向 sidecar（`http` / `cli`）执行，未配置时返回 `Unsupported`。
 5. executor 产出 `Receipt`；确定性 Go `Attester` 校验 SQL provenance 与展示值 fidelity。
 6. 成功才返回 `display_value`；失败一律 `display_allowed=false`，并把 verdict 写入 `computation_runs`。详见 [computations.md](computations.md)。
 

@@ -59,6 +59,39 @@ func TestAssembleAdapterEgressError(t *testing.T) {
 	}
 }
 
+func TestAssembleComputeSidecarEgressError(t *testing.T) {
+	cfg := config.Default()
+	cfg.Git.Root = t.TempDir()
+	cfg.Compute.Sidecars = []config.ComputeSidecarConfig{
+		{Runtime: "bigquery", Bridge: "http", Endpoint: "http://evil.example"},
+	}
+	cfg.Egress.AllowedHosts = []string{"good.example"}
+	if _, err := Assemble(context.Background(), cfg); err == nil {
+		t.Fatal("a compute sidecar outside the allowlist must fail assembly")
+	}
+}
+
+func TestAssembleComputeSidecarInstallsRuntime(t *testing.T) {
+	cfg := config.Default()
+	cfg.Git.Root = t.TempDir()
+	cfg.Compute.Sidecars = []config.ComputeSidecarConfig{
+		{Runtime: "python", Bridge: "cli", Command: "agentmem-py"},
+	}
+	svc, err := Assemble(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	defer svc.Close()
+	if svc.Compute == nil {
+		t.Fatal("compute service missing")
+	}
+	// Naming the runtimes is still the contract-level view: the sidecar did not
+	// add or rename one, it only replaced a skeleton with an executor.
+	if got := len(compute.RuntimeNames); got != 5 {
+		t.Fatalf("runtime names = %d", got)
+	}
+}
+
 func TestServiceLifecycle(t *testing.T) {
 	svc := assembleOffline(t)
 	defer svc.Close()

@@ -45,6 +45,31 @@ deployment reachable beyond the local machine:
 See `docs/security.md` for the permission matrix, token rotation and the
 threat model.
 
+## CLI trust boundary
+
+The bearer-token system described above protects the HTTP surface only. The CLI
+is a **local trusted operator surface**, not a second authenticated transport:
+
+- There is no bearer channel on the command line. A subject is self-asserted:
+  `agentmem put --subject alice` runs as `alice` without any token, digest or
+  scope check.
+- Authorisation semantics are still enforced underneath. The storage layer
+  rejects anonymous writes (`router: anonymous write rejected`), matches the
+  owner on updates and filters reads by ACL, so the CLI cannot bypass *what* may
+  be written or read — only *who* it claims to be.
+- Therefore any local process that can read `.env` (which holds token digests,
+  the DSN and the bundle root) and write the OKF bundle already has equivalent
+  or greater authority. Treat that filesystem access as the real boundary.
+- Mitigations: run the CLI only on the host or through a controlled jump box;
+  never expose it to untrusted callers or wrap it in a shell service; use the
+  HTTP API with tokens for any multi-tenant or remote access; audit subjects in
+  `internal/meta` rather than trusting CLI output; keep `.env` untracked and
+  `0600`.
+
+Do not read this as "the CLI is protected by the token system": a local
+operator can assert any subject, and that is a deliberate design choice for a
+single-tenant operator console.
+
 ## Trust stores
 
 Go 1.27.3 carries the `crypto/x509` blocklist for the eight weak eMudhra

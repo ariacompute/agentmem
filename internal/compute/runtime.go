@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 
+	"agentmem/internal/bridges"
 	"agentmem/internal/meta"
 )
 
@@ -15,20 +16,24 @@ type Runtime interface {
 	Execute(ctx context.Context, b BoundComputation) (Receipt, error)
 }
 
-// RuntimeNames lists every runtime with a formal contract. Only "postgres"
-// has an executor; the others are explicit Unsupported skeletons.
+// RuntimeNames lists every runtime with a formal contract. "postgres" always
+// executes in-process; the others execute through a configured sidecar and are
+// explicit Unsupported skeletons until one is installed.
 var RuntimeNames = []string{"bigquery", "dbt", "looker", "postgres", "python"}
 
 // RuntimeRegistry is the explicit, immutable-at-runtime set of runtimes.
 type RuntimeRegistry struct {
 	mu       sync.RWMutex
 	runtimes map[string]Runtime
+	maxRows  int
 }
 
 // NewRuntimeRegistry registers all five runtime contracts. exec may be an
-// offline fake; it is injected by the service, never constructed here.
+// offline fake; it is injected by the service, never constructed here. The four
+// outbound runtimes start as Unsupported skeletons and only execute once
+// Configure installs a sidecar.
 func NewRuntimeRegistry(exec meta.SQLExecutor, maxRows int) *RuntimeRegistry {
-	r := &RuntimeRegistry{runtimes: make(map[string]Runtime, len(RuntimeNames))}
+	r := &RuntimeRegistry{runtimes: make(map[string]Runtime, len(RuntimeNames)), maxRows: maxRows}
 	_ = r.Register(&postgresRuntime{exec: exec, maxRows: maxRows})
 	for _, name := range RuntimeNames {
 		if name == "postgres" {
@@ -37,6 +42,36 @@ func NewRuntimeRegistry(exec meta.SQLExecutor, maxRows int) *RuntimeRegistry {
 		_ = r.Register(&unsupportedRuntime{name: name})
 	}
 	return r
+}
+
+// Configure installs an outbound executor for each spec, replacing that
+// runtime's Unsupported skeleton. It is called once at assembly time, after
+// configuration validation, so an operator mistake fails the process start
+// instead of surfacing later as a computation error. Unconfigured runtimes stay
+// fail-closed.
+func (r *RuntimeRegistry) Configure(specs []SidecarSpec, allowHosts []string, runner bridges.Runner) error {
+	installed := make([]Runtime, 0, len(specs))
+	seen := make(map[string]bool, len(specs))
+	for _, spec := range specs {
+		rt, err := newSidecarRuntime(spec, allowHosts, r.maxRows, runner)
+		if err != nil {
+			return err
+		}
+		if seen[rt.Name()] {
+			return fmt.Errorf("compute: runtime %q is configured twice", rt.Name())
+		}
+		seen[rt.Name()] = true
+		if _, ok := r.runtimes[rt.Name()]; !ok {
+			return fmt.Errorf("compute: runtime %q has no contract", rt.Name())
+		}
+		installed = append(installed, rt)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, rt := range installed {
+		r.runtimes[rt.Name()] = rt
+	}
+	return nil
 }
 
 func (r *RuntimeRegistry) Register(rt Runtime) error {

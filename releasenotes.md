@@ -64,9 +64,12 @@ and a rule-first smart router.
 
 - Python SDK clients are not linked into the Go binary: a sidecar implements
   the line protocol declared by each plugin's `sdk_boundary`.
-- `postgres` is the only Attested Computation runtime that executes; the other
-  four runtimes (`bigquery`, `dbt`, `python`, `looker`) are formal contract
-  skeletons returning `Unsupported`.
+- Attested Computation covers all five runtimes. `postgres` always executes
+  in-process; `bigquery`, `dbt`, `python` and `looker` execute through an
+  outbound executor declared in `AGENTMEM_COMPUTE_SIDECARS` (`http` endpoint or
+  bare `cli` command, protocol in `docs/compute-sidecar.md`). A runtime with no
+  configured sidecar stays fail-closed and returns `Unsupported`; every sidecar
+  receipt must echo the SHA-256 of the body it ran or no value is displayed.
 - The web console is a static page served by a reverse proxy or any file
   server; the Go binary does not embed it. The API reference is read-only, with
   no interactive request builder.
