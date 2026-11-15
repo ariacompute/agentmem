@@ -87,7 +87,7 @@ const rows = {
     'Select a row to reveal its request and response JSON samples.',
     'Machine data stays verbatim: methods, paths, field names and status codes do not change with the interface language.',
     'Apart from the exception below, failures are JSON objects with an error field.',
-    'Unregistered paths answer a plain-text 404 from net/http once the request is authenticated; with authentication enabled a missing or unknown token answers 401 first. A disallowed method returns 405 without an Allow header.',
+    'Unregistered paths answer a JSON 404 once the request is authenticated; with authentication enabled a missing or unknown token answers 401 first. A disallowed method returns 405 without an Allow header. The console page itself is served by the same binary at GET / and needs no token.',
     'POST /v1/computations is the exception: execution errors return both error and envelope, and a failed envelope never carries display_value.',
     'The HTTP limit defaults to 20 and must stay between 1 and 1000; any other value returns 400. The command line keeps its own default of 20.',
 
@@ -146,7 +146,7 @@ const rows = {
     '点击任意一行可展开请求与响应 JSON 样例。',
     '机器数据逐字呈现：方法、路径、字段名与状态码不随界面语言变化。',
     '除下方标注的例外，失败响应都是带 error 字段的 JSON 对象。',
-    '未注册路径在通过鉴权后由 net/http 直接返回纯文本 404；开启鉴权时，缺失或未知的令牌会先返回 401。不允许的方法返回 405 且不设置 Allow 头。',
+    '未注册路径在通过鉴权后返回 JSON 404；开启鉴权时，缺失或未知的令牌会先返回 401。不允许的方法返回 405 且不设置 Allow 头。控制台页面由同一个二进制在 GET / 提供，无需令牌。',
     'POST /v1/computations 是唯一例外：执行错误时响应体同时包含 error 与 envelope，失败的 envelope 永不带 display_value。',
     'HTTP 的 limit 默认 20，且必须在 1 到 1000 之间；其他取值返回 400。命令行保持自己的默认值 20。',
 
@@ -205,7 +205,7 @@ const rows = {
     '點選任一列可展開請求與回應 JSON 範例。',
     '機器資料逐字呈現：方法、路徑、欄位名稱與狀態碼不隨介面語言變化。',
     '除下方標註的例外，失敗回應都是帶 error 欄位的 JSON 物件。',
-    '未註冊路徑在通過鑑權後由 net/http 直接回傳純文字 404；開啟鑑權時，缺少或未知的權杖會先回傳 401。不允許的方法回傳 405 且不設定 Allow 標頭。',
+    '未註冊路徑在通過鑑權後回傳 JSON 404；開啟鑑權時，缺少或未知的權杖會先回傳 401。不允許的方法回傳 405 且不設定 Allow 標頭。控制台頁面由同一個執行檔在 GET / 提供，無需權杖。',
     'POST /v1/computations 是唯一例外：執行錯誤時回應體同時包含 error 與 envelope，失敗的 envelope 永不帶 display_value。',
     'HTTP 的 limit 預設 20，且必須介於 1 到 1000；其他取值回傳 400。命令列維持自己的預設值 20。',
 
@@ -264,7 +264,7 @@ const rows = {
     'Selecciona una fila para mostrar sus ejemplos JSON de petición y respuesta.',
     'Los datos de máquina permanecen iguales: métodos, rutas, nombres de campo y códigos de estado no cambian con el idioma de la interfaz.',
     'Salvo la excepción indicada abajo, los fallos son objetos JSON con un campo error.',
-    'Las rutas no registradas devuelven un 404 en texto plano de net/http una vez autenticada la petición. Con la autenticación activa, un token ausente o desconocido responde antes con 401. Un método no permitido devuelve 405 sin cabecera Allow.',
+    'Las rutas no registradas devuelven un 404 en JSON una vez autenticada la petición. Con la autenticación activa, un token ausente o desconocido responde antes con 401. Un método no permitido devuelve 405 sin cabecera Allow. La página de la consola la sirve el mismo binario en GET / y no requiere token.',
     'POST /v1/computations es la excepción: los errores de ejecución devuelven error y envelope a la vez, y un envelope fallido nunca incluye display_value.',
     'El limit HTTP vale 20 por defecto y debe estar entre 1 y 1000; cualquier otro valor devuelve 400. La línea de comandos conserva su propio valor por defecto de 20.',
 
@@ -323,7 +323,7 @@ const rows = {
     'Sélectionnez une ligne pour afficher ses exemples JSON de requête et de réponse.',
     'Les données machine restent à l’identique : méthodes, chemins, noms de champs et codes de statut ne changent pas avec la langue de l’interface.',
     'Hors l’exception ci-dessous, les échecs sont des objets JSON dotés d’un champ error.',
-    'Les chemins non enregistrés renvoient un 404 en texte brut de net/http une fois la requête authentifiée. Avec l’authentification active, un jeton absent ou inconnu répond d’abord 401. Une méthode interdite renvoie 405 sans en-tête Allow.',
+    'Les chemins non enregistrés renvoient un 404 en JSON une fois la requête authentifiée. Avec l’authentification active, un jeton absent ou inconnu répond d’abord 401. Une méthode interdite renvoie 405 sans en-tête Allow. La page de la console est servie par le même binaire sur GET / et ne demande aucun jeton.',
     'POST /v1/computations est l’exception : les erreurs d’exécution renvoient error et envelope ensemble, et un envelope en échec ne contient jamais display_value.',
     'Le limit HTTP vaut 20 par défaut et doit rester entre 1 et 1000 ; toute autre valeur renvoie 400. La ligne de commande conserve sa propre valeur par défaut de 20.',
 
@@ -382,7 +382,7 @@ const rows = {
     'Zeile auswählen, um JSON-Beispiele für Anfrage und Antwort zu öffnen.',
     'Maschinendaten bleiben unverändert: Methoden, Pfade, Feldnamen und Statuscodes ändern sich nicht mit der Oberflächensprache.',
     'Abgesehen von der unten genannten Ausnahme sind Fehler JSON-Objekte mit einem error-Feld.',
-    'Nicht registrierte Pfade liefern nach erfolgreicher Authentifizierung einen Klartext-404 von net/http. Bei aktiver Authentifizierung antwortet ein fehlendes oder unbekanntes Token zuvor mit 401. Eine unzulässige Methode liefert 405 ohne Allow-Header.',
+    'Nicht registrierte Pfade liefern nach erfolgreicher Authentifizierung einen JSON-404. Bei aktiver Authentifizierung antwortet ein fehlendes oder unbekanntes Token zuvor mit 401. Eine unzulässige Methode liefert 405 ohne Allow-Header. Die Konsolenseite liefert dasselbe Binary unter GET / aus und braucht kein Token.',
     'POST /v1/computations ist die Ausnahme: Ausführungsfehler liefern error und envelope zugleich, und ein fehlgeschlagenes Envelope enthält nie display_value.',
     'Das HTTP-limit ist standardmäßig 20 und muss zwischen 1 und 1000 liegen; jeder andere Wert liefert 400. Die Kommandozeile behält ihren eigenen Standardwert 20.',
 
@@ -441,7 +441,7 @@ const rows = {
     'Seleziona una riga per mostrare gli esempi JSON di richiesta e risposta.',
     'I dati macchina restano identici: metodi, percorsi, nomi dei campi e codici di stato non cambiano con la lingua dell’interfaccia.',
     'Salvo l’eccezione sotto, i fallimenti sono oggetti JSON con un campo error.',
-    'I percorsi non registrati restituiscono un 404 in testo semplice di net/http dopo l’autenticazione. Con l’autenticazione attiva, un token assente o sconosciuto risponde prima con 401. Un metodo non consentito restituisce 405 senza intestazione Allow.',
+    'I percorsi non registrati restituiscono un 404 JSON dopo l’autenticazione. Con l’autenticazione attiva, un token assente o sconosciuto risponde prima con 401. Un metodo non consentito restituisce 405 senza intestazione Allow. La pagina della console è servita dallo stesso binario su GET / e non richiede token.',
     'POST /v1/computations è l’eccezione: gli errori di esecuzione restituiscono error ed envelope insieme, e un envelope fallito non contiene mai display_value.',
     'Il limit HTTP vale 20 per impostazione predefinita e deve restare tra 1 e 1000; ogni altro valore restituisce 400. La riga di comando mantiene il proprio valore predefinito di 20.',
 
@@ -500,7 +500,7 @@ const rows = {
     'Выберите строку, чтобы раскрыть примеры JSON запроса и ответа.',
     'Машинные данные остаются прежними: методы, пути, имена полей и коды состояния не зависят от языка интерфейса.',
     'За исключением описанного ниже случая, отказы представляют собой JSON-объекты с полем error.',
-    'Незарегистрированные пути возвращают текстовый 404 от net/http после аутентификации. При включённой аутентификации отсутствующий или неизвестный токен сначала даёт 401. Недопустимый метод возвращает 405 без заголовка Allow.',
+    'Незарегистрированные пути возвращают JSON-404 после аутентификации. При включённой аутентификации отсутствующий или неизвестный токен сначала даёт 401. Недопустимый метод возвращает 405 без заголовка Allow. Страницу консоли отдаёт тот же бинарник по GET /, токен для неё не нужен.',
     'POST /v1/computations — исключение: ошибки выполнения возвращают одновременно error и envelope, а ошибочный envelope никогда не содержит display_value.',
     'HTTP-параметр limit по умолчанию равен 20 и должен быть в диапазоне от 1 до 1000; любое другое значение возвращает 400. Командная строка сохраняет собственное значение по умолчанию 20.',
 
@@ -559,7 +559,7 @@ const rows = {
     '行を選択するとリクエストとレスポンスの JSON サンプルを展開します。',
     '機械データはそのまま表示されます。メソッド、パス、フィールド名、ステータスコードは表示言語で変化しません。',
     '後述の例外を除き、失敗時は error フィールドを持つ JSON オブジェクトです。',
-    '未登録のパスは認証後に net/http がプレーンテキストの 404 を返します。認証が有効な場合、トークンがない、または不明なときは先に 401 を返します。許可されないメソッドは Allow ヘッダーなしで 405 を返します。',
+    '未登録のパスは認証後に JSON の 404 を返します。認証が有効な場合、トークンがない、または不明なときは先に 401 を返します。許可されないメソッドは Allow ヘッダーなしで 405 を返します。コンソールページは同じバイナリが GET / で配信し、トークンは不要です。',
     'POST /v1/computations は例外です。実行エラーでは error と envelope の両方を返し、失敗した envelope に display_value は含まれません。',
     'HTTP の limit は既定値 20 で、1〜1000 の範囲でなければ 400 を返します。コマンドラインは独自の既定値 20 を保ちます。',
 
@@ -618,7 +618,7 @@ const rows = {
     '행을 선택하면 요청과 응답 JSON 예시가 펼쳐집니다.',
     '기계 데이터는 그대로 표시됩니다. 메서드, 경로, 필드 이름, 상태 코드는 화면 언어에 따라 바뀌지 않습니다.',
     '아래 예외를 제외하면 실패 응답은 error 필드를 가진 JSON 객체입니다.',
-    '등록되지 않은 경로는 인증을 통과한 뒤 net/http가 일반 텍스트 404를 반환합니다. 인증이 켜져 있으면 토큰이 없거나 알 수 없을 때 먼저 401을 반환합니다. 허용되지 않은 메서드는 Allow 헤더 없이 405를 반환합니다.',
+    '등록되지 않은 경로는 인증을 통과한 뒤 JSON 404를 반환합니다. 인증이 켜져 있으면 토큰이 없거나 알 수 없을 때 먼저 401을 반환합니다. 허용되지 않은 메서드는 Allow 헤더 없이 405를 반환합니다. 콘솔 페이지는 같은 바이너리가 GET /에서 제공하며 토큰이 필요 없습니다.',
     'POST /v1/computations이 예외입니다. 실행 오류는 error와 envelope를 함께 반환하며, 실패한 envelope에는 display_value가 없습니다.',
     'HTTP의 limit는 기본값 20이며 1~1000 범위여야 하고, 그 밖의 값은 400을 반환합니다. 명령줄은 자체 기본값 20을 유지합니다.',
 
@@ -677,7 +677,7 @@ const rows = {
     'Selecione uma linha para revelar os exemplos JSON de pedido e resposta.',
     'Os dados de máquina permanecem iguais: métodos, caminhos, nomes de campos e códigos de estado não mudam com o idioma da interface.',
     'Salvo a exceção abaixo, as falhas são objetos JSON com um campo error.',
-    'Caminhos não registados devolvem um 404 em texto simples do net/http depois da autenticação. Com a autenticação ativa, um token ausente ou desconhecido responde primeiro com 401. Um método não permitido devolve 405 sem cabeçalho Allow.',
+    'Caminhos não registados devolvem um 404 em JSON depois da autenticação. Com a autenticação ativa, um token ausente ou desconhecido responde primeiro com 401. Um método não permitido devolve 405 sem cabeçalho Allow. A página da consola é servida pelo mesmo binário em GET / e não exige token.',
     'POST /v1/computations é a exceção: erros de execução devolvem error e envelope em conjunto, e um envelope falhado nunca contém display_value.',
     'O limit HTTP vale 20 por omissão e tem de ficar entre 1 e 1000; qualquer outro valor devolve 400. A linha de comandos mantém o seu próprio valor por omissão de 20.',
 
@@ -736,7 +736,7 @@ const rows = {
     'اختر صفاً لعرض أمثلة JSON للطلب والرد.',
     'تبقى البيانات الآلية كما هي: الأساليب والمسارات وأسماء الحقول ورموز الحالة لا تتغير بتغير لغة الواجهة.',
     'باستثناء الحالة المذكورة أدناه، تكون الإخفاقات كائنات JSON تحمل الحقل error.',
-    'تُعيد المسارات غير المسجلة رداً نصياً 404 من net/http بعد المصادقة. وعند تفعيل المصادقة يُعاد 401 أولاً إذا غاب الرمز أو كان غير معروف. ويُعيد الأسلوب غير المسموح 405 دون ترويسة Allow.',
+    'تُعيد المسارات غير المسجلة 404 بصيغة JSON بعد المصادقة. وعند تفعيل المصادقة يُعاد 401 أولاً إذا غاب الرمز أو كان غير معروف. ويُعيد الأسلوب غير المسموح 405 دون ترويسة Allow. وتقدّم الصفحة نفسها الملف التنفيذي عبر GET / دون رمز.',
     'POST /v1/computations هو الاستثناء: تُعيد أخطاء التنفيذ error و envelope معاً، ولا يحمل envelope الفاشل display_value أبداً.',
     'قيمة limit في HTTP هي 20 افتراضياً ويجب أن تبقى بين 1 و1000؛ وأي قيمة أخرى تُعيد 400. ويحتفظ سطر الأوامر بقيمته الافتراضية 20.',
 
@@ -795,7 +795,7 @@ const rows = {
     'किसी पंक्ति को चुनें, अनुरोध और प्रतिक्रिया के JSON उदाहरण खुलेंगे।',
     'मशीन डेटा जस का तस रहता है: तरीके, पथ, फ़ील्ड नाम और स्टेटस कोड इंटरफ़ेस भाषा से नहीं बदलते।',
     'नीचे बताए अपवाद को छोड़कर, विफलताएँ error फ़ील्ड वाले JSON ऑब्जेक्ट हैं।',
-    'अपंजीकृत पथ प्रमाणीकरण के बाद net/http से सादा पाठ 404 लौटाते हैं। प्रमाणीकरण सक्रिय होने पर टोकन न होने या अज्ञात होने पर पहले 401 लौटता है। अमान्य तरीका Allow हेडर के बिना 405 लौटाता है।',
+    'अपंजीकृत पथ प्रमाणीकरण के बाद JSON 404 लौटाते हैं। प्रमाणीकरण सक्रिय होने पर टोकन न होने या अज्ञात होने पर पहले 401 लौटता है। अमान्य तरीका Allow हेडर के बिना 405 लौटाता है। कंसोल पृष्ठ वही बाइनरी GET / पर परोसती है और उसे टोकन की आवश्यकता नहीं है।',
     'POST /v1/computations अपवाद है: निष्पादन त्रुटियाँ error और envelope दोनों लौटाती हैं, और विफल envelope में कभी display_value नहीं होता।',
     'HTTP का limit डिफ़ॉल्ट 20 है और 1 से 1000 के बीच होना चाहिए; कोई अन्य मान 400 लौटाता है। कमांड लाइन अपना डिफ़ॉल्ट 20 बनाए रखती है।',
 

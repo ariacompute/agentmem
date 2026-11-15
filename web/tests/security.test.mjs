@@ -10,10 +10,14 @@ const INDEX = join(WEB, 'index.html')
 const html = readFileSync(INDEX, 'utf8')
 
 /**
- * The page is served as plain static files, so the policy travels inside the
- * document as a meta element. Only the parser-blocking theme resolver is
- * inline; everything else, including the module bundle and the stylesheet,
- * must stay same-origin and dependency free.
+ * The page travels inside the document as a meta element, which is what a
+ * plain static file server honours. The binary serves it with a matching
+ * `Content-Security-Policy` header whose digest is computed from this same
+ * inline script (internal/webui), so the two can never disagree.
+ *
+ * Only the parser-blocking theme resolver is inline; everything else,
+ * including the module bundle and the stylesheet, must stay same-origin and
+ * dependency free.
  */
 function csp() {
   const meta = html.match(

@@ -147,6 +147,17 @@ func NewHandler(svc *service.KnowledgeService, opts Options) http.Handler {
 			methodNotAllowed(w)
 		}
 	})
+	// Unregistered /v1 paths answer JSON, never HTML: the console catch-all
+	// below must not turn an API client's typo into a page.
+	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "not found")
+	})
+	if opts.Console != nil {
+		// Everything else is the console: "/" serves index.html and
+		// "/assets/*" the hashed bundles. The handler answers its own 404/405
+		// in JSON for anything it does not own.
+		mux.Handle("/", opts.Console)
+	}
 	return newSecurity(opts).wrap(mux)
 }
 

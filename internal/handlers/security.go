@@ -13,6 +13,22 @@ import (
 	"agentmem/internal/auth"
 )
 
+// apiPolicy is the policy for every JSON response: nothing may be loaded or
+// fetched from an API answer. The console page needs a wider policy, which is
+// why it is the single documented exception (see Console).
+const apiPolicy = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+
+// Console is the optional web console compiled into the binary. The port lives
+// here, where it is consumed, so internal/webui stays a leaf package with no
+// agentmem imports.
+type Console interface {
+	http.Handler
+	// Public reports whether a path may be read without a bearer token.
+	Public(path string) bool
+	// CSP is the page-level policy the console needs.
+	CSP() string
+}
+
 // Options carries the security posture assembled by the CLI. A nil
 // Authenticator fails closed: every protected route returns 401.
 type Options struct {
@@ -21,11 +37,15 @@ type Options struct {
 	AllowedOrigins []string
 	RateRPS        int
 	RateBurst      int
+	// Console is nil when the console is not embedded, which keeps the
+	// API-only posture reproducible in tests.
+	Console Console
 }
 
 // routePermissions is the single, auditable permission matrix. It mirrors the
 // 9 method+path combinations registered in NewHandler. Anything not listed
-// here is handled by the router's own 405 logic.
+// here is handled by the router's own 405 logic. The console paths are not
+// listed: they are public reads, resolved by Console.Public instead.
 func routePermissions(r *http.Request) (auth.Permission, bool) {
 	switch r.Method + " " + r.URL.Path {
 	case "POST /v1/knowledge":
@@ -68,7 +88,7 @@ func (s *security) wrap(next http.Handler) http.Handler {
 				writeError(w, http.StatusInternalServerError, "internal error")
 			}
 		}()
-		setSecurityHeaders(w.Header())
+		s.setSecurityHeaders(w.Header(), r)
 		if !s.limiter.Allow(clientKey(r)) {
 			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 			return
@@ -77,7 +97,7 @@ func (s *security) wrap(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "origin not allowed")
 			return
 		}
-		if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
+		if s.publicPath(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -144,12 +164,40 @@ func (s *security) originAllowed(r *http.Request) bool {
 	return false
 }
 
-func setSecurityHeaders(h http.Header) {
+// setSecurityHeaders applies the API posture by default and the console posture
+// for the page and its assets. The console handler sets both headers again on
+// its own responses (it must stay testable in isolation), and the two policies
+// would otherwise intersect into a blank page.
+func (s *security) setSecurityHeaders(h http.Header, r *http.Request) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Referrer-Policy", "no-referrer")
+	if s.consolePath(r) {
+		h.Set("Content-Security-Policy", s.opts.Console.CSP())
+		// Hashed assets are immutable and index.html revalidates; the static
+		// handler owns the exact value.
+		return
+	}
 	h.Set("Cache-Control", "no-store")
-	h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+	h.Set("Content-Security-Policy", apiPolicy)
+}
+
+// publicPath is the complete allowlist of anonymous reads: the health check and
+// the embedded console page with its assets. Every other route authenticates
+// first, so an unknown path still answers 401 before 404.
+func (s *security) publicPath(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
+		return true
+	}
+	return s.consolePath(r)
+}
+
+// consolePath reports whether the request addresses the embedded console.
+func (s *security) consolePath(r *http.Request) bool {
+	return s.opts.Console != nil && s.opts.Console.Public(r.URL.Path)
 }
 
 func clientKey(r *http.Request) string {

@@ -5,13 +5,16 @@ import { LANGUAGES } from './lib/languages.js'
 import { getLang, initLang, mirrorHtml, onLangChange, setLang, t } from './lib/i18n.js'
 import { getTheme, initTheme, onThemeChange, toggleTheme } from './lib/theme.js'
 import { button, chip, el } from './lib/dom.js'
+import { readToken } from './lib/api-try.js'
 import { renderStatus } from './views/status.js'
 import { cleanupDocs, renderDocs } from './views/docs.js'
 
 const root = document.getElementById('app')
 
 const statusState = { health: {}, decisions: [], error: '', loaded: false }
-const docsState = { open: {} }
+// `drafts` keeps unsent requests alive across the shell's full re-render; the
+// token never enters this state, it stays in sessionStorage.
+const docsState = { open: {}, drafts: {} }
 const initialView =
   typeof window !== 'undefined' && window.location
     ? new URLSearchParams(window.location.search).get('view')
@@ -153,6 +156,9 @@ function render() {
         docsState.open[key] = !docsState.open[key]
         render()
       },
+      onDraft: (key, draft) => {
+        docsState.drafts[key] = draft
+      },
     })
   }
   window.scrollTo(0, scrollY)
@@ -160,9 +166,14 @@ function render() {
 
 async function loadStatus() {
   try {
+    // /healthz is public; the audit trail is not. When the operator has entered
+    // a token in the docs workbench, the status view reuses it so an
+    // authenticated deployment does not show a permanent 401.
+    const token = readToken()
+    const authorized = token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
     const [healthRes, decisionsRes] = await Promise.all([
       fetch('/healthz'),
-      fetch('/v1/decisions?limit=20'),
+      fetch('/v1/decisions?limit=20', authorized),
     ])
     if (!healthRes.ok || !decisionsRes.ok) throw new Error(t('shell', 'badStatus'))
     statusState.health = await healthRes.json()

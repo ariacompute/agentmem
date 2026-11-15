@@ -70,6 +70,10 @@ jobs:
           bun install --frozen-lockfile
           bun test
           bun run build
+      # The build output is the embedded package (`//go:embed all:dist`), so a
+      # stale copy silently ships an old console in every binary.
+      - name: Embedded console is up to date
+        run: git diff --exit-code -- internal/webui/dist
       # Monochrome invariant and WCAG AA contrast are silent regressions:
       # impeccable runs from the lockfile-pinned devDependency, never @latest.
       - name: Web rendering audit (impeccable, pinned)

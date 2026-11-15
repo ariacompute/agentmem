@@ -89,7 +89,15 @@ AGENTMEM_AUTH_TOKENS='[
 - 单进程令牌桶：`AGENTMEM_RATE_RPS`（默认 20）/ `AGENTMEM_RATE_BURST`（默认 40），按 `RemoteAddr` 主机计。桶表上限 10000 个键并有定期清理，避免伪造源地址撑爆内存。
 - HTTP 服务端超时（`internal/cli/root.go` 常量）：读头 5s、读 15s、写 30s、空闲 60s、`MaxHeaderBytes` 1 MiB；收到 `SIGINT`/`SIGTERM` 后最多 10s 优雅退出。
 - 跨站来源：同源请求直接放行；跨源必须命中 `AGENTMEM_ALLOWED_ORIGINS`（精确匹配 scheme+host+port，不接受带路径的条目）。**不返回 CORS 响应头**——跨源控制台需要自行经同源反向代理转发。
-- 安全响应头：`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、`Cache-Control: no-store`，以及 API 侧的 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'`。
+- 安全响应头：`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`；JSON 响应额外带 `Cache-Control: no-store` 与 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'`。控制台页面的两处例外见下。
+
+### 内嵌控制台
+
+- `GET /` 与 `/assets/*` 由 `internal/webui` 从二进制内嵌的 Vite 产物提供，与 `GET /healthz` 同属匿名可读白名单（`handlers.Console.Public` 是封闭清单）。其余路径仍先鉴权：未知路径在开启鉴权时先返回 `401`，通过鉴权后才落到 JSON `404`。
+- 页面级 CSP 在 `serve` 启动时用内嵌 `index.html` 里唯一的内联脚本现算 SHA-256（`webui.Handler.CSP`），因此响应头不会与页面漂移；`web/index.html` 里的 meta 保留为纯静态托管时的兜底。两条 CSP 同时下发时按交集生效，所以"按路径选择策略"是页面能渲染的前提。
+- 缓存策略是唯一的头部例外：`index.html` 为 `no-cache`，带内容哈希的 `/assets/*` 为 `public, max-age=31536000, immutable`；所有 JSON 响应仍是 `no-store`。
+- 静态资源同样计入单进程限流（一次首屏加载数个请求），因此把 `AGENTMEM_RATE_RPS` 调得过低会连带拖慢页面。
+- 文档页的试调用面板把 Bearer 令牌只放在 `sessionStorage`（键 `agentmem.token`，关闭标签页即失效），仅作为 `Authorization` 头发送，绝不进入 URL、草稿、`localStorage` 或日志；401/403/429 只呈现固定分类文案，网络错误不携带请求详情。写端点（`POST /v1/knowledge`、`POST /v1/migrate`、`POST /v1/computations`）必须先显式确认才能发送。
 
 ## 6. 文件与执行面
 

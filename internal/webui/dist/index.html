@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Content Security Policy. Every asset is local, so 'self' is enough for
+      the module bundle, the stylesheet and the same-origin /healthz + /v1
+      calls (the Vite dev proxy keeps them same-origin). The only inline
+      script is the parser-blocking theme resolver below, admitted by its
+      SHA-256 digest; web/tests/security.test.mjs recomputes that digest from
+      this file and fails if the two ever drift.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'sha256-mzeryZFrNf4VCOrOZpT96qWc7YnYh2IpCBFOVEM0lyc='; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'"
+    />
+    <title>agentmem</title>
+    <meta name="description" content="agentmem status console and HTTP API documentation." />
+    <script>
+      // Resolve the theme before the first paint. A parser-blocking classic
+      // script in the head avoids a dark frame on a light-configured machine,
+      // and stays inline so the page also works when served as plain files.
+      ;(function () {
+        try {
+          var stored = window.localStorage.getItem('agentmem.theme')
+          document.documentElement.dataset.theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark'
+        } catch (error) {
+          document.documentElement.dataset.theme = 'dark'
+        }
+      })()
+    </script>
+    <script type="module" crossorigin src="/assets/index-DRZ9Jk_Z.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BpZ7fV1h.css">
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
+</html>

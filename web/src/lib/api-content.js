@@ -28,6 +28,7 @@ export const serverBaseLines = [
   `http://${serverBase.addr}          ${serverBase.addrEnv} (default)`,
   `http://${serverBase.containerAddr}          container / compose`,
   '/healthz  ·  /v1/*             one listener, no version prefix on health',
+  '/                        console page, compiled into the binary',
 ]
 
 export const headerLines = [
@@ -282,6 +283,31 @@ export const endpoints = [
 ]`,
   },
 ]
+
+/**
+ * Interactive metadata for the try-it workbench, keyed by `METHOD path`.
+ *
+ * Machine data again: `query` holds the sample value of every query parameter
+ * the route accepts (empty for routes without one), and `write` marks the
+ * routes that change stored state, which the panel asks the operator to
+ * confirm before sending. Every key in ROUTE_KEYS must appear here;
+ * api-content.test.mjs enforces that, so a new endpoint cannot ship without a
+ * request form.
+ */
+export const tryMeta = {
+  'GET /healthz': { write: false, query: {} },
+  'POST /v1/knowledge': { write: true, query: {} },
+  'GET /v1/knowledge': { write: false, query: { id: 'concepts/example' } },
+  'POST /v1/query': { write: false, query: {} },
+  'POST /v1/migrate': { write: true, query: {} },
+  'GET /v1/decisions': { write: false, query: { concept_id: 'concepts/example', limit: '20' } },
+  'GET /v1/concepts': { write: false, query: {} },
+  'POST /v1/computations': { write: true, query: {} },
+  'GET /v1/computations': {
+    write: false,
+    query: { concept_id: 'computations/example', limit: '20' },
+  },
+}
 
 /** Status rows for the errors section. `codes` is a wire-level hint. */
 export const statusGroups = [

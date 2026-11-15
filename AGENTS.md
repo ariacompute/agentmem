@@ -71,11 +71,19 @@ upward import: `internal/auth` (consumed by `handlers` / `cli`),
   in `schema_migrations` with an advisory lock.
 - **Explicit plugin registry**, not Go `.so` plugins.
 - **Web is dependency-free, monochrome and fully localised.** `web/` ships plain
-  ES modules with no runtime framework, external CSS or CDN assets and is served
-  as static files. Every colour sits on the black/white/grey luminance axis
-  (`web/tests/style.test.mjs` enforces it). All 13 languages need real
-  translations in `web/src/lib/copy/`; methods, paths, field names, status codes
-  and JSON samples are machine data and are never translated.
+  ES modules with no runtime framework, external CSS or CDN assets. Vite only
+  bundles it, and the output directory *is* the embedded package
+  (`internal/webui/dist`, set in `web/vite.config.js`); that directory is
+  committed so `go build`/`go test ./...` never need bun. Every colour sits on
+  the black/white/grey luminance axis (`web/tests/style.test.mjs` enforces it).
+  All 13 languages need real translations in `web/src/lib/copy/`; methods,
+  paths, field names, status codes and JSON samples are machine data and are
+  never translated.
+- **The console is a public page; the API is not.** `GET /` and `/assets/*` are
+  anonymous like `GET /healthz` (`handlers.Console.Public` is the closed
+  allowlist). Every attempt to call the API from the page still needs a bearer
+  token, which the try-it workbench keeps in `sessionStorage` only — never in a
+  URL, a draft, a log line or `localStorage`.
 - **Web rendering is checked with impeccable.** `make web-audit` runs
   `impeccable detect` on the `web/` source (no browser required) and fails the
   build on any anti-pattern. The CLI version is pinned exactly in
@@ -123,7 +131,8 @@ make validate    # strict validation of .env.example
 make check-boundaries  # SDK boundaries stay declarative; no inline annotations
 make check-trust-store # offline eMudhra/emSign CA fingerprint scan
 cd web && bun test  # offline node:test suites, zero extra dependencies
-cd web && bun run build  # optional Vite bundle of the same static page
+cd web && bun run build  # rebuild internal/webui/dist (the embedded console)
+make web-verify  # rebuild and fail if internal/webui/dist is stale
 ```
 
 ## Where to look
@@ -167,9 +176,12 @@ The endpoint table in `web/src/lib/api-content.js` is the user-facing half of
 `internal/handlers/http.go`: a route, status code or auth requirement change must
 be mirrored there, including the `headerLines` bearer/scope/rate-limit rows and
 the `statusGroups` table. Request samples never carry a `subject` field.
-`web/tests/api-content.test.mjs` pins the 9 method+path combinations and the
-documented statuses, `copy-fallback.test.mjs` demands a non-English translation
-for every key, `style.test.mjs` keeps the console monochrome, and
-`security.test.mjs` keeps the page CSP honest. The outbound sidecar wire
-protocol in `internal/bridges/` is not part of the public API; do not document
-`/put`, `/query` or `/delete` as agentmem endpoints.
+`tryMeta` is the interactive half of the same table: one entry per route with
+its query samples and a `write` flag, so a new endpoint cannot ship without a
+request form. `web/tests/api-content.test.mjs` pins the 9 method+path
+combinations and the documented statuses, `api-try.test.mjs` pins URL/header
+building and the write-confirmation rule, `copy-fallback.test.mjs` demands a
+non-English translation for every key, `style.test.mjs` keeps the console
+monochrome, and `security.test.mjs` keeps the page CSP honest. The outbound
+sidecar wire protocol in `internal/bridges/` is not part of the public API; do
+not document `/put`, `/query` or `/delete` as agentmem endpoints.

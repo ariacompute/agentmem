@@ -25,6 +25,7 @@ import (
 	"agentmem/internal/okf"
 	"agentmem/internal/router"
 	"agentmem/internal/service"
+	"agentmem/internal/webui"
 )
 
 const usage = `agentmem - OKF+Git knowledge hub with pluggable RAG and smart routing
@@ -124,12 +125,19 @@ func cmdServe(args []string, out io.Writer) error {
 		return err
 	}
 	defer svc.Close()
+	// The console is compiled in, so a failure here means the binary was built
+	// without a usable embed: fail closed rather than start API-only.
+	console, err := webui.New()
+	if err != nil {
+		return err
+	}
 	handler := handlers.NewHandler(svc, handlers.Options{
 		Auth:           authenticator,
 		LocalSubject:   cfg.ACL.DefaultOwner,
 		AllowedOrigins: cfg.Auth.AllowedOrigins,
 		RateRPS:        cfg.RateLimit.RPS,
 		RateBurst:      cfg.RateLimit.Burst,
+		Console:        console,
 	})
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,

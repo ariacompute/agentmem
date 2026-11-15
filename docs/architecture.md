@@ -35,15 +35,18 @@ flowchart TB
   CMP --> PG
 ```
 
-包依赖单向：`auth` / `safepath` / `netsafe` 与 `okf` / `meta` / `config`（L0，零内部依赖）→ `vcs` / `adapter` / `bridges` → `plugins`（清单 + 引擎包）→ `router` / `eval` / `compute` → `service` → `handlers` / `cli` → `cmd/agentmem`。端口定义在消费方，实现注入。`gorm` 只在 `internal/meta` 内出现；`compute.SQLExecutor` 定义在 `meta`，其 GORM 实现留在 `internal/meta/postgres_exec.go`，避免下层反向 import。
+包依赖单向：`auth` / `safepath` / `netsafe` / `webui` 与 `okf` / `meta` / `config`（L0，零内部依赖）→ `vcs` / `adapter` / `bridges` → `plugins`（清单 + 引擎包）→ `router` / `eval` / `compute` → `service` → `handlers` / `cli` → `cmd/agentmem`。端口定义在消费方，实现注入。`gorm` 只在 `internal/meta` 内出现；`compute.SQLExecutor` 定义在 `meta`，其 GORM 实现留在 `internal/meta/postgres_exec.go`，避免下层反向 import。
 
-三个安全叶子包只依赖标准库，因此不产生向上的依赖：
+四个叶子包只依赖标准库，因此不产生向上的依赖：
 
 | 包 | 消费方 | 职责 |
 |---|---|---|
 | `internal/auth` | `handlers` / `cli` | 权限常量、`Principal`、令牌 SHA-256 摘要映射、context 注入与读取 |
 | `internal/safepath` | `okf` / `vcs` | 相对路径校验、`Clean` + `EvalSymlinks` + root 包含性判定 |
 | `internal/netsafe` | `bridges` / `router` | 出向端点 scheme/host 白名单校验与逐跳重定向复检 |
+| `internal/webui` | `handlers` / `cli` | `//go:embed` 内嵌的控制台产物、只读静态服务、页面级 CSP（启动时对首页内联脚本现算摘要） |
+
+控制台与 API 共用同一个监听端口：`handlers.NewHandler` 注册 9 条 API 路由与 `/v1/` 的 JSON 404 兜底后，把 `/` 交给 `webui.Handler`（`GET`/`HEAD` 只读，其余方法 405）。`handlers.Console` 端口定义在消费方，`webui` 因此不需要认识 `handlers`。页面与资源是匿名可读的公开前缀，其余路径仍走鉴权与权限矩阵。
 
 `config` 包不引入第三方 dotenv 依赖：`.env` 由标准库解析。加载顺序为 `Default()` → `.env`（`--env` / `AGENTMEM_ENV_FILE` 指定路径）→ 进程环境变量 → `Validate()`。封闭的 `AGENTMEM_*` 键白名单（同时覆盖进程环境中出现的未知 `AGENTMEM_*` 键）让未知键、非法数值、非法 `AGENTMEM_ADAPTERS` JSON 全部 fail closed；`POSTGRES_*` 等非前缀键留给 Docker Compose。`.env` 不进镜像，Compose 用 `env_file` 与 `${...}` 插值读取同一文件。
 

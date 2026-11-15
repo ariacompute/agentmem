@@ -4,8 +4,9 @@ import { LANGUAGES } from '../src/lib/languages.js'
 import { detectLang, resolve, STORAGE_KEY } from '../src/lib/i18n.js'
 import { shellCopy } from '../src/lib/copy/shell-copy.js'
 import { apiCopy } from '../src/lib/copy/api-copy.js'
+import { tryCopy } from '../src/lib/copy/try-copy.js'
 
-const PROSE = { shell: shellCopy, api: apiCopy }
+const PROSE = { shell: shellCopy, api: apiCopy, tryit: tryCopy }
 
 describe('copy fallback', () => {
   it('keeps English complete for every key translated elsewhere', () => {

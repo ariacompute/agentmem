@@ -245,7 +245,7 @@ go run ./cmd/agentmem validate --env .env
 
 数据与 OKF bundle 存于命名卷（`pgdata`、`agentmem_data`）；容器内 `AGENTMEM_GIT_ROOT` 为 `/app/data/bundle`。如需初始化 bundle，可将 `testdata/bundle/` 复制进该卷（例如通过临时容器或对运行中的服务执行 `docker compose cp`）。
 
-镜像把构建好的控制台放在 `/app/web/dist`，但 Go 二进制既不内嵌也不托管 `web/` —— API 只监听文档中列出的 9 条路径。若希望控制台与 API 同机部署，请用任意静态服务器（或反向代理）单独托管该目录。
+镜像内不含静态目录：控制台已编入二进制，`http://127.0.0.1:8080/` 即控制台页面，同一监听端口继续提供文档中的 9 条 API 路径。前置反向代理仍建议保留用于 TLS，但不再需要配置 document root。
 
 **信任库刷新。** 2026-10 eMudhra/emSign 中间 CA 私钥泄露后，请重新拉取 `pgvector/pgvector:pg16` 并重建 agentmem 镜像以刷新随附信任库；可用 `make check-trust-store` 离线核验。
 
@@ -394,11 +394,14 @@ go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
 
 `web/` 是零运行时依赖的原生 ES module 控制台，包含两个视图：**状态**（健康状态 + 最近路由决策）与 **API 文档**（全部 9 个 HTTP method + path 组合、请求/响应样例、通用约定与错误码）。
 
+- **由二进制托管**：Vite 直接打包输出到 `internal/webui/dist`，`//go:embed` 把该目录编进 `agentmem`，`serve` 用 `GET /` 返回页面、`/assets/*` 返回带哈希的产物。不再需要反向代理的 document root 或第二个进程，也不依赖运行时 JS。
+- **文档页可直接试调用**：展开任意端点即出现内联工作区——可编辑查询参数与 JSON 请求体，一键发出真实的同源请求，随后展示状态码、耗时、响应头子集与美化后的响应体。写操作（`POST /v1/knowledge`、`POST /v1/migrate`、`POST /v1/computations`）必须先显式确认。
+- **凭据只留在当前标签页**：Bearer 令牌仅存于 `sessionStorage`，只作为 `Authorization` 头发送，绝不进入 URL、草稿或日志；关闭标签页即失效。
 - 13 种语言，与 agenthub 一致：`en`、`zh`、`zh-TW`、`es`、`fr`、`de`、`it`、`ru`、`ja`、`ko`、`pt`、`ar`、`hi`。优先级为 `?lang=` > 本地存储 > 浏览器语言 > 英文；缺失键回退英文，阿拉伯语自动切换 RTL。
 - light / dark 双主题共用一套纯黑白灰灰阶。主题在首屏绘制前解析，未选择时跟随系统，仅显式切换才写入 `agentmem.theme`。
 - `?view=docs` 可直接打开 API 文档视图。
 - 方法、路径、字段名与 JSON 样例在所有语言下逐字呈现，仅说明文字翻译；端点数据与 `internal/handlers/http.go` 保持一致。
-- 页面自带 `Content-Security-Policy` meta（`default-src 'none'`、仅同源资源、内联首屏主题脚本以 SHA-256 白名单放行），`web/tests/security.test.mjs` 会在摘要与脚本文本不一致时失败。
+- 控制台页面与 `GET /healthz` 一样公开，但页面内发起的 API 调用仍需令牌。页面 CSP 由服务端在启动时用内嵌首页现算（`script-src 'self'` 加内联主题脚本的 SHA-256），因此摘要不会漂移；JSON 响应仍保持 `default-src 'none'`。`web/index.html` 里的 meta 保留为纯静态托管时的兜底，`web/tests/security.test.mjs` 继续校验它。
 - Web 渲染质量使用 [impeccable][impeccable-link] 检查，单色不变式保持不变；`.notice` 的侧边强调边框作为已知「AI 痕迹」被刻意避免。
 
 ```bash
@@ -416,7 +419,7 @@ bun x impeccable detect http://localhost:5173 > impeccable-report.txt
 bun x impeccable detect http://localhost:5173 --quiet
 ```
 
-可直接用任意静态服务器托管 `web/`；有 Bun 时也可用 Vite 打包（`cd web && bun install --frozen-lockfile && bun run build`）。Go 二进制不依赖 Bun 或任何 JS 运行时。前端校验使用 Bun 内置测试运行器，离线执行且无新增依赖：`cd web && bun test`。
+修改控制台后需要重建内嵌产物：`cd web && bun install --frozen-lockfile && bun run build`（或 `make web`）会重写 `internal/webui/dist`；该目录已入库，因此 `go build` 与 `go test ./...` 无需 Bun、全程离线。`make web-verify` 会重建并在产物过期时失败。Go 二进制不依赖 Bun 或任何 JS 运行时。前端校验使用 Bun 内置测试运行器，离线执行且无新增依赖：`cd web && bun test`。
 
 <div align="right">
 
@@ -472,9 +475,10 @@ make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
 | `make eval` | 基于 `testdata/eval.jsonl` 的排序指标 |
 | `make check-boundaries` | 检查声明式 SDK 边界并跑插件测试 |
 | `make check-trust-store` | 离线扫描 eMudhra/emSign CA 指纹 |
-| `make web` | 安装并用 Vite 构建控制台 |
+| `make web` | 安装并用 Vite 重建 `internal/webui/dist` |
+| `make web-verify` | 重建并在入库的内嵌产物过期时失败 |
 | `make web-audit` | 通过 impeccable 做源码级 web 渲染/反模式检查 |
-| `make clean` | 清理 `bin/` 与 `web/dist` |
+| `make clean` | 清理 `bin/`（`internal/webui/dist` 是入库的构建输入，不会被清理） |
 | `make e2e` | 用户视角离线黑盒验收（见[测试](#-测试)） |
 
 `go test ./...` 无需 Postgres、网络或凭据即可通过。设置 `AGENTMEM_TEST_PG_DSN` 可启用可选的真实 PostgreSQL 集成测试。

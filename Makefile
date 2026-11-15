@@ -1,8 +1,10 @@
-.PHONY: build test vet eval validate check-boundaries check-trust-store run clean web web-audit e2e
+.PHONY: build test vet eval validate check-boundaries check-trust-store run clean web web-verify web-audit e2e
 
 BINARY := bin/agentmem
 PKG := ./...
 
+# The console is compiled in: internal/webui/dist is the Vite output and is
+# committed, so `go build` and `go test ./...` stay offline and bun-free.
 build:
 	go build -o $(BINARY) ./cmd/agentmem
 
@@ -36,8 +38,21 @@ check-trust-store:
 run: build
 	./$(BINARY) serve --env .env
 
+# Vite writes straight into the embedded package (web/vite.config.js), so a
+# rebuild replaces internal/webui/dist in place and `make build` picks it up.
 web:
 	cd web && bun install --frozen-lockfile && bun run build
+
+# Drift check for a machine that has bun: rebuild and fail if the committed
+# embed output differs from what the current sources produce.
+web-verify:
+	cd web && bun install --frozen-lockfile && bun run build
+	@if ! git diff --quiet -- internal/webui/dist; then \
+		echo "internal/webui/dist is stale: rebuild and commit it (make web)"; \
+		git --no-pager diff --stat -- internal/webui/dist; exit 1; \
+	else \
+		echo "embedded console matches the sources"; \
+	fi
 
 # Source-level rendering/slop check (no browser needed). The CLI version is
 # pinned by web/package.json's devDependency, so `bun run audit` resolves the
@@ -53,5 +68,7 @@ web-audit:
 e2e:
 	./scripts/e2e.sh $(E2E_ARGS)
 
+# internal/webui/dist is a committed build input (`//go:embed`), never cleaned:
+# removing it would break `go build` for everyone without bun.
 clean:
-	rm -rf bin web/dist
+	rm -rf bin

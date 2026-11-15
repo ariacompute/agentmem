@@ -7,7 +7,9 @@
 # certificates are unaffected; no re-issuance is needed. Verify the delivered
 # bundle offline with `make check-trust-store`.
 # Both host ports are bound to loopback; put a TLS-terminating reverse proxy
-# in front before exposing the service beyond the local machine.
+# in front before exposing the service beyond the local machine. The console is
+# compiled into the agentmem image and served on the same port at GET /, so no
+# extra static-file service or proxy rule is needed.
 
 services:
   postgres:

@@ -11,7 +11,9 @@ import {
   endpointGroups,
   endpoints,
   statusGroups,
+  tryMeta,
 } from '../lib/api-content.js'
+import { buildTryIt, cleanupTryIt } from './try-it.js'
 
 const READING_LINE = 160
 let cleanup = null
@@ -21,6 +23,7 @@ let activeId = docsSections[0].id
 export function cleanupDocs() {
   if (cleanup) cleanup()
   cleanup = null
+  cleanupTryIt()
 }
 
 function updateIndex(index) {
@@ -59,7 +62,9 @@ function buildOverview() {
   return card
 }
 
-function buildEndpoints(open, onToggle) {
+function buildEndpoints(state, actions) {
+  const open = state.open
+  const draftOf = (key) => (state.drafts && state.drafts[key]) || {}
   const card = el('section', 'card panel')
   card.id = 'sec-endpoints'
   card.appendChild(el('h3', null, t('api', 'sectionEndpoints')))
@@ -84,7 +89,7 @@ function buildEndpoints(open, onToggle) {
       const key = `${ep.method} ${ep.path}`
       const isOpen = Boolean(open[key])
       const row = el('tr', 'endpoint-row')
-      row.addEventListener('click', () => onToggle(key))
+      row.addEventListener('click', () => actions.onToggle(key))
       const methodCell = el('td')
       methodCell.appendChild(el('span', 'verb mono', ep.method))
       row.appendChild(methodCell)
@@ -97,7 +102,7 @@ function buildEndpoints(open, onToggle) {
         'btn btn-ghost compact',
         (event) => {
           event.stopPropagation()
-          onToggle(key)
+          actions.onToggle(key)
         },
       )
       toggleCell.appendChild(toggle)
@@ -118,6 +123,13 @@ function buildEndpoints(open, onToggle) {
         grid.appendChild(request)
         grid.appendChild(response)
         detailCell.appendChild(grid)
+        // The workbench sits below the read-only samples: same row, same
+        // language, and it keeps its own draft across re-renders.
+        detailCell.appendChild(
+          buildTryIt(ep, tryMeta[key] || { write: false, query: {} }, draftOf(key), (next) =>
+            actions.onDraft(key, next),
+          ),
+        )
         detailRow.appendChild(detailCell)
         tbody.appendChild(detailRow)
       }
@@ -167,7 +179,7 @@ export function renderDocs(host, state, actions) {
   const index = buildIndex()
   const content = el('div', 'docs-content')
   content.appendChild(buildOverview())
-  content.appendChild(buildEndpoints(state.open, actions.onToggle))
+  content.appendChild(buildEndpoints(state, actions))
   content.appendChild(buildErrors())
   body.appendChild(index)
   body.appendChild(content)

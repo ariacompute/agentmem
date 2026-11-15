@@ -59,7 +59,7 @@ for tool in go curl python3 sed grep awk sha256sum; do
 done
 cd "$REPO" || { echo "error: 无法进入仓库根目录" >&2; exit 2; }
 for f in go.mod Makefile .env.example testdata/eval.jsonl testdata/bundle/index.md \
-         web/index.html web/src/lib/api-content.js; do
+         web/index.html web/src/lib/api-content.js internal/webui/dist/index.html; do
   if [[ ! -f "$f" ]]; then echo "error: 缺少 $f" >&2; exit 2; fi
 done
 
@@ -1072,8 +1072,36 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_absent envelope.display_value
   end_case
 
-  hc H31 "Go 二进制不托管 Web 静态资源" GET / '' 404
+  hc H31 "Go 二进制托管控制台首页" GET / '' 200
   a_header X-Content-Type-Options nosniff
+  a_header Content-Type text/html
+  a_header Cache-Control no-cache
+  a_header Content-Security-Policy "script-src 'self'"
+  has "$(cat "$BODY")" 'id="app"' '控制台根节点'
+  console_asset="$(grep -oE '/assets/[A-Za-z0-9._-]+' "$BODY" | head -n 1)"
+  end_case
+
+  begin_case H36 "控制台静态资源由二进制提供且可长期缓存"
+  if [[ -n "$console_asset" ]]; then
+    http_req GET "$console_asset" ''
+    a_status 200
+    a_header Cache-Control 'immutable'
+    hasnt "$(cat "$BODY")" '<html' '静态资源不应是首页'
+  else
+    ck 1 "首页未引用任何 /assets/ 资源"
+  fi
+  end_case
+
+  hc H37 "未注册的 /v1 路径仍返回 JSON 404" GET /v1/unknown '' 404
+  a_json_eq error 'not found'
+  end_case
+
+  hc H38 "控制台不接管未注册的静态路径" GET /assets/missing.js '' 404
+  a_json_eq error 'not found'
+  end_case
+
+  hc H39 "控制台拒绝写方法（JSON 405）" POST / '' 405
+  a_json_eq error 'method not allowed'
   end_case
 
   hc H32 "私有文档与不存在的文档统一 404" GET '/v1/knowledge?id=e2e%2Fmissing' '' 404
@@ -1093,8 +1121,9 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_header Content-Security-Policy "default-src 'none'"
   end_case
 
-  hc H35 "未知路径返回 404" GET /v1/not-a-route '' 404
-  a_body_has '404 page not found'
+  hc H35 "未知路径返回 JSON 404（控制台不接管 API 前缀）" GET /v1/not-a-route '' 404
+  a_json_eq error 'not found'
+  a_header Content-Type application/json
   end_case
 else
   fail_case H00 "HTTP 用例组" "服务未能启动: $(head -c 200 "$WORK/serve-base.log" | tr '\n' ' ')"
@@ -1205,6 +1234,11 @@ if start_server auth "$AUTH_ENV" "$PORT_AUTH"; then
   a_body_hasnt 'e2e-all-'
   a_body_hasnt 'SELECT'
   end_case
+
+  hc S21 "控制台在开启鉴权时仍公开可读" GET / '' 200
+  a_header Content-Type text/html
+  a_json_absent error
+  end_case
 else
   fail_case S00 "鉴权用例组" "服务未能启动: $(head -c 200 "$WORK/serve-auth.log" | tr '\n' ' ')"
 fi
@@ -1271,7 +1305,7 @@ if [[ "$e2e_md" -ge 1 ]]; then ck 0 ""; else ck 1 'bundle 中未找到 e2e 概�
 end_case
 
 # ===========================================================================
-section "7. Web 控制台（静态自检，不含浏览器 UI 自动化）"
+section "7. Web 控制台（二进制托管 + 静态自检）"
 # ===========================================================================
 begin_case W01 "index.html 自带严格 CSP"
 web_html="$(cat "$REPO/web/index.html")"
@@ -1297,7 +1331,20 @@ web_langs="$(cat "$REPO/web/src/lib/languages.js")"
 has "$web_langs" 'zh-TW' '繁体中文'
 has "$web_langs" 'hi' '印地语'
 web_tests="$(ls "$REPO"/web/tests/*.test.mjs 2>/dev/null | wc -l)"
-eq "$web_tests" 7 '离线测试文件数'
+eq "$web_tests" 8 '离线测试文件数'
+end_case
+
+begin_case W06 "文档页提供交互式试调用"
+web_content="$(cat "$REPO/web/src/lib/api-content.js")"
+has "$web_content" 'export const tryMeta' 'tryMeta 元数据'
+web_try="$(cat "$REPO/web/src/lib/copy/try-copy.js")"
+has "$web_try" "'trySend'" '发送按钮文案'
+has "$web_try" 'tryErrAuth' '鉴权失败提示'
+web_view="$(cat "$REPO/web/src/views/try-it.js")"
+has "$web_view" 'buildTryIt' '试调用面板'
+web_trylib="$(cat "$REPO/web/src/lib/api-try.js")"
+has "$web_trylib" "TOKEN_KEY = 'agentmem.token'" '令牌键名'
+has "$web_trylib" 'sessionStorage' '会话级存储'
 end_case
 
 if command -v bun >/dev/null 2>&1; then

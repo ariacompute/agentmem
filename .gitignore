@@ -22,6 +22,8 @@ operator/bin/
 node_modules/
 web/dist/
 web/coverage/
+# internal/webui/dist is deliberately NOT ignored: it is the Vite output that
+# `//go:embed` compiles into the binary, so `go build`/`go test` stay offline.
 # Impeccable design-check cache (keep the shared web/.impeccable/config.json)
 web/.impeccable/*
 !web/.impeccable/config.json

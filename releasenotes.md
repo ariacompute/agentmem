@@ -26,12 +26,25 @@ and a rule-first smart router.
 - **Interfaces**: JSON HTTP API (including `/v1/computations`), ten CLI
   commands (including `compute` / `computations`) and pure-function ranking
   and routing evaluation.
-- **Web console**: a dependency-free ES module page with a status view and an
-  in-app HTTP API reference: 9 method+path combinations, request/response JSON
-  samples, conventions and error/status codes. Prose is fully translated into
-  13 languages (English fallback, Arabic RTL), and a monochrome black/white/
-  grey light/dark theme follows the OS until explicitly chosen. Offline
-  `node:test` suites guard copy coverage, endpoint drift and the palette.
+- **Web console, compiled in**: a dependency-free ES module page with a status
+  view and an in-app HTTP API reference: 9 method+path combinations,
+  request/response JSON samples, conventions and error/status codes. Vite
+  writes straight into `internal/webui/dist` and `//go:embed` compiles it into
+  the binary, so `serve` answers `GET /` and `/assets/*` on the same listener as
+  the API — no reverse proxy, document root or second process. The page CSP is
+  assembled at startup from the inline theme script's SHA-256 while JSON
+  answers keep `default-src 'none'`; hashed assets are `immutable` and the page
+  is `no-cache`. Prose is fully translated into 13 languages (English fallback,
+  Arabic RTL), and a monochrome black/white/grey light/dark theme follows the OS
+  until explicitly chosen. Offline `node:test` suites guard copy coverage,
+  endpoint drift and the palette.
+- **Interactive API reference**: every endpoint row expands into a workbench
+  that fires a real same-origin request — editable query parameters and JSON
+  body, `Ctrl/Cmd+Enter` to send, then status code, duration, response headers
+  and a pretty-printed body. The bearer token lives in `sessionStorage` only and
+  travels as an `Authorization` header (never in a URL, a draft or a log), and
+  the three state-changing routes require an explicit confirmation before they
+  fire. Drafts survive a re-render; results stay in memory.
 - **Web rendering checks (impeccable)**: adopted
   [pbakaus/impeccable](https://github.com/pbakaus/impeccable) for design and
   anti-pattern detection. `make web-audit` runs a source-level `impeccable
@@ -70,9 +83,10 @@ and a rule-first smart router.
   bare `cli` command, protocol in `docs/compute-sidecar.md`). A runtime with no
   configured sidecar stays fail-closed and returns `Unsupported`; every sidecar
   receipt must echo the SHA-256 of the body it ran or no value is displayed.
-- The web console is a static page served by a reverse proxy or any file
-  server; the Go binary does not embed it. The API reference is read-only, with
-  no interactive request builder.
+- The embedded console is a build artifact: UI changes need `make web` (or
+  `bun run build`) so `internal/webui/dist` is refreshed and committed. CI fails
+  on a stale copy and `make web-verify` reproduces the check locally. Try-it
+  results are in-memory only and are dropped on reload or a theme switch.
 - Tokens are static: rotation means editing `.env` and restarting. Distributed
   rate limiting, OIDC/SSO, mTLS and full commit-SHA pinning of actions/images
   remain follow-ups documented in `SECURITY.md`.
