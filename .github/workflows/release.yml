@@ -157,7 +157,7 @@ jobs:
           echo "Built assets:"
           ls -lh dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agentmem-linux-windows
           path: dist/*
@@ -222,7 +222,7 @@ jobs:
           echo "Built assets:"
           ls -lh dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: agentmem-macos
           path: dist/*
