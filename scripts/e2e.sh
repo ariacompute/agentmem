@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# e2e.sh — agentmem 用户视角黑盒验收脚本。
+# e2e.sh — agentmem black-box acceptance script from the user's perspective.
 #
-# 只做三件事：编译真实二进制、以子进程调用 CLI、用 curl 访问真实的 HTTP 服务。
-# 不 import 任何 internal 包，不修改生产代码，不依赖 Postgres / 网络 / 凭据。
-# 所有运行期产物（二进制、.env、bundle 副本、快照、响应体、日志）都在 mktemp
-# 临时目录内，退出时由 trap 回收；--keep 可保留现场排错。
+# It does only three things: build the real binary, invoke the CLI as a child process, and use curl to hit the real HTTP server.
+# It imports no internal packages, modifies no production code, and depends on no Postgres / network / credentials.
+# All runtime artifacts (binary, .env, bundle copy, snapshots, response bodies, logs) live in a mktemp
+# temporary directory, reclaimed by a trap on exit; --keep preserves it for troubleshooting.
 #
-# 用法:
-#   scripts/e2e.sh                     # 全量（含现有质量门禁）
-#   scripts/e2e.sh --no-gates          # 只跑黑盒用例，跳过耗时门禁
-#   scripts/e2e.sh --filter '^H'       # 只报告 HTTP 组
-#   scripts/e2e.sh --keep              # 保留临时目录
-#   make e2e                           # 仓库门禁入口
+# Usage:
+#   scripts/e2e.sh                     # full run (including existing quality gates)
+#   scripts/e2e.sh --no-gates          # black-box cases only, skip slow gates
+#   scripts/e2e.sh --filter '^H'       # report only the HTTP group
+#   scripts/e2e.sh --keep              # keep the temporary directory
+#   make e2e                           # repository gate entry point
 #
-# 退出码: 0 = 全部通过；1 = 有用例失败；2 = 用法/环境/构建错误。
-# 可选工具（bun、openssl）缺失时对应项记 SKIP，绝不静默通过。
+# Exit codes: 0 = all passed; 1 = some case failed; 2 = usage/environment/build error.
+# When optional tools (bun, openssl) are missing, the corresponding item is marked SKIP, never silently passed.
 
 set -uo pipefail
 
@@ -25,14 +25,14 @@ FILTER=""
 
 usage() {
   cat <<'USAGE'
-用法: scripts/e2e.sh [--no-gates] [--keep] [--filter REGEX] [--help]
+Usage: scripts/e2e.sh [--no-gates] [--keep] [--filter REGEX] [--help]
 
-  --no-gates       跳过 go vet / go test / make 门禁（二进制构建始终执行）
-  --keep           保留临时工作目录，便于排错
-  --filter REGEX   只报告编号匹配该正则的用例结果（如 '^H'、'^(C|S)'）
-  --help           显示本帮助
+  --no-gates       skip go vet / go test / make gates (binary build always runs)
+  --keep           keep the temporary working directory for troubleshooting
+  --filter REGEX   report only cases whose ID matches this regex (e.g. '^H', '^(C|S)')
+  --help           show this help
 
-退出码: 0 全通过；1 有用例失败；2 用法/环境/构建错误。
+Exit codes: 0 all passed; 1 some case failed; 2 usage/environment/build error.
 USAGE
 }
 
@@ -42,34 +42,34 @@ while [[ $# -gt 0 ]]; do
     --keep) KEEP=1 ;;
     --no-gates) NO_GATES=1 ;;
     --filter)
-      if [[ $# -lt 2 ]]; then echo "error: --filter 需要一个正则参数" >&2; exit 2; fi
+      if [[ $# -lt 2 ]]; then echo "error: --filter requires a regex argument" >&2; exit 2; fi
       FILTER="$2"; shift ;;
     --filter=*) FILTER="${1#*=}" ;;
-    *) echo "error: 未知参数 $1" >&2; usage >&2; exit 2 ;;
+    *) echo "error: unknown argument $1" >&2; usage >&2; exit 2 ;;
   esac
   shift
 done
 
-# --- 环境预检 ---------------------------------------------------------------
+# --- Environment preflight ---------------------------------------------------
 for tool in go curl python3 sed grep awk sha256sum; do
   if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "error: 缺少必需工具 $tool" >&2
+    echo "error: missing required tool $tool" >&2
     exit 2
   fi
 done
-cd "$REPO" || { echo "error: 无法进入仓库根目录" >&2; exit 2; }
+cd "$REPO" || { echo "error: cannot enter repository root" >&2; exit 2; }
 for f in go.mod Makefile .env.example testdata/eval.jsonl testdata/bundle/index.md \
          web/index.html web/src/lib/api-content.js internal/webui/dist/index.html; do
-  if [[ ! -f "$f" ]]; then echo "error: 缺少 $f" >&2; exit 2; fi
+  if [[ ! -f "$f" ]]; then echo "error: missing $f" >&2; exit 2; fi
 done
 
-# config.Load 会用进程环境覆盖 .env，且拒绝任何未知的 AGENTMEM_* 进程键。
-# 先清空继承值，保证每个用例只受自己那份 env 文件控制。
+# config.Load overlays the process environment on top of .env and rejects any unknown AGENTMEM_* process keys.
+# Clear inherited values first so each case is controlled only by its own env file.
 for _k in $(env | sed -n 's/^\(AGENTMEM_[A-Za-z0-9_]*\)=.*/\1/p'); do
   unset "$_k"
 done
 unset _k
-export GOPROXY=off   # 全程离线：只用本地 module cache，绝不联网
+export GOPROXY=off   # offline throughout: use only the local module cache, never the network
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/agentmem-e2e.XXXXXX")" || exit 2
 cp -R "$REPO/testdata/bundle" "$WORK/bundle" || exit 2
@@ -82,7 +82,7 @@ CLI_ERR="$WORK/cli.err"
 SERVER_PID=""
 PORT=""
 
-# --- 计算面 sidecar 桩（本地 python3 实现线协议 v1，绝不联网） ----------------
+# --- Compute-plane sidecar stubs (local python3 implementing wire protocol v1, never networked) ---
 SIDECAR_DIR="$WORK/sidecar"
 mkdir -p "$SIDECAR_DIR" || exit 2
 cat > "$SIDECAR_DIR/agentmem-py" <<'PY'
@@ -139,7 +139,7 @@ PY
 chmod +x "$SIDECAR_DIR/agentmem-py" "$SIDECAR_DIR/agentmem-fail"
 SIDECAR_PID=""
 
-# --- 报告框架 ---------------------------------------------------------------
+# --- Reporting framework ----------------------------------------------------
 PASS=0
 FAIL=0
 SKIP=0
@@ -163,9 +163,9 @@ ck() {
   if [[ "$ok" -ne 0 && "$CASE_ACTIVE" -eq 1 ]]; then CASE_ERR="${CASE_ERR}; $*"; fi
 }
 
-eq() { if [[ "$1" == "$2" ]]; then ck 0 ""; else ck 1 "$3: 期望 '$2'，实际 '$1'"; fi; }
-has() { if [[ "$1" == *"$2"* ]]; then ck 0 ""; else ck 1 "$3: 未包含 '$2'"; fi; }
-hasnt() { if [[ "$1" != *"$2"* ]]; then ck 0 ""; else ck 1 "$3: 不应包含 '$2'"; fi; }
+eq() { if [[ "$1" == "$2" ]]; then ck 0 ""; else ck 1 "$3: expected '$2', got '$1'"; fi; }
+has() { if [[ "$1" == *"$2"* ]]; then ck 0 ""; else ck 1 "$3: does not contain '$2'"; fi; }
+hasnt() { if [[ "$1" != *"$2"* ]]; then ck 0 ""; else ck 1 "$3: should not contain '$2'"; fi; }
 
 end_case() {
   [[ "$CASE_ACTIVE" -eq 1 ]] || return 0
@@ -186,7 +186,7 @@ skip_case() {
   CASE_ACTIVE=0
 }
 
-# 服务起不来属于被测对象故障，不能像可选工具缺失那样 SKIP 掉。
+# A server that fails to start is a fault in the system under test; it must not be SKIPped like a missing optional tool.
 fail_case() {
   begin_case "$1" "$2"
   [[ "$CASE_ACTIVE" -eq 1 ]] || return 0
@@ -195,7 +195,7 @@ fail_case() {
   CASE_ACTIVE=0
 }
 
-# --- JSON 断言（python3 标准库，替代 jq） -----------------------------------
+# --- JSON assertions (python3 standard library, replacing jq) -----------------
 cat > "$TOOL" <<'PY'
 import json
 import sys
@@ -267,28 +267,28 @@ jlen() { python3 "$TOOL" len "$1" "$2" 2>/dev/null || echo -1; }
 jcontains() { python3 "$TOOL" contains "$1" "$2" "$3" >/dev/null 2>&1; }
 
 a_json_eq() { eq "$(jget "$BODY" "$1")" "$2" "JSON $1"; }
-a_json_has() { jexists "$BODY" "$1"; ck $? "JSON 缺少 $1"; }
-a_json_absent() { if jexists "$BODY" "$1"; then ck 1 "JSON 不应存在 $1"; else ck 0 ""; fi; }
-a_json_contains() { jcontains "$BODY" "$1" "$2"; ck $? "JSON $1 不含 '$2'"; }
+a_json_has() { jexists "$BODY" "$1"; ck $? "JSON missing $1"; }
+a_json_absent() { if jexists "$BODY" "$1"; then ck 1 "JSON should not have $1"; else ck 0 ""; fi; }
+a_json_contains() { jcontains "$BODY" "$1" "$2"; ck $? "JSON $1 does not contain '$2'"; }
 a_json_len_min() {
   local n; n="$(jlen "$BODY" "$1")"
-  if [[ "$n" =~ ^[0-9]+$ ]] && [[ "$n" -ge "$2" ]]; then ck 0 ""; else ck 1 "JSON $1 长度期望 >=$2，实际 $n"; fi
+  if [[ "$n" =~ ^[0-9]+$ ]] && [[ "$n" -ge "$2" ]]; then ck 0 ""; else ck 1 "JSON $1 length expected >=$2, got $n"; fi
 }
-a_body_has() { has "$(head -c 2000 "$BODY")" "$1" "响应体"; }
-a_body_hasnt() { hasnt "$(head -c 4000 "$BODY")" "$1" "响应体"; }
+a_body_has() { has "$(head -c 2000 "$BODY")" "$1" "response body"; }
+a_body_hasnt() { hasnt "$(head -c 4000 "$BODY")" "$1" "response body"; }
 
 header_value() {
   grep -i "^$1:" "$HEADERS" 2>/dev/null | head -n 1 | sed -e 's/^[^:]*:[[:space:]]*//' -e 's/\r$//'
 }
 a_header() {
   local v; v="$(header_value "$1")"
-  if [[ "$v" == *"$2"* ]]; then ck 0 ""; else ck 1 "响应头 $1 期望含 '$2'，实际 '$v'"; fi
+  if [[ "$v" == *"$2"* ]]; then ck 0 ""; else ck 1 "response header $1 expected to contain '$2', got '$v'"; fi
 }
 
-# --- HTTP / CLI 原语 --------------------------------------------------------
+# --- HTTP / CLI primitives ---------------------------------------------------
 STATUS="000"
 
-http_req() { # METHOD PATH [BODY|@FILE] [HEADER...]；NO_CT 可抑制默认 Content-Type
+http_req() { # METHOD PATH [BODY|@FILE] [HEADER...]; NO_CT suppresses the default Content-Type
   local method="$1" path="$2" body="${3-}"
   local -a hdrs=()
   if (( $# >= 4 )); then hdrs=("${@:4}"); fi
@@ -312,7 +312,7 @@ http_req() { # METHOD PATH [BODY|@FILE] [HEADER...]；NO_CT 可抑制默认 Cont
   STATUS="$(curl "${args[@]}" "http://127.0.0.1:${PORT}${path}" 2>"$WORK/curl.err")" || STATUS="000"
 }
 
-a_status() { eq "$STATUS" "$1" "HTTP 状态"; }
+a_status() { eq "$STATUS" "$1" "HTTP status"; }
 
 hc() { # ID DESC METHOD PATH BODY WANT_STATUS [HEADER...]
   local id="$1" desc="$2" method="$3" path="$4" body="$5" want="$6"
@@ -325,23 +325,23 @@ hc() { # ID DESC METHOD PATH BODY WANT_STATUS [HEADER...]
 
 CLI_RC=0
 run_cli() { "$BIN" "$@" >"$CLI_OUT" 2>"$CLI_ERR"; CLI_RC=$?; }
-run_cli_env() { # VAR=VALUE ARGS...（只在子进程中注入，用于进程环境白名单用例）
+run_cli_env() { # VAR=VALUE ARGS... (injected only into the child process, for process-env allowlist cases)
   local var="$1"; shift
   env "$var" "$BIN" "$@" >"$CLI_OUT" 2>"$CLI_ERR"; CLI_RC=$?
 }
-a_rc() { eq "$CLI_RC" "$1" "CLI 退出码"; }
+a_rc() { eq "$CLI_RC" "$1" "CLI exit code"; }
 a_cli_out() { has "$(head -c 2000 "$CLI_OUT")" "$1" "CLI stdout"; }
 a_cli_err() { has "$(head -c 2000 "$CLI_ERR")" "$1" "CLI stderr"; }
 a_cli_json_eq() { eq "$(jget "$CLI_OUT" "$1")" "$2" "CLI JSON $1"; }
-a_cli_json_has() { jexists "$CLI_OUT" "$1"; ck $? "CLI JSON 缺少 $1"; }
-a_cli_json_absent() { if jexists "$CLI_OUT" "$1"; then ck 1 "CLI JSON 不应存在 $1"; else ck 0 ""; fi; }
+a_cli_json_has() { jexists "$CLI_OUT" "$1"; ck $? "CLI JSON missing $1"; }
+a_cli_json_absent() { if jexists "$CLI_OUT" "$1"; then ck 1 "CLI JSON should not have $1"; else ck 0 ""; fi; }
 a_cli_json_len_min() {
   local n; n="$(jlen "$CLI_OUT" "$1")"
-  if [[ "$n" =~ ^[0-9]+$ ]] && [[ "$n" -ge "$2" ]]; then ck 0 ""; else ck 1 "CLI JSON $1 长度期望 >=$2，实际 $n"; fi
+  if [[ "$n" =~ ^[0-9]+$ ]] && [[ "$n" -ge "$2" ]]; then ck 0 ""; else ck 1 "CLI JSON $1 length expected >=$2, got $n"; fi
 }
-a_cli_json_contains() { jcontains "$CLI_OUT" "$1" "$2"; ck $? "CLI JSON $1 不含 '$2'"; }
+a_cli_json_contains() { jcontains "$CLI_OUT" "$1" "$2"; ck $? "CLI JSON $1 does not contain '$2'"; }
 
-# --- 服务管理 ---------------------------------------------------------------
+# --- Server management -------------------------------------------------------
 start_server() { # NAME ENVFILE PORT
   local name="$1" envfile="$2" port="$3" i code
   PORT="$port"
@@ -377,7 +377,7 @@ cleanup() {
   stop_http_sidecar
   stop_server
   if [[ "$KEEP" -eq 1 ]]; then
-    printf '\n临时工作目录已保留: %s\n' "$WORK"
+    printf '\nTemporary working directory kept: %s\n' "$WORK"
   else
     rm -rf "$WORK"
   fi
@@ -386,7 +386,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# --- 配置准备 ---------------------------------------------------------------
+# --- Configuration setup -----------------------------------------------------
 PORTS="$(python3 -c '
 import socket
 socks = []
@@ -395,7 +395,7 @@ for _ in range(4):
     s.bind(("127.0.0.1", 0))
     socks.append(s)
 print(" ".join(str(s.getsockname()[1]) for s in socks))
-')" || { echo "error: 无法分配本地端口" >&2; exit 2; }
+')" || { echo "error: cannot allocate local ports" >&2; exit 2; }
 read -r PORT_BASE PORT_AUTH PORT_RATE PORT_SIDE <<< "$PORTS"
 
 BASE_ENV="$WORK/base.env"
@@ -416,13 +416,13 @@ make_env() { # FILE PORT RPS BURST [EXTRA_LINE...]
     printf 'AGENTMEM_RATE_BURST=%s\n' "$burst"
     printf 'AGENTMEM_ACL_DEFAULT_OWNER=system\n'
     printf 'AGENTMEM_ACL_DEFAULT_VISIBILITY=private\n'
-    # 不在此处写 AGENTMEM_AUTH_ENABLED：默认值已是 false，且鉴权档位要覆盖它，
-    # 重复键会被 dotenv 解析器判为错误。
+    # Do not write AGENTMEM_AUTH_ENABLED here: the default is already false and the auth profile overrides it;
+    # duplicate keys are treated as an error by the dotenv parser.
     for line in "$@"; do printf '%s\n' "$line"; done
   } > "$out"
 }
 
-bad_env() { # NAME [LINE...]；只写必要键，其余走 Default()
+bad_env() { # NAME [LINE...]; write only required keys, the rest fall back to Default()
   local name="$1" line
   shift
   {
@@ -463,7 +463,7 @@ make_env "$AUTH_ENV" "$PORT_AUTH" 100000 1000000 \
   'AGENTMEM_ALLOWED_ORIGINS=https://console.example.test'
 make_env "$RATE_ENV" "$PORT_RATE" 1 5
 
-# 计算面 sidecar 配置：python runtime 分别走 CLI 子进程与本地 HTTP 回环桩。
+# Compute-plane sidecar config: the python runtime goes through a CLI child process and a local HTTP loopback stub.
 SIDECAR_ENV="$WORK/sidecar-cli.env"
 SIDECAR_HTTP_ENV="$WORK/sidecar-http.env"
 SIDECAR_FAIL_ENV="$WORK/sidecar-fail.env"
@@ -482,27 +482,27 @@ CLI_DOC='e2e/cli-doc'
 COMPUTE_ID='computations/revenue-postgres'
 UNSUPPORTED_ID='computations/revenue-ytd'
 
-printf 'agentmem 用户视角黑盒验收\n仓库: %s\n工作区: %s\n' "$REPO" "$WORK"
+printf 'agentmem black-box acceptance (user perspective)\nRepository: %s\nWorkspace: %s\n' "$REPO" "$WORK"
 
 # ===========================================================================
-section "0. 构建"
+section "0. Build"
 # ===========================================================================
-begin_case G01 "离线编译真实二进制"
+begin_case G01 "build the real binary offline"
 if GOPROXY=off go build -o "$BIN" ./cmd/agentmem >"$WORK/build.log" 2>&1; then
   ck 0 ""
 else
-  ck 1 "go build 失败: $(head -c 300 "$WORK/build.log")"
+  ck 1 "go build failed: $(head -c 300 "$WORK/build.log")"
 fi
 end_case
 if [[ ! -x "$BIN" ]]; then
-  printf '\n无法继续：二进制构建失败。\n' >&2
+  printf '\nCannot continue: binary build failed.\n' >&2
   exit 2
 fi
 
 # ===========================================================================
-section "1. 配置校验与故障关闭（CLI validate）"
+section "1. Configuration validation and fail-closed (CLI validate)"
 # ===========================================================================
-begin_case F01 "validate 接受离线基准配置"
+begin_case F01 "validate accepts the offline baseline config"
 run_cli validate "${ENVARG[@]}"
 a_rc 0
 a_cli_json_eq status ok
@@ -510,14 +510,14 @@ a_cli_json_eq mode dev
 a_cli_json_eq adapters 2
 end_case
 
-begin_case F02 "validate 接受仓库模板 .env.example"
+begin_case F02 "validate accepts the repo template .env.example"
 run_cli validate --env "$REPO/.env.example"
 a_rc 0
 a_cli_json_eq status ok
 a_cli_json_eq adapters 7
 end_case
 
-begin_case F03 "env 文件缺失时回退默认配置"
+begin_case F03 "falls back to defaults when the env file is missing"
 run_cli validate --env "$WORK/does-not-exist.env"
 a_rc 0
 a_cli_json_eq status ok
@@ -525,34 +525,34 @@ a_cli_json_eq mode dev
 end_case
 
 bad_env unknown-key 'AGENTMEM_TYPO_KEY=1'
-begin_case F04 "env 文件中的未知 AGENTMEM_* 键被拒绝"
+begin_case F04 "unknown AGENTMEM_* key in env file is rejected"
 run_cli validate --env "$WORK/bad-unknown-key.env"
 a_rc 1
 a_cli_err 'unknown keys AGENTMEM_TYPO_KEY'
 end_case
 
-begin_case F05 "进程环境中的未知 AGENTMEM_* 键被拒绝"
+begin_case F05 "unknown AGENTMEM_* key in process env is rejected"
 run_cli_env 'AGENTMEM_TYPO_KEY=1' validate "${ENVARG[@]}"
 a_rc 1
 a_cli_err 'unknown process environment keys'
 end_case
 
 bad_env mode 'AGENTMEM_MODE=staging'
-begin_case F06 "非法 mode 被拒绝"
+begin_case F06 "invalid mode is rejected"
 run_cli validate --env "$WORK/bad-mode.env"
 a_rc 1
 a_cli_err 'must be dev or production'
 end_case
 
 bad_env prod-no-dsn 'AGENTMEM_MODE=production'
-begin_case F07 "production 缺少 DSN 被拒绝"
+begin_case F07 "production without DSN is rejected"
 run_cli validate --env "$WORK/bad-prod-no-dsn.env"
 a_rc 1
 a_cli_err 'postgres.dsn is required in production'
 end_case
 
 bad_env prod-no-auth 'AGENTMEM_MODE=production' "AGENTMEM_PG_DSN=$PROD_DSN"
-begin_case F08 "production 缺少鉴权被拒绝"
+begin_case F08 "production without auth is rejected"
 run_cli validate --env "$WORK/bad-prod-no-auth.env"
 a_rc 1
 a_cli_err 'production requires AGENTMEM_AUTH_ENABLED=true'
@@ -561,7 +561,7 @@ end_case
 bad_env prod-insecure 'AGENTMEM_MODE=production' \
   'AGENTMEM_PG_DSN=postgres://e2e:placeholder@db.example.test:5432/agentmem?sslmode=disable' \
   'AGENTMEM_AUTH_ENABLED=true' "AGENTMEM_AUTH_TOKENS='$PROD_JSON'"
-begin_case F09 "production 拒绝 sslmode=disable"
+begin_case F09 "production rejects sslmode=disable"
 run_cli validate --env "$WORK/bad-prod-insecure.env"
 a_rc 1
 a_cli_err 'must not disable TLS'
@@ -569,14 +569,14 @@ end_case
 
 bad_env prod-ok 'AGENTMEM_MODE=production' "AGENTMEM_PG_DSN=$PROD_DSN" \
   'AGENTMEM_AUTH_ENABLED=true' "AGENTMEM_AUTH_TOKENS='$PROD_JSON'"
-begin_case F10 "完整 production 配置通过校验"
+begin_case F10 "complete production config passes validation"
 run_cli validate --env "$WORK/bad-prod-ok.env"
 a_rc 0
 a_cli_json_eq mode production
 end_case
 
 bad_env egress-missing 'AGENTMEM_SYSTEMONE_ENDPOINT=https://example.test/route'
-begin_case F11 "配置出向端点但不配白名单被拒绝"
+begin_case F11 "outbound endpoint without allowlist is rejected"
 run_cli validate --env "$WORK/bad-egress-missing.env"
 a_rc 1
 a_cli_err 'outbound endpoints require AGENTMEM_EGRESS_ALLOWED_HOSTS'
@@ -584,14 +584,14 @@ end_case
 
 bad_env egress-ok 'AGENTMEM_SYSTEMONE_ENDPOINT=https://example.test/route' \
   'AGENTMEM_EGRESS_ALLOWED_HOSTS=example.test'
-begin_case F12 "配置出向端点并配白名单通过校验"
+begin_case F12 "outbound endpoint with allowlist passes validation"
 run_cli validate --env "$WORK/bad-egress-ok.env"
 a_rc 0
 a_cli_json_eq status ok
 end_case
 
 bad_env adapters "AGENTMEM_ADAPTERS='not-json'"
-begin_case F13 "非法 AGENTMEM_ADAPTERS JSON 被拒绝"
+begin_case F13 "invalid AGENTMEM_ADAPTERS JSON is rejected"
 run_cli validate --env "$WORK/bad-adapters.env"
 a_rc 1
 a_cli_err 'AGENTMEM_ADAPTERS'
@@ -599,76 +599,76 @@ end_case
 
 bad_env scope 'AGENTMEM_AUTH_ENABLED=true' \
   "AGENTMEM_AUTH_TOKENS='[{\"token_sha256\":\"$(digest "e2e-bad-$STAMP")\",\"subject\":\"x\",\"scopes\":[\"bogus:scope\"]}]'"
-begin_case F14 "未知权限 scope 被拒绝"
+begin_case F14 "unknown scope is rejected"
 run_cli validate --env "$WORK/bad-scope.env"
 a_rc 1
 a_cli_err 'unknown scope'
 end_case
 
 bad_env conflict 'AGENTMEM_CONFLICT_POLICY=rag_wins'
-begin_case F15 "未实现的冲突策略被拒绝"
+begin_case F15 "unimplemented conflict policy is rejected"
 run_cli validate --env "$WORK/bad-conflict.env"
 a_rc 1
 a_cli_err 'conflict_policy'
 end_case
 
 bad_env rate 'AGENTMEM_RATE_RPS=abc'
-begin_case F16 "非法数值被拒绝"
+begin_case F16 "invalid number is rejected"
 run_cli validate --env "$WORK/bad-rate.env"
 a_rc 1
 a_cli_err 'expected an integer'
 end_case
 
 bad_env bool 'AGENTMEM_AUTH_ENABLED=maybe'
-begin_case F17 "非法布尔被拒绝"
+begin_case F17 "invalid boolean is rejected"
 run_cli validate --env "$WORK/bad-bool.env"
 a_rc 1
 a_cli_err 'expected a boolean'
 end_case
 
 bad_env duplicate 'AGENTMEM_MODE=dev' 'AGENTMEM_MODE=dev'
-begin_case F18 "重复键被拒绝"
+begin_case F18 "duplicate key is rejected"
 run_cli validate --env "$WORK/bad-duplicate.env"
 a_rc 1
 a_cli_err 'duplicate key'
 end_case
 
 bad_env malformed 'THIS_LINE_HAS_NO_EQUALS'
-begin_case F19 "畸形 KEY=VALUE 行被拒绝"
+begin_case F19 "malformed KEY=VALUE line is rejected"
 run_cli validate --env "$WORK/bad-malformed.env"
 a_rc 1
 a_cli_err 'expected KEY=VALUE'
 end_case
 
 # ===========================================================================
-section "2. CLI 全命令（服务启动前，避免快照被覆写）"
+section "2. All CLI commands (before server start, to avoid snapshot overwrite)"
 # ===========================================================================
-begin_case C01 "无参数输出 usage"
+begin_case C01 "no arguments prints usage"
 run_cli
 a_rc 0
 a_cli_out 'Commands:'
 a_cli_out '  put         Write a knowledge concept'
 end_case
 
-begin_case C02 "help 输出 usage"
+begin_case C02 "help prints usage"
 run_cli help
 a_rc 0
 a_cli_out 'agentmem - OKF+Git knowledge hub'
 end_case
 
-begin_case C03 "--help 输出 usage"
+begin_case C03 "--help prints usage"
 run_cli --help
 a_rc 0
 a_cli_out '  eval        Run ranking'
 end_case
 
-begin_case C04 "未知命令报错"
+begin_case C04 "unknown command errors out"
 run_cli no-such-command
 a_rc 1
 a_cli_err 'unknown command "no-such-command"'
 end_case
 
-begin_case C05 "put 写入知识概念"
+begin_case C05 "put writes a knowledge concept"
 run_cli put "${ENVARG[@]}" --id "$CLI_DOC" --subject alice --owner alice \
   --type Metric --title 'E2E churn' --description 'e2e description' \
   --body '# Definition' --visibility public
@@ -679,30 +679,30 @@ a_cli_json_has commit_sha
 a_cli_json_has decision
 end_case
 
-begin_case C06 "put 缺少 --id 报错"
+begin_case C06 "put without --id errors out"
 run_cli put "${ENVARG[@]}" --subject alice
 a_rc 1
 a_cli_err 'put: --id is required'
 end_case
 
-begin_case C07 "put 匿名写入被拒绝"
+begin_case C07 "put anonymous write rejected"
 run_cli put "${ENVARG[@]}" --id e2e/anon
 a_rc 1
 a_cli_err 'anonymous write rejected'
 end_case
 
-begin_case C08 "put 的 owner 与主体不一致被拒绝"
+begin_case C08 "put with owner not matching subject is rejected"
 run_cli put "${ENVARG[@]}" --id e2e/owner-mismatch --subject alice --owner mallory
 a_rc 1
 a_cli_err 'owner does not match'
 end_case
 
-begin_case C09 "put 非法 visibility 被拒绝"
+begin_case C09 "put with invalid visibility is rejected"
 run_cli put "${ENVARG[@]}" --id e2e/bad-vis --subject alice --visibility bogus
 a_rc 1
 end_case
 
-begin_case C10 "query 路由并执行查询"
+begin_case C10 "query routes and executes"
 run_cli query "${ENVARG[@]}" --q 'define churn' --subject alice --top-k 3
 a_rc 0
 a_cli_json_eq query 'define churn'
@@ -710,13 +710,13 @@ a_cli_json_has decision
 a_cli_json_has hits
 end_case
 
-begin_case C11 "query 缺少 --q 报错"
+begin_case C11 "query without --q errors out"
 run_cli query "${ENVARG[@]}" --subject alice
 a_rc 1
 a_cli_err 'query: --q is required'
 end_case
 
-begin_case C12 "migrate 执行增量对账"
+begin_case C12 "migrate performs incremental reconciliation"
 run_cli migrate "${ENVARG[@]}" --job e2e-cli --direction canonical_to_rag \
   --target memory --limit 10
 a_rc 0
@@ -726,32 +726,32 @@ a_cli_json_eq target memory
 a_cli_json_has done
 end_case
 
-begin_case C13 "migrate --dry-run 只做计划"
+begin_case C13 "migrate --dry-run only plans"
 run_cli migrate "${ENVARG[@]}" --job e2e-dry --dry-run --limit 5
 a_rc 0
 a_cli_json_eq dry_run true
 a_cli_json_has planned
 end_case
 
-begin_case C14 "migrate 非法方向报错"
+begin_case C14 "migrate with invalid direction errors out"
 run_cli migrate "${ENVARG[@]}" --direction wrong-way
 a_rc 1
 end_case
 
-begin_case C15 "decisions 输出路由审计"
+begin_case C15 "decisions prints routing audit"
 run_cli decisions "${ENVARG[@]}" --limit 10
 a_rc 0
 a_cli_json_len_min '' 1
 a_cli_json_has 0.concept_id
 end_case
 
-begin_case C16 "concepts 列出概念 id"
+begin_case C16 "concepts lists concept IDs"
 run_cli concepts "${ENVARG[@]}"
 a_rc 0
 a_cli_json_len_min '' 1
 end_case
 
-begin_case C17 "compute 执行 Attested Computation"
+begin_case C17 "compute runs an Attested Computation"
 run_cli compute "${ENVARG[@]}" --id "$COMPUTE_ID" --subject alice --param year=2026
 a_rc 0
 a_cli_json_eq concept_id "$COMPUTE_ID"
@@ -760,37 +760,37 @@ a_cli_json_has display_value
 a_cli_json_eq verdict.passed true
 end_case
 
-begin_case C18 "compute 缺少 --id 报错"
+begin_case C18 "compute without --id errors out"
 run_cli compute "${ENVARG[@]}" --subject alice
 a_rc 1
 a_cli_err 'compute: --id is required'
 end_case
 
-begin_case C19 "compute 非法 --param 报错"
+begin_case C19 "compute with invalid --param errors out"
 run_cli compute "${ENVARG[@]}" --id "$COMPUTE_ID" --subject alice --param year
 a_rc 1
 a_cli_err 'compute: --param must be name=value'
 end_case
 
-begin_case C20 "compute 非法参数不展示数值"
+begin_case C20 "compute with invalid parameter does not display a value"
 run_cli compute "${ENVARG[@]}" --id "$COMPUTE_ID" --subject alice --param year=notanint
 a_rc 1
 end_case
 
-begin_case C21 "compute 不支持的 runtime 被拒绝"
+begin_case C21 "compute with unsupported runtime is rejected"
 run_cli compute "${ENVARG[@]}" --id "$UNSUPPORTED_ID" --subject alice --param year=2026
 a_rc 1
 a_cli_err 'has a contract but no executor'
 end_case
 
-begin_case C22 "computations 输出计算审计"
+begin_case C22 "computations prints computation audit"
 run_cli computations "${ENVARG[@]}" --id "$COMPUTE_ID" --limit 10
 a_rc 0
 a_cli_json_len_min '' 1
 a_cli_json_has 0.concept_id
 end_case
 
-begin_case C23 "eval 输出排名指标"
+begin_case C23 "eval prints ranking metrics"
 run_cli eval --dataset "$REPO/testdata/eval.jsonl" --k 3
 a_rc 0
 a_cli_json_eq k 3
@@ -803,20 +803,20 @@ a_cli_json_has map
 a_cli_json_has hit_rate_at_k
 end_case
 
-begin_case C24 "eval 使用默认数据集路径"
+begin_case C24 "eval uses the default dataset path"
 run_cli eval
 a_rc 0
 a_cli_json_eq k 5
 end_case
 
 printf '{not json\n' > "$WORK/bad.jsonl"
-begin_case C25 "eval 遇到坏 JSONL 报错"
+begin_case C25 "eval errors on bad JSONL"
 run_cli eval --dataset "$WORK/bad.jsonl"
 a_rc 1
 a_cli_err 'eval: line 1'
 end_case
 
-begin_case C26 "eval 数据集不存在报错"
+begin_case C26 "eval errors when dataset does not exist"
 run_cli eval --dataset "$WORK/missing.jsonl"
 a_rc 1
 a_cli_err 'no such file or directory'
@@ -838,8 +838,8 @@ start_http_sidecar() {
   return 1
 }
 
-# --- 计算面 sidecar（离线 python3 桩） --------------------------------------
-begin_case C29 "compute 经 CLI sidecar 执行 python runtime"
+# --- Compute-plane sidecar (offline python3 stub) -----------------------------
+begin_case C29 "compute runs python runtime via CLI sidecar"
 PATH="$SIDECAR_DIR:$PATH" "$BIN" compute --env "$SIDECAR_ENV" --id "$PY_COMPUTE_ID" \
   --subject alice --param year=2026 >"$CLI_OUT" 2>"$CLI_ERR"
 CLI_RC=$?
@@ -852,7 +852,7 @@ a_cli_json_eq verdict.fidelity true
 a_cli_json_absent error_class
 end_case
 
-begin_case C30 "compute 经 HTTP sidecar 执行 python runtime"
+begin_case C30 "compute runs python runtime via HTTP sidecar"
 if start_http_sidecar; then
   run_cli compute --env "$SIDECAR_HTTP_ENV" --id "$PY_COMPUTE_ID" --subject alice --param year=2026
   a_rc 0
@@ -862,11 +862,11 @@ if start_http_sidecar; then
   a_cli_json_eq verdict.passed true
   stop_http_sidecar
 else
-  ck 1 "本地 HTTP sidecar 桩未能启动"
+  ck 1 "local HTTP sidecar stub failed to start"
 fi
 end_case
 
-begin_case C31 "sidecar 失败不展示数值且不回显正文"
+begin_case C31 "sidecar failure shows no value and does not echo the body"
 PATH="$SIDECAR_DIR:$PATH" "$BIN" compute --env "$SIDECAR_FAIL_ENV" --id "$PY_COMPUTE_ID" \
   --subject alice --param year=2026 >"$CLI_OUT" 2>"$CLI_ERR"
 CLI_RC=$?
@@ -874,39 +874,39 @@ a_rc 1
 a_cli_err 'sidecar process failed'
 a_cli_json_absent display_value
 if grep -q 'import json' "$CLI_OUT" "$CLI_ERR" 2>/dev/null; then
-  ck 1 "sidecar 失败时回显了脚本正文"
+  ck 1 "sidecar failure echoed the script body"
 else
   ck 0 ""
 fi
 end_case
 
-begin_case C32 "未配置 sidecar 的 runtime 仍 fail-closed"
+begin_case C32 "runtime without a configured sidecar stays fail-closed"
 run_cli compute "${ENVARG[@]}" --id "$PY_COMPUTE_ID" --subject alice --param year=2026
 a_rc 1
 a_cli_err 'has a contract but no executor'
 end_case
 
-begin_case C27 "eval 不接受 --env（唯一不读配置的命令）"
+begin_case C27 "eval does not accept --env (the only command that reads no config)"
 run_cli eval --env "$BASE_ENV"
 a_rc 1
 a_cli_err 'flag provided but not defined'
 end_case
 
-begin_case C28 "concepts 未知 flag 报错"
+begin_case C28 "concepts errors on unknown flag"
 run_cli concepts "${ENVARG[@]}" --bogus
 a_rc 1
 a_cli_err 'flag provided but not defined'
 end_case
 
 # ===========================================================================
-section "3. HTTP API 全路由（鉴权关闭档位）"
+section "3. All HTTP API routes (auth-disabled profile)"
 # ===========================================================================
 if start_server base "$BASE_ENV" "$PORT_BASE"; then
-  begin_case H01 "serve 以离线 fake 启动"
-  has "$(head -c 500 "$WORK/serve-base.log")" 'postgres=offline fake' '启动日志'
+  begin_case H01 "serve starts with the offline fake"
+  has "$(head -c 500 "$WORK/serve-base.log")" 'postgres=offline fake' 'startup log'
   end_case
 
-  hc H02 "GET /healthz 报告依赖健康" GET /healthz '' 200
+  hc H02 "GET /healthz reports dependency health" GET /healthz '' 200
   a_json_eq status ok
   a_json_eq postgres 'fake (offline)'
   a_json_eq 'adapter:okf' ok
@@ -915,7 +915,7 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_header Content-Type 'application/json; charset=utf-8'
   end_case
 
-  hc H03 "POST /v1/knowledge 写入概念" POST /v1/knowledge \
+  hc H03 "POST /v1/knowledge writes a concept" POST /v1/knowledge \
     '{"concept_id":"e2e/http-doc","document":{"type":"Concept","title":"E2E HTTP","description":"written over HTTP","body":"# E2E","tags":["e2e"],"visibility":"public"}}' 200
   a_json_eq concept_id "$HTTP_DOC"
   a_json_has content_hash
@@ -923,7 +923,7 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_has decision
   end_case
 
-  hc H04 "GET /v1/knowledge 读取规范正文" GET '/v1/knowledge?id=e2e%2Fhttp-doc' '' 200
+  hc H04 "GET /v1/knowledge reads the canonical body" GET '/v1/knowledge?id=e2e%2Fhttp-doc' '' 200
   a_json_eq concept_id "$HTTP_DOC"
   a_json_eq type Concept
   a_json_eq title 'E2E HTTP'
@@ -931,13 +931,13 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_has body
   end_case
 
-  hc H05 "POST /v1/query 双路检索" POST /v1/query '{"query":"define churn","top_k":3}' 200
+  hc H05 "POST /v1/query dual-path retrieval" POST /v1/query '{"query":"define churn","top_k":3}' 200
   a_json_eq query 'define churn'
   a_json_has decision
   a_json_has hits
   end_case
 
-  hc H06 "POST /v1/migrate 增量对账" POST /v1/migrate \
+  hc H06 "POST /v1/migrate incremental reconciliation" POST /v1/migrate \
     '{"job":"e2e-http","direction":"canonical_to_rag","target":"memory","dry_run":true,"limit":10}' 200
   a_json_eq job e2e-http
   a_json_eq dry_run true
@@ -945,16 +945,16 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_has scanned
   end_case
 
-  hc H07 "GET /v1/decisions 路由审计" GET '/v1/decisions?limit=5' '' 200
+  hc H07 "GET /v1/decisions routing audit" GET '/v1/decisions?limit=5' '' 200
   a_json_len_min '' 1
   a_json_has 0.concept_id
   end_case
 
-  hc H08 "GET /v1/concepts 概念列表" GET /v1/concepts '' 200
+  hc H08 "GET /v1/concepts concept list" GET /v1/concepts '' 200
   a_json_len_min '' 1
   end_case
 
-  hc H09 "POST /v1/computations 成功展示已验证数值" POST /v1/computations \
+  hc H09 "POST /v1/computations successfully displays a verified value" POST /v1/computations \
     '{"concept_id":"computations/revenue-postgres","parameters":{"year":2026}}' 200
   a_json_eq concept_id "$COMPUTE_ID"
   a_json_eq display_allowed true
@@ -965,52 +965,52 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_eq verdict.fidelity true
   end_case
 
-  hc H10 "GET /v1/computations 计算审计" GET '/v1/computations?limit=5' '' 200
+  hc H10 "GET /v1/computations computation audit" GET '/v1/computations?limit=5' '' 200
   a_json_len_min '' 1
   end_case
 
-  hc H11 "错误方法返回 405" POST /healthz '' 405
+  hc H11 "wrong method returns 405" POST /healthz '' 405
   a_json_eq error 'method not allowed'
   end_case
 
-  hc H12 "另一条路由的错误方法也返回 405" DELETE /v1/knowledge '' 405
+  hc H12 "wrong method on another route also returns 405" DELETE /v1/knowledge '' 405
   a_json_eq error 'method not allowed'
   end_case
 
-  hc H13 "缺少 JSON Content-Type 被拒绝" POST /v1/query '{"query":"x"}' 400 NO_CT
+  hc H13 "missing JSON Content-Type is rejected" POST /v1/query '{"query":"x"}' 400 NO_CT
   a_json_eq error 'Content-Type must be application/json'
   end_case
 
-  hc H14 "非 JSON Content-Type 被拒绝" POST /v1/query '{"query":"x"}' 400 'Content-Type: text/plain'
+  hc H14 "non-JSON Content-Type is rejected" POST /v1/query '{"query":"x"}' 400 'Content-Type: text/plain'
   a_json_eq error 'Content-Type must be application/json'
   end_case
 
-  hc H15 "未知字段被拒绝" POST /v1/query '{"query":"x","bogus":1}' 400
+  hc H15 "unknown field is rejected" POST /v1/query '{"query":"x","bogus":1}' 400
   a_json_eq error 'invalid JSON'
   end_case
 
-  hc H16 "trailing data 被拒绝" POST /v1/query '{"query":"x"} {"a":1}' 400
+  hc H16 "trailing data is rejected" POST /v1/query '{"query":"x"} {"a":1}' 400
   a_json_eq error 'unexpected trailing data'
   end_case
 
-  hc H17 "畸形 JSON 被拒绝" POST /v1/query '{' 400
+  hc H17 "malformed JSON is rejected" POST /v1/query '{' 400
   a_json_eq error 'invalid JSON'
   end_case
 
   python3 -c 'import sys; sys.stdout.write("{\"query\":\"" + "x" * (4 * 1024 * 1024 + 1024) + "\"}")' > "$WORK/big.json"
-  hc H18 "超过 4 MiB 的请求体被拒绝" POST /v1/query "@$WORK/big.json" 400
+  hc H18 "request body over 4 MiB is rejected" POST /v1/query "@$WORK/big.json" 400
   a_json_eq error 'invalid JSON'
   end_case
 
-  hc H19 "top_k 越界被拒绝" POST /v1/query '{"query":"x","top_k":101}' 400
+  hc H19 "out-of-range top_k is rejected" POST /v1/query '{"query":"x","top_k":101}' 400
   a_json_eq error 'top_k is out of range'
   end_case
 
-  hc H20 "空 query 被拒绝" POST /v1/query '{"query":""}' 400
+  hc H20 "empty query is rejected" POST /v1/query '{"query":""}' 400
   a_json_eq error 'query is empty'
   end_case
 
-  begin_case H21 "limit 的三种越界值都被拒绝"
+  begin_case H21 "all three out-of-range limit values are rejected"
   http_req GET '/v1/decisions?limit=0' ''
   eq "$STATUS" 400 'limit=0'
   http_req GET '/v1/decisions?limit=1001' ''
@@ -1020,27 +1020,27 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_eq error 'limit is out of range'
   end_case
 
-  hc H22 "GET /v1/knowledge 缺少 id 被拒绝" GET /v1/knowledge '' 400
+  hc H22 "GET /v1/knowledge without id is rejected" GET /v1/knowledge '' 400
   a_json_eq error 'id is required'
   end_case
 
-  hc H23 "POST /v1/knowledge 缺少必填字段被拒绝" POST /v1/knowledge \
+  hc H23 "POST /v1/knowledge missing required fields is rejected" POST /v1/knowledge \
     '{"concept_id":"","document":{"type":""}}' 400
   a_json_eq error 'concept_id and document.type are required'
   end_case
 
-  hc H24 "POST /v1/computations 缺少 concept_id 被拒绝" POST /v1/computations \
+  hc H24 "POST /v1/computations without concept_id is rejected" POST /v1/computations \
     '{"parameters":{}}' 400
   a_json_eq error 'concept_id is required'
   end_case
 
-  hc H25 "非法迁移参数被拒绝且错误已脱敏" POST /v1/migrate '{"direction":"wrong-way"}' 400
+  hc H25 "invalid migration parameter rejected with redacted error" POST /v1/migrate '{"direction":"wrong-way"}' 400
   a_json_eq error 'migration rejected'
   a_body_hasnt 'dsn'
   a_body_hasnt 'SELECT'
   end_case
 
-  hc H26 "计算参数类型错误返回 400 且不展示数值" POST /v1/computations \
+  hc H26 "wrong computation parameter type returns 400 with no value shown" POST /v1/computations \
     '{"concept_id":"computations/revenue-postgres","parameters":{"year":"notanint"}}' 400
   a_json_eq error 'computation rejected'
   a_json_absent envelope.display_value
@@ -1048,72 +1048,72 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_body_hasnt 'postgres://'
   end_case
 
-  hc H27 "计算缺少必填参数返回 400" POST /v1/computations \
+  hc H27 "computation missing required parameter returns 400" POST /v1/computations \
     '{"concept_id":"computations/revenue-postgres","parameters":{}}' 400
   a_json_eq error 'computation rejected'
   a_json_absent envelope.display_value
   end_case
 
-  hc H28 "计算参数篡改 SQL 保留字段返回 400" POST /v1/computations \
+  hc H28 "computation parameter tampering with reserved SQL field returns 400" POST /v1/computations \
     '{"concept_id":"computations/revenue-postgres","parameters":{"year":2026,"sql":"SELECT 1"}}' 400
   a_json_eq error 'computation rejected'
   a_json_absent envelope.display_value
   end_case
 
-  hc H29 "不支持的 runtime 返回 422 且不展示数值" POST /v1/computations \
+  hc H29 "unsupported runtime returns 422 with no value shown" POST /v1/computations \
     '{"concept_id":"computations/revenue-ytd","parameters":{"year":2026}}' 422
   a_json_has envelope
   a_json_absent envelope.display_value
   a_body_hasnt 'SELECT'
   end_case
 
-  hc H30 "不存在的计算概念返回 400" POST /v1/computations \
+  hc H30 "nonexistent computation concept returns 400" POST /v1/computations \
     '{"concept_id":"computations/does-not-exist","parameters":{}}' 400
   a_json_absent envelope.display_value
   end_case
 
-  hc H31 "Go 二进制托管控制台首页" GET / '' 200
+  hc H31 "Go binary hosts the console home page" GET / '' 200
   a_header X-Content-Type-Options nosniff
   a_header Content-Type text/html
   a_header Cache-Control no-cache
   a_header Content-Security-Policy "script-src 'self'"
-  has "$(cat "$BODY")" 'id="app"' '控制台根节点'
+  has "$(cat "$BODY")" 'id="app"' 'console root node'
   console_asset="$(grep -oE '/assets/[A-Za-z0-9._-]+' "$BODY" | head -n 1)"
   end_case
 
-  begin_case H36 "控制台静态资源由二进制提供且可长期缓存"
+  begin_case H36 "console static assets are served by the binary and are long-cacheable"
   if [[ -n "$console_asset" ]]; then
     http_req GET "$console_asset" ''
     a_status 200
     a_header Cache-Control 'immutable'
-    hasnt "$(cat "$BODY")" '<html' '静态资源不应是首页'
+    hasnt "$(cat "$BODY")" '<html' 'static asset should not be the home page'
   else
-    ck 1 "首页未引用任何 /assets/ 资源"
+    ck 1 "home page references no /assets/ resource"
   fi
   end_case
 
-  hc H37 "未注册的 /v1 路径仍返回 JSON 404" GET /v1/unknown '' 404
+  hc H37 "unregistered /v1 path still returns JSON 404" GET /v1/unknown '' 404
   a_json_eq error 'not found'
   end_case
 
-  hc H38 "控制台不接管未注册的静态路径" GET /assets/missing.js '' 404
+  hc H38 "console does not take over unregistered static paths" GET /assets/missing.js '' 404
   a_json_eq error 'not found'
   end_case
 
-  hc H39 "控制台拒绝写方法（JSON 405）" POST / '' 405
+  hc H39 "console rejects write methods (JSON 405)" POST / '' 405
   a_json_eq error 'method not allowed'
   end_case
 
-  hc H32 "私有文档与不存在的文档统一 404" GET '/v1/knowledge?id=e2e%2Fmissing' '' 404
+  hc H32 "private and nonexistent documents both return 404" GET '/v1/knowledge?id=e2e%2Fmissing' '' 404
   a_json_eq error 'document not found or access denied'
   end_case
 
-  hc H33 "写入时 owner 与主体不一致被拒绝" POST /v1/knowledge \
+  hc H33 "write with owner not matching subject is rejected" POST /v1/knowledge \
     '{"concept_id":"e2e/owner-mismatch","document":{"type":"Concept","owner":"mallory"}}' 400
   a_json_eq error 'write rejected'
   end_case
 
-  hc H34 "安全响应头齐备" GET /healthz '' 200
+  hc H34 "security response headers are complete" GET /healthz '' 200
   a_header X-Content-Type-Options nosniff
   a_header X-Frame-Options DENY
   a_header Referrer-Policy no-referrer
@@ -1121,134 +1121,134 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_header Content-Security-Policy "default-src 'none'"
   end_case
 
-  hc H35 "未知路径返回 JSON 404（控制台不接管 API 前缀）" GET /v1/not-a-route '' 404
+  hc H35 "unknown path returns JSON 404 (console does not take over API prefix)" GET /v1/not-a-route '' 404
   a_json_eq error 'not found'
   a_header Content-Type application/json
   end_case
 else
-  fail_case H00 "HTTP 用例组" "服务未能启动: $(head -c 200 "$WORK/serve-base.log" | tr '\n' ' ')"
+  fail_case H00 "HTTP case group" "service failed to start: $(head -c 200 "$WORK/serve-base.log" | tr '\n' ' ')"
 fi
 stop_server
 
 # ===========================================================================
-section "4. 鉴权、权限矩阵与身份安全（鉴权开启档位）"
+section "4. Authentication, permission matrix, and identity security (auth-enabled profile)"
 # ===========================================================================
 if start_server auth "$AUTH_ENV" "$PORT_AUTH"; then
-  hc S01 "GET /healthz 无需令牌" GET /healthz '' 200
+  hc S01 "GET /healthz needs no token" GET /healthz '' 200
   a_json_eq status ok
   end_case
 
-  hc S02 "缺少令牌返回 401 并带 WWW-Authenticate" GET /v1/concepts '' 401
+  hc S02 "missing token returns 401 with WWW-Authenticate" GET /v1/concepts '' 401
   a_json_eq error 'authentication required'
   a_header WWW-Authenticate 'Bearer realm="agentmem"'
   end_case
 
-  hc S03 "未知令牌返回 401" GET /v1/concepts '' 401 "Authorization: Bearer not-a-real-token"
+  hc S03 "unknown token returns 401" GET /v1/concepts '' 401 "Authorization: Bearer not-a-real-token"
   a_json_eq error 'authentication required'
   end_case
 
-  hc S04 "knowledge:read 只能读，不能写" GET /v1/concepts '' 200 "Authorization: Bearer $TOK_READ"
+  hc S04 "knowledge:read can only read, not write" GET /v1/concepts '' 200 "Authorization: Bearer $TOK_READ"
   http_req POST /v1/knowledge \
     '{"concept_id":"e2e/scope-denied","document":{"type":"Concept"}}' \
     "Authorization: Bearer $TOK_READ"
-  eq "$STATUS" 403 'knowledge:read 写入'
+  eq "$STATUS" 403 'knowledge:read write'
   end_case
 
-  hc S05 "knowledge:write 只能写，不能读" POST /v1/knowledge \
+  hc S05 "knowledge:write can only write, not read" POST /v1/knowledge \
     '{"concept_id":"e2e/scope-write","document":{"type":"Concept","visibility":"public"}}' 200 "Authorization: Bearer $TOK_WRITE"
   http_req GET /v1/concepts '' "Authorization: Bearer $TOK_WRITE"
-  eq "$STATUS" 403 'knowledge:write 读取'
+  eq "$STATUS" 403 'knowledge:write read'
   end_case
 
-  hc S06 "migrate:run 只能迁移，不能审计" POST /v1/migrate \
+  hc S06 "migrate:run can only migrate, not audit" POST /v1/migrate \
     '{"direction":"canonical_to_rag","target":"memory","dry_run":true,"limit":5}' 200 "Authorization: Bearer $TOK_MIGRATE"
   http_req GET /v1/decisions '' "Authorization: Bearer $TOK_MIGRATE"
-  eq "$STATUS" 403 'migrate:run 审计'
+  eq "$STATUS" 403 'migrate:run audit'
   end_case
 
-  hc S07 "audit:read 只能审计，不能查询" GET /v1/decisions '' 200 "Authorization: Bearer $TOK_AUDIT"
+  hc S07 "audit:read can only audit, not query" GET /v1/decisions '' 200 "Authorization: Bearer $TOK_AUDIT"
   http_req POST /v1/query '{"query":"x"}' "Authorization: Bearer $TOK_AUDIT"
-  eq "$STATUS" 403 'audit:read 查询'
+  eq "$STATUS" 403 'audit:read query'
   end_case
 
-  hc S08 "compute:run 只能计算，不能读审计" POST /v1/computations \
+  hc S08 "compute:run can only compute, not read audit" POST /v1/computations \
     '{"concept_id":"computations/revenue-postgres","parameters":{"year":2026}}' 200 "Authorization: Bearer $TOK_COMPUTE"
   a_json_eq display_allowed true
   http_req GET /v1/computations '' "Authorization: Bearer $TOK_COMPUTE"
-  eq "$STATUS" 403 'compute:run 审计'
+  eq "$STATUS" 403 'compute:run audit'
   end_case
 
-  hc S09 "health:read 不足以访问受保护路由" GET /v1/concepts '' 403 "Authorization: Bearer $TOK_HEALTH"
+  hc S09 "health:read is insufficient for protected routes" GET /v1/concepts '' 403 "Authorization: Bearer $TOK_HEALTH"
   a_json_eq error 'permission denied'
   end_case
 
-  hc S10 "全 scope 令牌可访问读写与审计" GET /v1/knowledge?id=e2e%2Fhttp-doc '' 200 "Authorization: Bearer $TOK_ALL"
+  hc S10 "full-scope token can access read, write, and audit" GET /v1/knowledge?id=e2e%2Fhttp-doc '' 200 "Authorization: Bearer $TOK_ALL"
   a_json_eq concept_id "$HTTP_DOC"
   http_req GET /v1/computations '' "Authorization: Bearer $TOK_ALL"
-  eq "$STATUS" 200 '全 scope 计算审计'
+  eq "$STATUS" 200 'full-scope computation audit'
   end_case
 
-  hc S11 "请求体中的 subject 伪造被拒绝" POST /v1/query \
+  hc S11 "subject spoofing in request body is rejected" POST /v1/query \
     '{"query":"x","subject":"mallory"}' 400 "Authorization: Bearer $TOK_ALL"
   a_json_eq error 'invalid JSON'
   end_case
 
-  hc S12 "写入私有文档" POST /v1/knowledge \
+  hc S12 "write a private document" POST /v1/knowledge \
     '{"concept_id":"e2e/private-doc","document":{"type":"Concept","title":"Private","visibility":"private"}}' 200 "Authorization: Bearer $TOK_ALL"
   a_json_eq concept_id 'e2e/private-doc'
   end_case
 
-  hc S13 "他人读取私有文档统一 404" GET '/v1/knowledge?id=e2e%2Fprivate-doc' '' 404 "Authorization: Bearer $TOK_READ"
+  hc S13 "another user reading a private document gets 404" GET '/v1/knowledge?id=e2e%2Fprivate-doc' '' 404 "Authorization: Bearer $TOK_READ"
   a_json_eq error 'document not found or access denied'
   end_case
 
-  hc S14 "owner 本人可读私有文档" GET '/v1/knowledge?id=e2e%2Fprivate-doc' '' 200 "Authorization: Bearer $TOK_ALL"
+  hc S14 "owner can read their private document" GET '/v1/knowledge?id=e2e%2Fprivate-doc' '' 200 "Authorization: Bearer $TOK_ALL"
   a_json_eq visibility private
   end_case
 
-  hc S15 "查询串中的 subject 伪造不改变身份" GET '/v1/knowledge?id=e2e%2Fprivate-doc&subject=alice' '' 404 "Authorization: Bearer $TOK_READ"
+  hc S15 "subject spoofing in the query string does not change identity" GET '/v1/knowledge?id=e2e%2Fprivate-doc&subject=alice' '' 404 "Authorization: Bearer $TOK_READ"
   a_json_eq error 'document not found or access denied'
   end_case
 
-  hc S16 "Origin: null 被拒绝" GET /healthz '' 403 'Origin: null'
+  hc S16 "Origin: null is rejected" GET /healthz '' 403 'Origin: null'
   a_json_eq error 'origin not allowed'
   end_case
 
-  hc S17 "未列入白名单的跨站 Origin 被拒绝" GET /v1/concepts '' 403 \
+  hc S17 "non-allowlisted cross-site Origin is rejected" GET /v1/concepts '' 403 \
     'Origin: https://evil.example.test' "Authorization: Bearer $TOK_ALL"
   a_json_eq error 'origin not allowed'
   end_case
 
-  hc S18 "白名单内的跨站 Origin 被允许" GET /v1/concepts '' 200 \
+  hc S18 "allowlisted cross-site Origin is allowed" GET /v1/concepts '' 200 \
     'Origin: https://console.example.test' "Authorization: Bearer $TOK_ALL"
   end_case
 
-  hc S19 "405 判定发生在鉴权之后" POST /healthz '' 401
+  hc S19 "405 determination happens after authentication" POST /healthz '' 401
   a_json_eq error 'authentication required'
   http_req POST /healthz '' "Authorization: Bearer $TOK_ALL"
-  eq "$STATUS" 405 '带令牌的错误方法'
+  eq "$STATUS" 405 'wrong method with token'
   end_case
 
-  hc S20 "错误响应不回显凭据或 DSN" GET /v1/concepts '' 401
+  hc S20 "error responses do not echo credentials or DSN" GET /v1/concepts '' 401
   a_body_hasnt 'postgres://'
   a_body_hasnt 'e2e-all-'
   a_body_hasnt 'SELECT'
   end_case
 
-  hc S21 "控制台在开启鉴权时仍公开可读" GET / '' 200
+  hc S21 "console remains publicly readable with auth enabled" GET / '' 200
   a_header Content-Type text/html
   a_json_absent error
   end_case
 else
-  fail_case S00 "鉴权用例组" "服务未能启动: $(head -c 200 "$WORK/serve-auth.log" | tr '\n' ' ')"
+  fail_case S00 "auth case group" "service failed to start: $(head -c 200 "$WORK/serve-auth.log" | tr '\n' ' ')"
 fi
 stop_server
 
 # ===========================================================================
-section "5. 限流（独立低限额档位）"
+section "5. Rate limiting (separate low-limit profile)"
 # ===========================================================================
 if start_server rate "$RATE_ENV" "$PORT_RATE"; then
-  begin_case R01 "超过令牌桶速率返回 429"
+  begin_case R01 "exceeding the token-bucket rate returns 429"
   rate_found=0
   for _i in $(seq 1 30); do
     http_req GET /healthz ''
@@ -1258,107 +1258,107 @@ if start_server rate "$RATE_ENV" "$PORT_RATE"; then
       break
     fi
   done
-  if [[ "$rate_found" -eq 1 ]]; then ck 0 ""; else ck 1 "连续 30 次请求未出现 429"; fi
-  has "$(head -c 500 "$WORK/rate429.body")" 'rate limit exceeded' '429 响应体'
+  if [[ "$rate_found" -eq 1 ]]; then ck 0 ""; else ck 1 "no 429 in 30 consecutive requests"; fi
+  has "$(head -c 500 "$WORK/rate429.body")" 'rate limit exceeded' '429 response body'
   end_case
 else
-  fail_case R00 "限流用例组" "服务未能启动: $(head -c 200 "$WORK/serve-rate.log" | tr '\n' ' ')"
+  fail_case R00 "rate-limit case group" "service failed to start: $(head -c 200 "$WORK/serve-rate.log" | tr '\n' ' ')"
 fi
 stop_server
 
 # ===========================================================================
-section "6. 跨进程状态一致性（所有服务已停止）"
+section "6. Cross-process state consistency (all servers stopped)"
 # ===========================================================================
-begin_case X01 "CLI concepts 能看到 HTTP 写入的概念"
+begin_case X01 "CLI concepts sees the concept written over HTTP"
 run_cli concepts "${ENVARG[@]}"
 a_rc 0
 a_cli_json_contains '' "$HTTP_DOC"
 end_case
 
-begin_case X02 "CLI decisions 保留完整审计轨迹"
+begin_case X02 "CLI decisions retains the full audit trail"
 run_cli decisions "${ENVARG[@]}" --limit 100
 a_rc 0
 a_cli_json_len_min '' 1
 a_cli_json_has 0.concept_id
 end_case
 
-begin_case X03 "CLI computations 保留 HTTP 计算留痕"
+begin_case X03 "CLI computations retains the HTTP computation record"
 run_cli computations "${ENVARG[@]}" --limit 100
 a_rc 0
 a_cli_json_len_min '' 1
 a_cli_json_has 0.verdict
 end_case
 
-begin_case X04 "离线快照落盘且为合法 JSON"
-if [[ -f "$WORK/meta.fake.json" ]]; then ck 0 ""; else ck 1 '缺少 meta.fake.json'; fi
+begin_case X04 "offline snapshot is written and is valid JSON"
+if [[ -f "$WORK/meta.fake.json" ]]; then ck 0 ""; else ck 1 'missing meta.fake.json'; fi
 python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' \
   "$WORK/meta.fake.json" >/dev/null 2>&1
-ck $? '快照不是合法 JSON'
+ck $? 'snapshot is not valid JSON'
 end_case
 
-begin_case X05 "OKF+Git 正文写入临时 bundle"
+begin_case X05 "OKF+Git bodies are written to the temporary bundle"
 e2e_md=0
 if [[ -d "$WORK/bundle/e2e" ]]; then
   e2e_md="$(find "$WORK/bundle/e2e" -type f -name '*.md' | wc -l)"
 fi
-if [[ "$e2e_md" -ge 1 ]]; then ck 0 ""; else ck 1 'bundle 中未找到 e2e 概念正文'; fi
+if [[ "$e2e_md" -ge 1 ]]; then ck 0 ""; else ck 1 'no e2e concept body found in bundle'; fi
 end_case
 
 # ===========================================================================
-section "7. Web 控制台（二进制托管 + 静态自检）"
+section "7. Web console (binary-hosted + static self-check)"
 # ===========================================================================
-begin_case W01 "index.html 自带严格 CSP"
+begin_case W01 "index.html carries a strict CSP"
 web_html="$(cat "$REPO/web/index.html")"
 has "$web_html" 'http-equiv="Content-Security-Policy"' 'CSP meta'
 has "$web_html" "default-src 'none'" 'default-src'
 end_case
 
-begin_case W02 "无外链 CDN 资源"
+begin_case W02 "no external CDN assets"
 if grep -Eq '(src|href)="https?://' "$REPO/web/index.html"; then
-  ck 1 'index.html 引用了外部资源'
+  ck 1 'index.html references an external resource'
 else
   ck 0 ''
 fi
 end_case
 
-begin_case W03 "API 文档镜像 9 条 method+path"
+begin_case W03 "API docs mirror 9 method+path entries"
 web_routes="$(grep -c "    method: '" "$REPO/web/src/lib/api-content.js")"
-eq "$web_routes" 9 '端点条数'
+eq "$web_routes" 9 'endpoint count'
 end_case
 
-begin_case W04 "13 语言目录齐备"
+begin_case W04 "all 13 language directories present"
 web_langs="$(cat "$REPO/web/src/lib/languages.js")"
-has "$web_langs" 'zh-TW' '繁体中文'
-has "$web_langs" 'hi' '印地语'
+has "$web_langs" 'zh-TW' 'Traditional Chinese'
+has "$web_langs" 'hi' 'Hindi'
 web_tests="$(ls "$REPO"/web/tests/*.test.mjs 2>/dev/null | wc -l)"
-eq "$web_tests" 8 '离线测试文件数'
+eq "$web_tests" 8 'offline test file count'
 end_case
 
-begin_case W06 "文档页提供交互式试调用"
+begin_case W06 "docs page provides interactive try-it"
 web_content="$(cat "$REPO/web/src/lib/api-content.js")"
-has "$web_content" 'export const tryMeta' 'tryMeta 元数据'
+has "$web_content" 'export const tryMeta' 'tryMeta metadata'
 web_try="$(cat "$REPO/web/src/lib/copy/try-copy.js")"
-has "$web_try" "'trySend'" '发送按钮文案'
-has "$web_try" 'tryErrAuth' '鉴权失败提示'
+has "$web_try" "'trySend'" 'send button copy'
+has "$web_try" 'tryErrAuth' 'auth failure hint'
 web_view="$(cat "$REPO/web/src/views/try-it.js")"
-has "$web_view" 'buildTryIt' '试调用面板'
+has "$web_view" 'buildTryIt' 'try-it panel'
 web_trylib="$(cat "$REPO/web/src/lib/api-try.js")"
-has "$web_trylib" "TOKEN_KEY = 'agentmem.token'" '令牌键名'
-has "$web_trylib" 'sessionStorage' '会话级存储'
+has "$web_trylib" "TOKEN_KEY = 'agentmem.token'" 'token key name'
+has "$web_trylib" 'sessionStorage' 'session-level storage'
 end_case
 
 if command -v bun >/dev/null 2>&1; then
-  begin_case W05 "bun test（Web 离线 node:test 套件）"
+  begin_case W05 "bun test (Web offline node:test suite)"
   (cd "$REPO/web" && bun test) >"$WORK/web-test.log" 2>&1
   web_test_rc=$?
-  ck "$web_test_rc" "bun test 退出码 $web_test_rc: $(tail -n 3 "$WORK/web-test.log" | tr '\n' ' ' | head -c 200)"
+  ck "$web_test_rc" "bun test exit code $web_test_rc: $(tail -n 3 "$WORK/web-test.log" | tr '\n' ' ' | head -c 200)"
   end_case
 else
-  skip_case W05 "bun test（Web 离线 node:test 套件）" "bun 未安装"
+  skip_case W05 "bun test (Web offline node:test suite)" "bun not installed"
 fi
 
 # ===========================================================================
-section "8. 现有质量门禁"
+section "8. Existing quality gates"
 # ===========================================================================
 run_gate() { # ID DESC COMMAND...
   local id="$1" desc="$2"
@@ -1366,33 +1366,33 @@ run_gate() { # ID DESC COMMAND...
   begin_case "$id" "$desc"
   "$@" >"$WORK/gate-$id.log" 2>&1
   local rc=$?
-  ck "$rc" "退出码 $rc: $(tail -n 3 "$WORK/gate-$id.log" | tr '\n' ' ' | head -c 200)"
+  ck "$rc" "exit code $rc: $(tail -n 3 "$WORK/gate-$id.log" | tr '\n' ' ' | head -c 200)"
   end_case
 }
 
 if [[ "$NO_GATES" -eq 1 ]]; then
-  skip_case G00 "现有质量门禁" "--no-gates 已指定"
+  skip_case G00 "existing quality gates" "--no-gates specified"
 else
   run_gate G02 "go vet ./..." go vet ./...
-  run_gate G03 "go test ./... -count=1（离线）" go test ./... -count=1
+  run_gate G03 "go test ./... -count=1 (offline)" go test ./... -count=1
   run_gate G04 "go build ./..." go build ./...
-  run_gate G05 "make validate（严格校验 .env.example）" make validate
+  run_gate G05 "make validate (strict .env.example validation)" make validate
   run_gate G06 "make check-boundaries" make check-boundaries
   run_gate G07 "make eval" make eval
   if command -v openssl >/dev/null 2>&1; then
     run_gate G08 "make check-trust-store" make check-trust-store
   else
-    skip_case G08 "make check-trust-store" "openssl 未安装"
+    skip_case G08 "make check-trust-store" "openssl not installed"
   fi
 fi
 
 # ===========================================================================
-section "汇总"
+section "Summary"
 # ===========================================================================
 printf 'PASS=%d  FAIL=%d  SKIP=%d  TOTAL=%d\n' "$PASS" "$FAIL" "$SKIP" "$((PASS + FAIL + SKIP))"
 if (( FAIL > 0 )); then
-  printf '结论: FAIL\n'
+  printf 'Result: FAIL\n'
   exit 1
 fi
-printf '结论: PASS\n'
+printf 'Result: PASS\n'
 exit 0
