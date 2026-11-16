@@ -237,6 +237,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          # Only the release archives. With no filter this step also fetches
+          # every other artifact in the run (notably the image job's
+          # *.dockerbuild record), whose download can fail and which must not
+          # end up in SHA256SUMS.txt or among the uploaded release assets.
+          pattern: agentmem-*
           path: dist
           merge-multiple: true
       - name: Generate checksums
