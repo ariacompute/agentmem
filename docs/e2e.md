@@ -43,8 +43,8 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 |---|---|---|
 | 构建 | `G01` | 离线编译真实二进制 |
 | 配置 | `F01`–`F19` | `validate` 正向（基准配置、`.env.example`、缺失文件回退、完整 production、egress 白名单）；故障关闭（未知文件键、未知进程环境键、非法 mode/数值/布尔/ADAPTERS/scope、重复键、畸形行、production 缺 DSN/缺鉴权/`sslmode=disable`、出向端点缺白名单、未实现冲突策略） |
-| CLI | `C01`–`C32` | `help`/无参数/未知命令；`put` `query` `migrate`（含 `--dry-run`）`decisions` `concepts` `compute`（含重复 `--param`）`computations` `validate` `eval` 的正常链路；缺参、匿名写入、owner 不匹配、非法 visibility、非法参数、不支持 runtime、坏 JSONL、缺失数据集、`eval --env` 与未知 flag 等异常路径；计算面 sidecar（`C29`–`C32`）：CLI 通道、本地 HTTP 回环通道、sidecar 失败不展示数值且不回显正文、未配置 sidecar 仍 fail-closed |
-| HTTP | `H01`–`H39` | 9 条 method+path 全部端到端（写→读→查询→迁移→决策审计→计算→计算审计→概念列表→健康检查）；405、Content-Type、未知字段、trailing data、畸形 JSON、4 MiB 上限、`top_k`/`limit`/必填字段边界；计算 400/422 且不展示 `display_value`；错误脱敏、安全响应头、JSON 404；二进制托管控制台（`H31` 首页 200 + 页面 CSP、`H36` 哈希资源可长期缓存、`H37`/`H38` 未注册 API 与静态路径仍是 JSON 404、`H39` 写方法 405） |
+| CLI | `C01`–`C35` | `help`/无参数/未知命令；`put` `query` `migrate`（含 `--dry-run`）`decisions` `concepts` `compute`（含重复 `--param`）`computations` `validate` `eval` 的正常链路；缺参、匿名写入、owner 不匹配、非法 visibility、非法参数、不支持 runtime、坏 JSONL、缺失数据集、`eval --env` 与未知 flag 等异常路径；计算面 sidecar（`C29`–`C32`）：CLI 通道、本地 HTTP 回环通道、sidecar 失败不展示数值且不回显正文、未配置 sidecar 仍 fail-closed；`C33`–`C35` 用 `examples/compute-sidecars` 的参考实现（`SIDECAR_OFFLINE=1`）端到端跑通 `bigquery` / `dbt` / `looker` 三个 runtime |
+| HTTP | `H01`–`H40` | 9 条 method+path 全部端到端（写→读→查询→迁移→决策审计→计算→计算审计→概念列表→健康检查）；405、Content-Type、未知字段、trailing data、畸形 JSON、4 MiB 上限、`top_k`/`limit`/必填字段边界；计算 400/422 且不展示 `display_value`；错误脱敏、安全响应头、JSON 404；二进制托管控制台（`H31` 首页 200 + 页面 CSP、`H36` 哈希资源可长期缓存、`H37`/`H38` 未注册 API 与静态路径仍是 JSON 404、`H39` 写方法 405）；`H40` 关闭 `AGENTMEM_CONSOLE_ENABLED` 后首页与资产为 JSON 404、`/healthz` 与 API 不变 |
 | 安全 | `S01`–`S21` | 6 个 scope 的权限矩阵（正反向）、公开 `/healthz`、401 + `WWW-Authenticate`、未知令牌、`health:read` 不足、全 scope 令牌；请求体与查询串 `subject` 伪造；私有文档 ACL（owner 可读 / 他人统一 404）；`Origin: null`、跨站未授权/白名单放行；405 在鉴权之后；错误体不回显凭据；`S21` 开启鉴权时控制台仍公开可读 |
 | 限流 | `R01` | 独立低限额档位，突发请求触发 429 及固定错误体 |
 | 跨进程 | `X01`–`X05` | 服务停止后 CLI 仍能看到 HTTP 写入的概念、路由审计、计算留痕；快照合法；OKF 正文落盘 |
@@ -55,7 +55,8 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 
 ## 实现要点
 
-- 三个服务档位顺序启停：`base`（鉴权关闭、高限额）、`auth`（多 scoped 令牌）、
+- 四个服务档位顺序启停：`base`（鉴权关闭、高限额）、`console-off`
+  （`AGENTMEM_CONSOLE_ENABLED=false`，纯 API 姿态）、`auth`（多 scoped 令牌）、
   `rate`（低限额）。CLI 写入放在服务启动前，因为离线快照在进程启动时加载一次、
   退出时写回，运行中并发写入会被覆盖。
 - `GET /healthz` 同样经过限流器，就绪探测会消耗 token；`rate` 档位用 `burst=5`

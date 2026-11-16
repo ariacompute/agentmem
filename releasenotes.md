@@ -19,7 +19,15 @@ and a rule-first smart router.
   All remain offline-mockable.
 - **Attested Computation**: parameter binding, read-only `postgres` execution,
   receipt, deterministic Go attester (SQL provenance + display fidelity),
-  rejection on failure, and a versioned `computation_runs` audit.
+  rejection on failure, and a versioned `computation_runs` audit. A reference
+  sidecar (`examples/compute-sidecars/sidecar.py`) implements the v1 wire
+  protocol over both channels — `cli` stdio and `http POST /run` — dispatching
+  `bigquery`, `dbt`, `looker` and `python`, with `SIDECAR_OFFLINE=1` returning
+  deterministic tables for demos and acceptance runs. Table-driven contract
+  tests pin all four outbound runtimes (request fields, `body_digest` match and
+  mismatch, unknown reply fields rejected, `postgres` never proxied to a
+  sidecar), and black-box cases `C33`–`C35` run `bigquery`, `dbt` and `looker`
+  end to end.
 - **Smart routing**: deterministic `R1`–`R7` rules first, AFM-D System One
   fallback with 5000 ms timeout, 256-entry cache, low-score protection and
   fail-closed behaviour. Dual-path reads/writes plus resumable migration.
@@ -37,7 +45,11 @@ and a rule-first smart router.
   is `no-cache`. Prose is fully translated into 13 languages (English fallback,
   Arabic RTL), and a monochrome black/white/grey light/dark theme follows the OS
   until explicitly chosen. Offline `node:test` suites guard copy coverage,
-  endpoint drift and the palette.
+  endpoint drift and the palette. `AGENTMEM_CONSOLE_ENABLED` (default `true`)
+  switches the page off: with it set to `false`, `GET /`, `/assets/*` and
+  unknown static paths answer JSON `404` while the nine API routes, the
+  permission matrix, rate limiting and `GET /healthz` stay identical — an
+  API-only deployment needs no rebuild.
 - **Interactive API reference**: every endpoint row expands into a workbench
   that fires a real same-origin request — editable query parameters and JSON
   body, `Ctrl/Cmd+Enter` to send, then status code, duration, response headers
@@ -82,6 +94,15 @@ and a rule-first smart router.
   replaced duplicated path/rel logic, and defensive branches that cannot fail
   were deleted instead of left untested. The router package holds 99.6%
   statement coverage; its two remaining statements are provably unreachable.
+  Permission assertions that manufacture a denial with `os.Chmod` skip
+  themselves when running as root, where `CAP_DAC_OVERRIDE` makes the negative
+  case unprovable and a root container would otherwise fail on correct code.
+- **Continuous real-Postgres verification**: the `postgres-integration` job runs
+  on a daily schedule as well as on manual dispatch, against an ephemeral
+  `pgvector/pgvector:pg16` service container. GORM, the versioned migrations,
+  `computation_runs` and the pgvector `Scanner/Valuer` — the one production path
+  the offline suite cannot prove — are therefore exercised within 24 hours of
+  every change instead of only on demand.
 
 ## Known limitations
 
@@ -97,6 +118,9 @@ and a rule-first smart router.
   `bun run build`) so `internal/webui/dist` is refreshed and committed. CI fails
   on a stale copy and `make web-verify` reproduces the check locally. Try-it
   results are in-memory only and are dropped on reload or a theme switch.
+- The default `go test ./...` suite still runs entirely on fakes. Real
+  PostgreSQL coverage comes from the scheduled (or manually dispatched)
+  `postgres-integration` job, which does not gate pull requests.
 - Tokens are static: rotation means editing `.env` and restarting. Distributed
   rate limiting, OIDC/SSO, mTLS and full commit-SHA pinning of actions/images
   remain follow-ups documented in `SECURITY.md`.

@@ -148,6 +148,7 @@ var envSpecs = []struct {
 	{EnvFileVar, func(*Config, string) error { return nil }}, // selects the file itself
 	{"AGENTMEM_ADDR", strSetter(func(c *Config) *string { return &c.Server.Addr })},
 	{"AGENTMEM_MODE", strSetter(func(c *Config) *string { return &c.Server.Mode })},
+	{"AGENTMEM_CONSOLE_ENABLED", boolSetter(func(c *Config) *bool { return &c.Console.Enabled })},
 	{"AGENTMEM_GIT_ROOT", strSetter(func(c *Config) *string { return &c.Git.Root })},
 	{"AGENTMEM_GIT_AUTHOR_NAME", strSetter(func(c *Config) *string { return &c.Git.AuthorName })},
 	{"AGENTMEM_GIT_AUTHOR_EMAIL", strSetter(func(c *Config) *string { return &c.Git.AuthorEmail })},

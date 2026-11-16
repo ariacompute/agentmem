@@ -7,8 +7,10 @@ Read this before modifying the repository. Detailed docs live under `docs/`.
 A Go 1.27.3 service: OKF+Git canonical knowledge bodies, PostgreSQL/GORM for
 server-side structured state, pluggable RAG adapters, and a rule-first smart
 router with an AFM-D System One fallback. `web/` is a dependency-free ES module
-console (status + HTTP API docs) served as static files; the Go binary neither
-embeds nor serves it.
+console (status + HTTP API docs + try-it workbench) bundled into
+`internal/webui/dist` and embedded in the binary, which serves it on the same
+listener as the API. `AGENTMEM_CONSOLE_ENABLED=false` answers JSON `404` for the
+page and its assets, which is the supported pure-API posture.
 
 ## Layering (single direction, no upward imports)
 
@@ -83,7 +85,11 @@ upward import: `internal/auth` (consumed by `handlers` / `cli`),
   anonymous like `GET /healthz` (`handlers.Console.Public` is the closed
   allowlist). Every attempt to call the API from the page still needs a bearer
   token, which the try-it workbench keeps in `sessionStorage` only — never in a
-  URL, a draft, a log line or `localStorage`.
+  URL, a draft, a log line or `localStorage`. `AGENTMEM_CONSOLE_ENABLED=false`
+  is the one supported way to remove that public surface: `cmdServe` then
+  leaves `handlers.Options.Console` nil (never a typed-nil `*webui.Handler`) and
+  the mux answers JSON `404` for `/` and `/assets/*` while every API route,
+  the permission matrix and `/healthz` stay identical.
 - **Web rendering is checked with impeccable.** `make web-audit` runs
   `impeccable detect` on the `web/` source (no browser required) and fails the
   build on any anti-pattern. The CLI version is pinned exactly in
@@ -160,6 +166,8 @@ make web-verify  # rebuild and fail if internal/webui/dist is stale
 | Security posture docs | `docs/security.md`, `SECURITY.md` |
 | Trust-store scan | `scripts/check-emudhra.sh`, `make check-trust-store` |
 | Web shell / views | `web/index.html`, `web/src/main.js`, `web/src/views/` |
+| Embedded console, CSP, `AGENTMEM_CONSOLE_ENABLED` | `internal/webui/`, `internal/cli/root.go`, `.env.example` |
+| Compute sidecar reference implementation | `examples/compute-sidecars/`, `internal/compute/sidecar.go` |
 | Web languages & copy | `web/src/lib/languages.js`, `i18n.js`, `copy/` |
 | Web themes | `web/src/lib/theme.js`, `web/src/style.css` |
 | API docs skeleton | `web/src/lib/api-content.js`, `internal/handlers/http.go` |

@@ -67,7 +67,19 @@ func TestOKFAdapterQueryListError(t *testing.T) {
 	}
 }
 
+// requireDACEnforcement skips a test that asserts on kernel permission checks.
+// Root holds CAP_DAC_OVERRIDE, so a 0o000 file stays readable and the
+// assertion cannot hold; a root CI container would otherwise fail on correct
+// code.
+func requireDACEnforcement(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses DAC checks (CAP_DAC_OVERRIDE)")
+	}
+}
+
 func TestOKFAdapterToleratesUnreadableConcept(t *testing.T) {
+	requireDACEnforcement(t)
 	b := newTestBundle(t)
 	if _, err := b.Put("team/readable", &okf.Document{Type: "Concept", Title: "Revenue", Body: "x"}); err != nil {
 		t.Fatal(err)

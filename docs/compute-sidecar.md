@@ -84,6 +84,20 @@ AGENTMEM_COMPUTE_SIDECARS='[
 
 非 SQL 正文由 sidecar 解释，因此 sidecar **本身就是执行沙箱边界**：以最小权限运行、只挂载读取数据所需凭据、不把正文当命令或 shell 片段执行。签名与信任边界见 `SECURITY.md` 与 `docs/security.md`。
 
+## 参考实现与离线演练
+
+`examples/compute-sidecars/sidecar.py` 是线协议 v1 的单文件参考实现（Python 3 标准库，无第三方依赖），同时支持两种通道：`cli`（`run` 子命令，stdin/stdout）与 `http`（`--addr host:port`，`POST /run`）。它按 `runtime` 分派到 `bq query`、`dbt show`、Looker REST 与子解释器，参数只以类型化值随行，响应永远只有 `columns` / `rows` / `body_digest` 三个字段。凭据、最小权限要求与上线检查清单见 `examples/compute-sidecars/README.md`。
+
+离线演练不需要凭据与网络：
+
+```bash
+SIDECAR_OFFLINE=1 agentmem-example run < request.json
+```
+
+开关刻意不使用 `AGENTMEM_` 前缀：agentmem 的配置闭白名单会拒绝进程环境中未知的 `AGENTMEM_*` 键，而 `cli` 子进程会继承该环境。
+
 ## 离线验证
 
-`go test ./internal/compute` 用 `httptest` 假服务覆盖 HTTP 通道、用注入的 `bridges.Runner` 覆盖 CLI 通道；`scripts/e2e.sh` 用本地 `python3` 桩（`agentmem-py` 与 `http_sidecar.py`）端到端验证真实二进制。两者都不触网、不需要凭据。
+`go test ./internal/compute` 用 `httptest` 假服务覆盖 HTTP 通道、用注入的 `bridges.Runner` 覆盖 CLI 通道，其中 `sidecar_contract_test.go` 对四个出向 runtime 做表驱动契约测试：请求必须携带 `runtime` / 派生出的 `body_kind` / 非空 `contract_hash` / 类型化参数；`body_digest` 相符才展示，不符即 `attestation_failed`；响应多出 `job_id` 等字段按严格解码整条拒绝；`postgres` 不得声明为 sidecar。
+
+`scripts/e2e.sh` 用本地 `python3` 桩（`agentmem-py`、`http_sidecar.py`）覆盖 `python` 的 CLI 与 HTTP 通道，并用上面那份参考实现（`C33`–`C35`）端到端跑通 `bigquery` / `dbt` / `looker`。两者都不触网、不需要凭据。

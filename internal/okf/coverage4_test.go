@@ -26,6 +26,19 @@ func writeConcept(t *testing.T, b *Bundle, id, body string) {
 	}
 }
 
+// skipDACAssertions reports whether an assertion that relies on kernel
+// permission checks must be skipped. Root holds CAP_DAC_OVERRIDE, so a
+// directory chmod-ed to 0o500 stays writable and the negative assertion cannot
+// hold; a root CI container would otherwise fail on correct code.
+func skipDACAssertions(t *testing.T) bool {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Log("root bypasses DAC checks (CAP_DAC_OVERRIDE); skipping the permission assertion")
+		return true
+	}
+	return false
+}
+
 func TestOpenReportsUnresolvableWorkingDirectory(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -73,25 +86,29 @@ func TestPutRejectsReservedAndUnwritableTargets(t *testing.T) {
 		t.Fatal("a reserved concept id must fail path resolution")
 	}
 
-	unwritable := newBundleAt(t)
-	if err := os.Chmod(unwritable.Root, 0o500); err != nil {
-		t.Skipf("cannot chmod: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(unwritable.Root, 0o700) })
-	if _, err := unwritable.Put("a", &Document{Type: "Concept"}); err == nil {
-		t.Fatal("an unwritable bundle must fail the atomic write")
+	if !skipDACAssertions(t) {
+		unwritable := newBundleAt(t)
+		if err := os.Chmod(unwritable.Root, 0o500); err != nil {
+			t.Skipf("cannot chmod: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(unwritable.Root, 0o700) })
+		if _, err := unwritable.Put("a", &Document{Type: "Concept"}); err == nil {
+			t.Fatal("an unwritable bundle must fail the atomic write")
+		}
 	}
 }
 
 func TestPutReportsIndexAndLogFailures(t *testing.T) {
 	// A directory that can be written but not read cannot be re-indexed.
-	unreadable := newBundleAt(t)
-	if err := os.Chmod(unreadable.Root, 0o300); err != nil {
-		t.Skipf("cannot chmod: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(unreadable.Root, 0o700) })
-	if _, err := unreadable.Put("a", &Document{Type: "Concept"}); err == nil {
-		t.Fatal("an unreadable directory must fail the index rebuild")
+	if !skipDACAssertions(t) {
+		unreadable := newBundleAt(t)
+		if err := os.Chmod(unreadable.Root, 0o300); err != nil {
+			t.Skipf("cannot chmod: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(unreadable.Root, 0o700) })
+		if _, err := unreadable.Put("a", &Document{Type: "Concept"}); err == nil {
+			t.Fatal("an unreadable directory must fail the index rebuild")
+		}
 	}
 
 	// log.md as a directory can be written around but not appended to.
@@ -122,12 +139,14 @@ func TestGetReportsReadAndSizeFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(p, 0o000); err != nil {
-		t.Skipf("cannot chmod: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(p, 0o600) })
-	if _, err := b.Get("team/a"); err == nil {
-		t.Fatal("an unreadable concept must be reported")
+	if !skipDACAssertions(t) {
+		if err := os.Chmod(p, 0o000); err != nil {
+			t.Skipf("cannot chmod: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(p, 0o600) })
+		if _, err := b.Get("team/a"); err == nil {
+			t.Fatal("an unreadable concept must be reported")
+		}
 	}
 
 	big := newBundleAt(t)
@@ -160,12 +179,14 @@ func TestDeleteSucceedsAndReportsIndexFailure(t *testing.T) {
 	unreadable := newBundleAt(t)
 	writeConcept(t, unreadable, "team/a", "body")
 	unreadable.LogWrites = false
-	if err := os.Chmod(filepath.Join(unreadable.Root, "team"), 0o300); err != nil {
-		t.Skipf("cannot chmod: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(unreadable.Root, "team"), 0o700) })
-	if err := unreadable.Delete("team/a"); err == nil {
-		t.Fatal("a failed index rebuild must be reported")
+	if !skipDACAssertions(t) {
+		if err := os.Chmod(filepath.Join(unreadable.Root, "team"), 0o300); err != nil {
+			t.Skipf("cannot chmod: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(unreadable.Root, "team"), 0o700) })
+		if err := unreadable.Delete("team/a"); err == nil {
+			t.Fatal("a failed index rebuild must be reported")
+		}
 	}
 }
 
@@ -186,12 +207,14 @@ func TestListReportsWalkAndBudgetFailures(t *testing.T) {
 	}
 	maxBundleEntries = previous
 
-	if err := os.Chmod(b.Root, 0o000); err != nil {
-		t.Skipf("cannot chmod: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(b.Root, 0o700) })
-	if _, err := b.List(); err == nil {
-		t.Fatal("an unreadable bundle must be reported")
+	if !skipDACAssertions(t) {
+		if err := os.Chmod(b.Root, 0o000); err != nil {
+			t.Skipf("cannot chmod: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(b.Root, 0o700) })
+		if _, err := b.List(); err == nil {
+			t.Fatal("an unreadable bundle must be reported")
+		}
 	}
 }
 
@@ -205,13 +228,15 @@ func TestRebuildIndexReportsFilesystemFailures(t *testing.T) {
 		t.Fatal("a directory that cannot be created must be reported")
 	}
 
-	hidden := filepath.Join(b.Root, "hidden")
-	if err := os.MkdirAll(hidden, 0o300); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(hidden, 0o700) })
-	if err := b.RebuildIndex(hidden); err == nil {
-		t.Fatal("an unreadable directory must be reported")
+	if !skipDACAssertions(t) {
+		hidden := filepath.Join(b.Root, "hidden")
+		if err := os.MkdirAll(hidden, 0o300); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(hidden, 0o700) })
+		if err := b.RebuildIndex(hidden); err == nil {
+			t.Fatal("an unreadable directory must be reported")
+		}
 	}
 }
 

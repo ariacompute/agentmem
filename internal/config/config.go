@@ -23,6 +23,7 @@ var ErrUnsupported = errors.New("config: unsupported capability")
 // Config is the root runtime configuration.
 type Config struct {
 	Server    ServerConfig    `json:"server" yaml:"server"`
+	Console   ConsoleConfig   `json:"console" yaml:"console"`
 	Git       GitConfig       `json:"git" yaml:"git"`
 	Postgres  PostgresConfig  `json:"postgres" yaml:"postgres"`
 	Router    RouterConfig    `json:"router" yaml:"router"`
@@ -32,6 +33,16 @@ type Config struct {
 	Auth      AuthConfig      `json:"auth" yaml:"auth"`
 	Egress    EgressConfig    `json:"egress" yaml:"egress"`
 	RateLimit RateLimitConfig `json:"rate_limit" yaml:"rate_limit"`
+}
+
+// ConsoleConfig switches the embedded web console. Enabled defaults to true so
+// an existing deployment keeps serving the page; a pure API deployment sets
+// AGENTMEM_CONSOLE_ENABLED=false and gets JSON 404 for "/" and "/assets/*"
+// without rebuilding the binary. This is a presentation switch only: the API
+// routes, the permission matrix and the console's public allowlist are
+// unchanged either way.
+type ConsoleConfig struct {
+	Enabled bool `json:"enabled" yaml:"enabled"`
 }
 
 // ComputeSidecarConfig names one outbound executor for a non-postgres runtime.
@@ -155,7 +166,8 @@ var knownPermissions = map[string]bool{
 // Default returns an offline, fully testable configuration.
 func Default() *Config {
 	return &Config{
-		Server: ServerConfig{Addr: "127.0.0.1:8080", Mode: "dev"},
+		Server:  ServerConfig{Addr: "127.0.0.1:8080", Mode: "dev"},
+		Console: ConsoleConfig{Enabled: true},
 		Git: GitConfig{
 			Root: "./data/bundle", AuthorName: "agentmem", AuthorEmail: "agentmem@localhost",
 		},

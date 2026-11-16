@@ -236,6 +236,12 @@ func TestSaveToReportsFilesystemErrors(t *testing.T) {
 		t.Fatal("a parent that is a regular file must fail")
 	}
 
+	// Root holds CAP_DAC_OVERRIDE, so a 0o500 directory stays writable and this
+	// assertion cannot hold; skip it rather than fail on correct code.
+	if os.Geteuid() == 0 {
+		t.Log("root bypasses DAC checks (CAP_DAC_OVERRIDE); skipping the read-only assertion")
+		return
+	}
 	readOnly := filepath.Join(dir, "readonly")
 	if err := os.Mkdir(readOnly, 0o500); err != nil {
 		t.Fatal(err)

@@ -1,4 +1,4 @@
-# agentmem 需求规格 v0.1.0
+# agentmem 需求规格 v0.2.0
 
 ## 1. OKF+Git 存储知识数据
 
@@ -54,20 +54,22 @@
 ## 7. 交付与验收
 
 - CLI：`serve` / `put` / `query` / `migrate` / `decisions` / `concepts` / `compute` / `computations` / `validate` / `eval`；命令用 `--env` 指定配置文件。
-- HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`。
+- HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`；同一 listener 另提供控制台静态路由 `GET /`（含 `/index.html`）与 `GET /assets/*`，匿名可读白名单只含 `GET /healthz` 与控制台（详见第 8 节）。
 - 评测：Recall@k / Precision@k / nDCG / MRR / MAP / HitRate@k 纯函数；显式区分覆盖率 Recall 与二值 HitRate。
 - 文档、CI、Docker、compose；`web/` 零运行时依赖原生 ES module 控制台（详见第 8 节）。
-- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`make check-trust-store`、`make web-audit`（impeccable 版本由 `web/package.json` 精确固定）、`make e2e`、`cd web && bun test`、`cd web && bun run build` 全绿，离线无外部服务（`make web-audit` 源码级渲染检查 0 反模式；`make e2e` 以真实二进制驱动 CLI 与 HTTP 服务）。上述门禁全部在 CI 中执行。
+- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`make check-trust-store`、`make web-audit`（impeccable 版本由 `web/package.json` 精确固定）、`make e2e`、`cd web && bun test`、`cd web && bun run build` 全绿，离线无外部服务（`make web-audit` 源码级渲染检查 0 反模式；`make e2e` 以真实二进制驱动 CLI 与 HTTP 服务）。上述门禁全部在 CI 中执行；真实 Postgres 另由 `postgres-integration` 作业每日定时（保留手动派发）在临时 pgvector service container 上验证，不参与离线验收线。
 
 ## 8. Web 控制台
 
-- 零运行时依赖的原生 ES module 单页（HTML + JS + 独立 `web/src/style.css`），可由任意静态服务器直接托管；Vite 6 仅作可选打包与开发代理；不引入框架、路由、CDN 或外部资源，Go 二进制不提供静态资源。
+- 零运行时依赖的原生 ES module 单页（HTML + JS + 独立 `web/src/style.css`），不引入框架、路由、CDN 或外部资源；Vite 6 仅作打包与开发代理，产物直接输出到 `internal/webui/dist`，由 `//go:embed all:dist` 编入二进制。`serve` 在**同一 listener** 上应答 `GET /`（含 `/index.html`）与 `/assets/*`，首页 `no-cache`、带内容哈希的资产 `immutable`；该产物目录已入库，因此 `go build` / `go test ./...` 无需 Bun 与网络，产物仍可由任意静态服务器直接托管。
+- 控制台开关 `AGENTMEM_CONSOLE_ENABLED`（默认 `true`）：关闭后不装配控制台，`GET /`、`/assets/*` 与未知静态路径统一返回 JSON `404`，服务退化为纯 API 部署；既有 9 条 API 路由、鉴权顺序与错误体不变，关闭无需重新编译二进制。
+- 交互式 try-it 工作台：文档视图的每个端点可展开为请求面板，查询参数与 JSON 正文可编辑，`Ctrl/Cmd+Enter` 发送同源真实请求，返回状态码、耗时、响应头与美化正文，写入类请求需二次确认。令牌只存 `sessionStorage`，只经 `Authorization` 头传输，不进 URL、草稿、日志或 `localStorage`；响应一律以 `textContent` + `createElement` 渲染，`web/src/` 不含 `innerHTML` / `outerHTML` / `insertAdjacentHTML` / `document.write`。
 - 两个视图：状态（`/healthz` 健康字段 + `/v1/decisions?limit=20` 最近决策，含刷新、加载与错误提示）与 API 文档；`?view=docs` 可直达文档视图。
 - 13 种语言与 agenthub 一致：`en / zh / zh-TW / es / fr / de / it / ru / ja / ko / pt / ar / hi`。优先级 `?lang=` > localStorage(`agentmem.lang`) > 浏览器语言 > 英文；英文浅合并兜底，阿拉伯语 RTL 镜像 `<html lang|dir>`；界面文案与文档正文在 13 语言下均有各自译文。
 - light / dark 双主题共用纯黑白灰灰阶，不含任何色相；`index.html` 首屏脚本写 `data-theme`，未选择时跟随系统，仅显式切换持久化到 `agentmem.theme`；状态差异由亮度、描边、字重、形状与克制动效表达。
 - API 文档覆盖 `internal/handlers/http.go` 的 9 个 method+path 组合，含章节索引、分组端点表、可展开的请求/响应 JSON 样例，以及 Base URL、Content-Type、4 MiB 上限、`{"error":...}` 错误体、401/403/405/422/429/502 状态码、Bearer 令牌与权限范围、`limit` 边界、无 CORS 响应头与无分页等通用约定；请求样例不出现 `subject` 字段（主体由服务端从令牌推导），出站 sidecar 线协议不属于对外 API。方法、路径、字段名、状态码与 JSON 样例在所有语言下逐字呈现。
-- 页面以静态文件托管，因此自带 `Content-Security-Policy` meta：`default-src 'none'`，仅允许同源脚本/样式与同源 `connect-src`，唯一的内联首屏主题脚本以 SHA-256 摘要白名单放行；`web/tests/security.test.mjs` 校验哈希与脚本文本一致、无外链资源与内联事件处理器。
-- Node 内置 `node:test` 套件（零新增依赖）：语言目录、译文完整性与英文兜底、端点表与后端路由一致性、单色守卫、主题解析/持久化、DOM 冒烟（两视图切换、示例展开、RTL、主题切换）；CI 的 web job 执行 `bun test` 与 `bun run build`。
+- 页面级 CSP 为 `default-src 'none'`，仅允许同源脚本/样式与同源 `connect-src`，唯一的内联首屏主题脚本以 SHA-256 摘要白名单放行。由二进制托管时，`serve` 启动期从内嵌 `index.html` 现算该摘要并组装响应头（Go 头与页面永不失配）；`web/index.html` 的 `Content-Security-Policy` meta 保留为纯静态托管时的兜底，`web/tests/security.test.mjs` 校验哈希与脚本文本一致、无外链资源与内联事件处理器。
+- Node 内置 `node:test` 套件（零新增依赖）：语言目录、译文完整性与英文兜底、端点表与后端路由一致性、try-it 的 URL/头部构造与写入确认、单色守卫、主题解析/持久化、DOM 冒烟（两视图切换、示例展开、RTL、主题切换）；CI 的 web job 执行 `bun test`、`bun run build`，并用 `git diff --exit-code -- internal/webui/dist` 阻止陈旧产物发布。
 - 页面不输出日志、不记录 API 响应正文；示例仅用占位值，不含正文、PII 或凭据。
 - Web 渲染质量采用 [pbakaus/impeccable](https://github.com/pbakaus/impeccable) 检查与优化：`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器），完整元素级规则（对比度、过小字号、间距）需运行中站点加本地 Chrome/Edge（`cd web && bun run dev` 后 `bun run audit:live`）。保持单色不变式，刻意避免 `.notice` 侧边强调边框等已知「AI 痕迹」；共享配置 `web/.impeccable/config.json`（关闭遥测），临时缓存被 `.gitignore` 排除。
 
@@ -85,4 +87,6 @@
 
 ## 10. 非目标
 
-完整管理台；Go 二进制内直接链接四个 Python 引擎的原生 SDK（由 sidecar 承担 `sdk_boundary`）；非 `postgres` 计算执行器；自动 commit/push 源码仓库；跨组织知识同步协议；前端框架/组件库、CDN 资源与交互式 Try it。
+完整管理台（写入 / RBAC 管理界面、多租户运维面板）；Go 二进制内直接链接四个 Python 引擎的原生 SDK（由 sidecar 承担 `sdk_boundary`）；自动 commit/push 源码仓库；跨组织知识同步协议；前端框架/组件库与 CDN 资源。
+
+自 v0.2.0 起，"二进制内嵌控制台"与"交互式 try-it 工作台"属于已实现范围（见第 8 节），不再列为非目标；`bigquery` / `dbt` / `python` / `looker` 经声明式 sidecar 真实执行（见第 5 节），也不再是非目标。

@@ -85,6 +85,45 @@ func TestConsoleIsPublicWhileTheAPIKeepsItsPolicy(t *testing.T) {
 	}
 }
 
+// TestConsoleDisabledAnswersJSON404 pins AGENTMEM_CONSOLE_ENABLED=false: the
+// page and its assets disappear while the API and the health check stay
+// untouched, and the edge still answers JSON instead of ServeMux's text/plain
+// 404. openOptions leaves Console nil, which is exactly what the serve path
+// builds when the switch is off.
+func TestConsoleDisabledAnswersJSON404(t *testing.T) {
+	srv := newTestServerWithOptions(t, openOptions())
+
+	for _, target := range []string{"/", "/index.html", "/assets/missing.js", "/nope"} {
+		resp, body := doJSON(t, http.MethodGet, srv.URL+target, nil, "")
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("GET %s = %d", target, resp.StatusCode)
+		}
+		var payload map[string]string
+		if err := json.Unmarshal([]byte(body), &payload); err != nil {
+			t.Fatalf("GET %s answered non-JSON %q", target, body)
+		}
+		if payload["error"] == "" {
+			t.Fatalf("GET %s body = %q", target, body)
+		}
+		if contentType := resp.Header.Get("Content-Type"); !strings.Contains(contentType, "application/json") {
+			t.Fatalf("GET %s content type = %q", target, contentType)
+		}
+	}
+
+	health, _ := doJSON(t, http.MethodGet, srv.URL+"/healthz", nil, "")
+	if health.StatusCode != http.StatusOK {
+		t.Fatalf("GET /healthz = %d", health.StatusCode)
+	}
+	// The API keeps its deny-all policy; no console CSP leaks onto JSON.
+	api, _ := doJSON(t, http.MethodGet, srv.URL+"/v1/concepts", nil, "")
+	if api.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/concepts = %d", api.StatusCode)
+	}
+	if policy := api.Header.Get("Content-Security-Policy"); strings.Contains(policy, "script-src") {
+		t.Fatalf("API answers must not admit scripts: %q", policy)
+	}
+}
+
 func TestConsoleDoesNotSwallowAPIRoutes(t *testing.T) {
 	srv := newTestServerWithOptions(t, withConsole(t, openOptions()))
 	defer srv.Close()

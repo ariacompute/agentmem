@@ -15,6 +15,17 @@ import (
 	"github.com/go-git/go-git/v5/storage"
 )
 
+// requireDACEnforcement skips a test that asserts on kernel permission checks.
+// Root holds CAP_DAC_OVERRIDE, so a directory chmod-ed to 0o500 stays writable
+// and the negative assertion cannot hold; a root CI container would otherwise
+// fail on correct code.
+func requireDACEnforcement(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses DAC checks (CAP_DAC_OVERRIDE)")
+	}
+}
+
 func TestNewGitRejectsRootBelowRegularFile(t *testing.T) {
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "blocker")
@@ -73,6 +84,7 @@ func TestCommitReportsFilesystemFailures(t *testing.T) {
 }
 
 func TestCommitReportsStagingFailure(t *testing.T) {
+	requireDACEnforcement(t)
 	g, err := NewGit(t.TempDir(), "a", "a@b")
 	if err != nil {
 		t.Fatal(err)
@@ -317,6 +329,7 @@ func setBranch(t *testing.T, g *GitRepository, hash plumbing.Hash) {
 }
 
 func TestCommitReportsUnwritableDirectory(t *testing.T) {
+	requireDACEnforcement(t)
 	g, err := NewGit(t.TempDir(), "a", "a@b")
 	if err != nil {
 		t.Fatal(err)

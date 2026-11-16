@@ -143,20 +143,11 @@ func cmdServe(args []string, out io.Writer) error {
 		return err
 	}
 	defer svc.Close()
-	// The console is compiled in, so a failure here means the binary was built
-	// without a usable embed: fail closed rather than start API-only.
-	console, err := newConsole()
+	opts, err := serverOptions(cfg, authenticator)
 	if err != nil {
 		return err
 	}
-	handler := handlers.NewHandler(svc, handlers.Options{
-		Auth:           authenticator,
-		LocalSubject:   cfg.ACL.DefaultOwner,
-		AllowedOrigins: cfg.Auth.AllowedOrigins,
-		RateRPS:        cfg.RateLimit.RPS,
-		RateBurst:      cfg.RateLimit.Burst,
-		Console:        console,
-	})
+	handler := handlers.NewHandler(svc, opts)
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr,
 		Handler:           handler,
@@ -166,11 +157,39 @@ func cmdServe(args []string, out io.Writer) error {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
-	fmt.Fprintf(out, "agentmem listening on %s (postgres=%s)\n", cfg.Server.Addr, postgresMode(cfg))
+	fmt.Fprintf(out, "agentmem listening on %s (postgres=%s, console=%s)\n",
+		cfg.Server.Addr, postgresMode(cfg), consoleMode(cfg))
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 	return serveLoop(srv, sigCh)
+}
+
+// serverOptions composes the handler posture for one serve invocation.
+//
+// AGENTMEM_CONSOLE_ENABLED=false is an explicit API-only deployment, not a
+// failure: Console must stay a nil interface, because assigning a typed-nil
+// *webui.Handler would satisfy `opts.Console != nil` and panic later. When the
+// console is enabled it is compiled in, so a construction failure means the
+// binary was built without a usable embed: fail closed rather than start
+// API-only.
+func serverOptions(cfg *config.Config, authenticator *auth.Authenticator) (handlers.Options, error) {
+	opts := handlers.Options{
+		Auth:           authenticator,
+		LocalSubject:   cfg.ACL.DefaultOwner,
+		AllowedOrigins: cfg.Auth.AllowedOrigins,
+		RateRPS:        cfg.RateLimit.RPS,
+		RateBurst:      cfg.RateLimit.Burst,
+	}
+	if !cfg.Console.Enabled {
+		return opts, nil
+	}
+	console, err := newConsole()
+	if err != nil {
+		return handlers.Options{}, err
+	}
+	opts.Console = console
+	return opts, nil
 }
 
 // serveLoop runs the server until it fails or a shutdown signal arrives.
@@ -221,6 +240,15 @@ func postgresMode(cfg *config.Config) string {
 		return "offline fake"
 	}
 	return "configured"
+}
+
+// consoleMode reports the console posture in the startup line, so an API-only
+// deployment is visible in the log without inspecting the configuration.
+func consoleMode(cfg *config.Config) string {
+	if !cfg.Console.Enabled {
+		return "disabled"
+	}
+	return "embedded"
 }
 
 func cmdPut(args []string, out io.Writer) error {

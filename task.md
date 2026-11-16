@@ -114,6 +114,26 @@
 - [x] 测试：`internal/compute/sidecar*_test.go`（HTTP/CLI、digest 不符、非标量单元格、行截断、命令校验）、`internal/bridges/outbound_test.go`、`internal/config/sidecar_test.go`；`scripts/e2e.sh` 新增 C29–C32（CLI sidecar、HTTP sidecar、失败不泄漏正文、未配置仍 fail-closed）。
 - [x] 文档：新增 `docs/compute-sidecar.md`；`requirements.md`、`releasenotes*`、`README*`、`docs/computations.md`、`docs/okf-conformance.md`、`docs/architecture.md`、`docs/e2e.md`、`.env.example`、`AGENTS.md` 同步。
 
+## 阶段 14 · 控制台内嵌与 try-it
+
+- [x] `internal/webui`：`//go:embed all:dist` 把 Vite 产物编入二进制；`serve` 在**同一 listener** 上应答 `GET /`（含 `/index.html`）与 `/assets/*`，首页 `no-cache`、带哈希资产 `immutable`，只服务已 clean 的路径（`..`、`//`、尾斜杠一律拒绝而非规范化），非 GET/HEAD 返回 405，未注册路径返回 JSON 404。
+- [x] 启动期 CSP：从内嵌 `index.html` 现算唯一内联主题脚本的 SHA-256 并组装 `Content-Security-Policy` 响应头，Go 头与页面永不失配；`web/index.html` 的 meta 降级为纯静态托管兜底。
+- [x] 控制台公开白名单：`handlers.Console.Public` 只放行 `/`、`/index.html`、`/assets/*`；`/v1/*` 仍需 Bearer 令牌，未注册 `/v1` 路径继续返回 JSON 404，控制台不会接管 API 前缀。
+- [x] try-it 工作台：`web/src/lib/api-try.js` + `web/src/views/try-it.js` 提供同源真实请求、可编辑查询参数与 JSON 正文、`Ctrl/Cmd+Enter` 发送、状态码 / 耗时 / 响应头 / 美化正文、写入二次确认；令牌只存 `sessionStorage` 且只走 `Authorization` 头，响应一律以 `textContent` + `createElement` 渲染（`web/src/` 零 `innerHTML` / `outerHTML` / `insertAdjacentHTML` / `document.write`）。
+- [x] 产物新鲜度门禁：产物目录随仓库入库，`go build` / `go test ./...` 无需 Bun；CI 用 `git diff --exit-code -- internal/webui/dist` 阻止陈旧产物，本地以 `make web-verify` 复现。
+- [x] 黑盒验收：`scripts/e2e.sh` 新增 `H31`（二进制托管首页 200）、`H36`（哈希资产长缓存）、`H37` / `H38`（未注册 API 与静态路径仍 JSON 404）、`H39`（写方法 405）、`S21`（鉴权开启时控制台仍公开）与 `W06`（文档页提供 try-it）。
+- [x] 文档：`AGENTS.md`、`README.md`、`README_cn.md`、`docs/security.md`、`docs/architecture.md`、`docs/e2e.md` 同步内嵌控制台、公开白名单与 try-it 边界。
+
+## 阶段 15 · 规格一致性与持续覆盖补强
+
+- [x] 规格同步：`requirements.md` 升为 v0.2.0；§7 补控制台静态路由，§8 首条改为二进制内嵌托管并新增控制台开关与 try-it 条目，§10 删除「非 `postgres` 计算执行器」与「交互式 Try it」两条已被实现打破的非目标，并把「完整管理台」收窄为写入 / RBAC 管理与多租户运维面板。`task.md` 补记阶段 14。
+- [x] 控制台开关：新增 `AGENTMEM_CONSOLE_ENABLED`（默认 `true`，进闭白名单与 `.env.example`）；`cmdServe` 仅在该值为真时装配 `webui.New`，关闭时 `handlers.Options.Console` 保持真正的 nil（避免 typed-nil），`GET /`、`/assets/*` 与未知静态路径统一返回 JSON 404，`/healthz` 与 9 条 API 路由不变。
+- [x] 真实 Postgres 持续覆盖：`postgres-integration` 由纯 `workflow_dispatch` 改为每日 `schedule` 定时触发并保留手动派发，让 GORM + 迁移 + `computation_runs` + 向量 `Scanner/Valuer` 这条唯一无持续验证的生产存储路径每天被真实 pgvector 验证一次。
+- [x] root 环境测试稳定：`internal/okf`、`internal/vcs`、`internal/store`、`internal/meta`、`internal/adapter` 五个包内依赖 `os.Chmod` 制造拒绝场景的断言在 `os.Geteuid() == 0` 时跳过（root 持有 `CAP_DAC_OVERRIDE`，权限检查被绕过），非 root 覆盖不变。
+- [x] sidecar 示例：`examples/compute-sidecars/sidecar.py` 单文件参考实现，`stdio` 对应 `bridge: cli`、`http` 对应 `bridge: http`，按 `runtime` 分派 `bigquery` / `dbt` / `looker` / `python`，`AGENTMEM_SIDECAR_OFFLINE=1` 返回确定性表，任何分支都只回 `columns` / `rows` / `body_digest`；`examples/compute-sidecars/README.md` 说明配置、凭据最小权限与上线检查清单。
+- [x] sidecar 契约测试：`internal/compute/sidecar_contract_test.go` 表驱动覆盖四个出向 runtime 的 `runtime` / `body_kind` / 参数透传、digest 正确与不符、未知字段拒绝、`postgres` 不得声明为 sidecar；`scripts/e2e.sh` 新增 `C33`–`C35`（bigquery / dbt / looker 经示例 sidecar 真实执行）与 `H40`（控制台关闭后的对外表现）。
+- [x] 文档同步：`.env.example`、`AGENTS.md`、`docs/security.md`、`docs/compute-sidecar.md`、`docs/e2e.md`、`README.md`、`README_cn.md` 记录开关、定时门禁与 sidecar 示例；`releasenotes*` 属历史发布记录，不改写。
+
 ## 验收
 
 ```bash
@@ -130,4 +150,6 @@ cd web && bun test
 cd web && bun run build
 ```
 
-验收条件：以上命令全部成功；不启动 Postgres、不访问网络、不需要密钥；四个插件在离线 mock 下可装配、可写、可查、可启停；`postgres` 计算链路离线可执行且 attestation 失败拒绝展示，四个出向 runtime 经 sidecar 可执行且 `body_digest` 不符时拒绝展示；鉴权矩阵、越权、伪造主体、错误脱敏与限流均有离线用例；系统/镜像 CA bundle 不含 eMudhra 弱证书指纹；13 语言文案完整、端点表与 `http.go` 一致（含 401/403/429）、CSP 哈希自洽、单色守卫通过，web 仍可用任意静态服务器直接托管。
+验收条件：以上命令全部成功；不启动 Postgres、不访问网络、不需要密钥；四个插件在离线 mock 下可装配、可写、可查、可启停；`postgres` 计算链路离线可执行且 attestation 失败拒绝展示，四个出向 runtime 经 sidecar 可执行且 `body_digest` 不符时拒绝展示；鉴权矩阵、越权、伪造主体、错误脱敏与限流均有离线用例；系统/镜像 CA bundle 不含 eMudhra 弱证书指纹；13 语言文案完整、端点表与 `http.go` 一致（含 401/403/429）、CSP 哈希自洽、单色守卫通过，web 仍可用任意静态服务器直接托管；`AGENTMEM_CONSOLE_ENABLED=false` 时控制台消失而 API 与 `/healthz` 不变。
+
+真实 Postgres 不在离线验收线内：`postgres-integration` 作业每日定时在临时 `pgvector/pgvector:pg16` service container 上跑 `TestPostgresIntegration`（也可手动 `workflow_dispatch` 触发），覆盖 GORM、版本化迁移、`computation_runs` 与向量 `Scanner/Valuer` 这些 fake 无法证明的路径。

@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Daily real-database regression. The offline suite runs entirely on fakes, so
+  # the production storage layer (GORM, versioned migrations, computation_runs,
+  # the pgvector Scanner/Valuer) would otherwise only be exercised by hand.
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 # Least privilege by default; individual jobs may narrow further.
@@ -80,10 +85,12 @@ jobs:
         working-directory: web
         run: bun run audit
 
-  # Optional: only runs on manual dispatch; the default test suite never needs
-  # a database. Set AGENTMEM_TEST_PG_DSN to exercise the real GORM backend.
+  # Real Postgres coverage: daily schedule plus manual dispatch. It never gates
+  # push/pull_request (those stay fully offline and service-free), but the
+  # production storage path is now verified on real pgvector within 24 hours of
+  # every change. The DSN below points at the ephemeral service container only.
   postgres-integration:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       contents: read

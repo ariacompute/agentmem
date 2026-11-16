@@ -157,6 +157,13 @@ func NewHandler(svc *service.KnowledgeService, opts Options) http.Handler {
 		// "/assets/*" the hashed bundles. The handler answers its own 404/405
 		// in JSON for anything it does not own.
 		mux.Handle("/", opts.Console)
+	} else {
+		// AGENTMEM_CONSOLE_ENABLED=false: an API-only deployment still answers
+		// JSON, never ServeMux's text/plain 404. Authentication runs first, so
+		// with auth enabled this path already answered 401 above.
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, http.StatusNotFound, "not found")
+		})
 	}
 	return newSecurity(opts).wrap(mux)
 }

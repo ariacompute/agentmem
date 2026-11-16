@@ -271,6 +271,39 @@ func TestServeFailsClosedOnStartupErrors(t *testing.T) {
 	}
 }
 
+// TestServerOptionsHonourTheConsoleSwitch covers the API-only posture: with the
+// switch off the console constructor must not run at all and the Options
+// interface must be a real nil (a typed-nil *webui.Handler would pass an
+// `opts.Console != nil` check and panic on the first request).
+func TestServerOptionsHonourTheConsoleSwitch(t *testing.T) {
+	previous := newConsole
+	calls := 0
+	newConsole = func() (*webui.Handler, error) {
+		calls++
+		return nil, errors.New("the console must not be constructed")
+	}
+	t.Cleanup(func() { newConsole = previous })
+
+	cfg := config.Default()
+	cfg.Console.Enabled = false
+	opts, err := serverOptions(cfg, nil)
+	if err != nil {
+		t.Fatalf("an API-only deployment must start cleanly: %v", err)
+	}
+	if opts.Console != nil {
+		t.Fatalf("disabled console leaked into Options: %#v", opts.Console)
+	}
+	if calls != 0 {
+		t.Fatalf("newConsole called %d times with the switch off", calls)
+	}
+
+	// Enabled still fails closed when the embed is unusable.
+	cfg.Console.Enabled = true
+	if _, err := serverOptions(cfg, nil); err == nil {
+		t.Fatal("a broken embed must abort startup when the console is enabled")
+	}
+}
+
 func TestBuildAuthenticatorRejectsUnknownScope(t *testing.T) {
 	_, err := buildAuthenticator(&config.Config{Auth: config.AuthConfig{
 		Tokens: []config.AuthTokenSpec{{

@@ -82,4 +82,4 @@ data/bundle/
 
 ## 离线路径
 
-`AGENTMEM_PG_DSN` 为空时注入 `meta.FakeStore`（同时实现 `MetaStore`、`VectorStore` 与 `SQLExecutor`），`go test ./...` 无需数据库。CLI 每条命令是独立进程，因此 `service.Assemble` 使用 `NewFileFakeStore` 把 fake 的状态序列化到 `data/meta.fake.json`（原子写，进程退出时保存），保证 ACL、投影状态、决策审计与计算 verdict 跨进程可见。该快照位于 OKF bundle 的上级目录，不会被 `Bundle.List()` 扫描，也不会被 `vcs.Commit` 提交。设置 `AGENTMEM_TEST_PG_DSN` 可运行 `TestPostgresIntegration` 验证真实 GORM 后端。
+`AGENTMEM_PG_DSN` 为空时注入 `meta.FakeStore`（同时实现 `MetaStore`、`VectorStore` 与 `SQLExecutor`），`go test ./...` 无需数据库。CLI 每条命令是独立进程，因此 `service.Assemble` 使用 `NewFileFakeStore` 把 fake 的状态序列化到 `data/meta.fake.json`（原子写，进程退出时保存），保证 ACL、投影状态、决策审计与计算 verdict 跨进程可见。该快照位于 OKF bundle 的上级目录，不会被 `Bundle.List()` 扫描，也不会被 `vcs.Commit` 提交。设置 `AGENTMEM_TEST_PG_DSN` 可运行 `TestPostgresIntegration` 验证真实 GORM 后端；CI 的 `postgres-integration` 作业每日定时（也可手动派发）在临时 `pgvector/pgvector:pg16` service container 上跑它，因此「fake 无法证明」的迁移、`computation_runs` 与向量 `Scanner/Valuer` 每天都在真实数据库上被验证一次。

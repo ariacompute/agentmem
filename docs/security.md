@@ -94,6 +94,7 @@ AGENTMEM_AUTH_TOKENS='[
 ### 内嵌控制台
 
 - `GET /` 与 `/assets/*` 由 `internal/webui` 从二进制内嵌的 Vite 产物提供，与 `GET /healthz` 同属匿名可读白名单（`handlers.Console.Public` 是封闭清单）。其余路径仍先鉴权：未知路径在开启鉴权时先返回 `401`，通过鉴权后才落到 JSON `404`。
+- 控制台可用 `AGENTMEM_CONSOLE_ENABLED=false` 关闭（默认 `true`）。关闭后 `internal/cli` 不装配控制台，`GET /`、`/assets/*` 与未知静态路径统一返回 JSON `404`，9 条 API 路由、权限矩阵、限流与 `/healthz` 全部不变；这是纯 API 部署的推荐姿态，也是对"公开文档面"这一暴露面的显式开关。控制台不在 `routePermissions` 内：它不是需要权限映射的路由，公开与否只由 `Console.Public` 与这个开关决定。
 - 页面级 CSP 在 `serve` 启动时用内嵌 `index.html` 里唯一的内联脚本现算 SHA-256（`webui.Handler.CSP`），因此响应头不会与页面漂移；`web/index.html` 里的 meta 保留为纯静态托管时的兜底。两条 CSP 同时下发时按交集生效，所以"按路径选择策略"是页面能渲染的前提。
 - 缓存策略是唯一的头部例外：`index.html` 为 `no-cache`，带内容哈希的 `/assets/*` 为 `public, max-age=31536000, immutable`；所有 JSON 响应仍是 `no-store`。
 - 静态资源同样计入单进程限流（一次首屏加载数个请求），因此把 `AGENTMEM_RATE_RPS` 调得过低会连带拖慢页面。

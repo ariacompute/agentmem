@@ -47,6 +47,32 @@ func TestLoadMissingFileUsesDefaults(t *testing.T) {
 	}
 }
 
+// TestConsoleSwitch pins the presentation switch: it is on by default (an
+// existing deployment keeps serving the page), it is part of the closed
+// whitelist, and an explicit false — from the file or the process environment —
+// disables it without touching any other setting.
+func TestConsoleSwitch(t *testing.T) {
+	if !Default().Console.Enabled {
+		t.Fatal("the console must default to enabled")
+	}
+	p := writeEnv(t, "AGENTMEM_CONSOLE_ENABLED=false\n")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("AGENTMEM_CONSOLE_ENABLED must be a known key: %v", err)
+	}
+	if cfg.Console.Enabled {
+		t.Fatal("AGENTMEM_CONSOLE_ENABLED=false must disable the console")
+	}
+	t.Setenv("AGENTMEM_CONSOLE_ENABLED", "true")
+	cfg, err = Load(p)
+	if err != nil {
+		t.Fatalf("process env override: %v", err)
+	}
+	if !cfg.Console.Enabled {
+		t.Fatal("process env must win over the file")
+	}
+}
+
 func TestLoadEnvFileValues(t *testing.T) {
 	p := writeEnv(t, strings.Join([]string{
 		"# comment",
@@ -178,6 +204,7 @@ func TestExampleEnvFileIsValid(t *testing.T) {
 	for _, required := range []string{
 		"AGENTMEM_PG_DSN", "AGENTMEM_MODE", "AGENTMEM_ADAPTERS",
 		"AGENTMEM_COMPUTE_TIMEOUT_MS", "AGENTMEM_SYSTEMONE_ENDPOINT",
+		"AGENTMEM_CONSOLE_ENABLED",
 	} {
 		if !found[required] {
 			t.Fatalf("missing supported key %q", required)

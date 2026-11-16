@@ -136,7 +136,11 @@ class Handler(BaseHTTPRequestHandler):
 
 HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
 PY
-chmod +x "$SIDECAR_DIR/agentmem-py" "$SIDECAR_DIR/agentmem-fail"
+# The shipped reference sidecar covers bigquery / dbt / looker without a
+# network: SIDECAR_OFFLINE=1 makes it return deterministic per-runtime tables.
+# It is copied instead of symlinked so the executable bit is explicit.
+cp "$REPO/examples/compute-sidecars/sidecar.py" "$SIDECAR_DIR/agentmem-example"
+chmod +x "$SIDECAR_DIR/agentmem-py" "$SIDECAR_DIR/agentmem-fail" "$SIDECAR_DIR/agentmem-example"
 SIDECAR_PID=""
 
 # --- Reporting framework ----------------------------------------------------
@@ -390,13 +394,13 @@ trap 'exit 143' TERM
 PORTS="$(python3 -c '
 import socket
 socks = []
-for _ in range(4):
+for _ in range(5):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
     socks.append(s)
 print(" ".join(str(s.getsockname()[1]) for s in socks))
 ')" || { echo "error: cannot allocate local ports" >&2; exit 2; }
-read -r PORT_BASE PORT_AUTH PORT_RATE PORT_SIDE <<< "$PORTS"
+read -r PORT_BASE PORT_AUTH PORT_RATE PORT_SIDE PORT_CONSOLE <<< "$PORTS"
 
 BASE_ENV="$WORK/base.env"
 AUTH_ENV="$WORK/auth.env"
@@ -474,9 +478,22 @@ make_env "$SIDECAR_HTTP_ENV" "$PORT_BASE" 100000 1000000 \
   "AGENTMEM_COMPUTE_SIDECARS='[{\"runtime\":\"python\",\"bridge\":\"http\",\"endpoint\":\"http://127.0.0.1:$PORT_SIDE\",\"timeout_ms\":5000}]'"
 make_env "$SIDECAR_FAIL_ENV" "$PORT_BASE" 100000 1000000 \
   "AGENTMEM_COMPUTE_SIDECARS='[{\"runtime\":\"python\",\"bridge\":\"cli\",\"command\":\"agentmem-fail\",\"timeout_ms\":5000}]'"
+# The reference sidecar (examples/compute-sidecars) serves the three runtimes
+# that used to be covered only by the fail-closed path.
+SIDECAR_MULTI_ENV="$WORK/sidecar-multi.env"
+make_env "$SIDECAR_MULTI_ENV" "$PORT_BASE" 100000 1000000 \
+  "AGENTMEM_COMPUTE_SIDECARS='[{\"runtime\":\"bigquery\",\"bridge\":\"cli\",\"command\":\"agentmem-example\",\"timeout_ms\":10000},{\"runtime\":\"dbt\",\"bridge\":\"cli\",\"command\":\"agentmem-example\",\"timeout_ms\":10000},{\"runtime\":\"looker\",\"bridge\":\"cli\",\"command\":\"agentmem-example\",\"timeout_ms\":10000}]'"
+
+# API-only deployment: the embedded console is switched off at configuration
+# time, so GET / and /assets/* must answer JSON 404 while the API keeps working.
+CONSOLE_ENV="$WORK/console-off.env"
+make_env "$CONSOLE_ENV" "$PORT_CONSOLE" 100000 1000000 'AGENTMEM_CONSOLE_ENABLED=false'
 
 ENVARG=(--env "$BASE_ENV")
 PY_COMPUTE_ID='computations/revenue-python'
+BQ_COMPUTE_ID='computations/revenue-ytd'
+DBT_COMPUTE_ID='computations/revenue-dbt'
+LOOKER_COMPUTE_ID='computations/revenue-looker'
 HTTP_DOC='e2e/http-doc'
 CLI_DOC='e2e/cli-doc'
 COMPUTE_ID='computations/revenue-postgres'
@@ -886,6 +903,43 @@ a_rc 1
 a_cli_err 'has a contract but no executor'
 end_case
 
+# The reference sidecar from examples/compute-sidecars runs in its offline mode,
+# so these three cases prove the bigquery / dbt / looker paths end to end (body
+# kind, parameter pass-through, digest echo, attestation) without a warehouse.
+run_example_sidecar() { # CONCEPT_ID
+  SIDECAR_OFFLINE=1 PATH="$SIDECAR_DIR:$PATH" "$BIN" compute --env "$SIDECAR_MULTI_ENV" \
+    --id "$1" --subject alice --param year=2026 >"$CLI_OUT" 2>"$CLI_ERR"
+  CLI_RC=$?
+}
+
+begin_case C33 "compute runs the bigquery runtime through the reference sidecar"
+run_example_sidecar "$BQ_COMPUTE_ID"
+a_rc 0
+a_cli_json_eq runtime bigquery
+a_cli_json_eq display_allowed true
+a_cli_json_eq display_value 1250
+a_cli_json_eq verdict.passed true
+a_cli_json_absent error_class
+end_case
+
+begin_case C34 "compute runs the dbt runtime through the reference sidecar"
+run_example_sidecar "$DBT_COMPUTE_ID"
+a_rc 0
+a_cli_json_eq runtime dbt
+a_cli_json_eq display_allowed true
+a_cli_json_eq display_value 1310
+a_cli_json_eq verdict.fidelity true
+end_case
+
+begin_case C35 "compute runs the looker runtime through the reference sidecar"
+run_example_sidecar "$LOOKER_COMPUTE_ID"
+a_rc 0
+a_cli_json_eq runtime looker
+a_cli_json_eq display_allowed true
+a_cli_json_eq display_value 1420
+a_cli_json_eq verdict.passed true
+end_case
+
 begin_case C27 "eval does not accept --env (the only command that reads no config)"
 run_cli eval --env "$BASE_ENV"
 a_rc 1
@@ -1127,6 +1181,30 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   end_case
 else
   fail_case H00 "HTTP case group" "service failed to start: $(head -c 200 "$WORK/serve-base.log" | tr '\n' ' ')"
+fi
+stop_server
+
+# ===========================================================================
+section "3b. API-only deployment (AGENTMEM_CONSOLE_ENABLED=false)"
+# ===========================================================================
+if start_server console-off "$CONSOLE_ENV" "$PORT_CONSOLE"; then
+  begin_case H40 "console disabled serves JSON 404 while the API keeps working"
+  has "$(head -c 500 "$WORK/serve-console-off.log")" 'console=disabled' 'startup log'
+  http_req GET / ''
+  a_status 404
+  a_json_eq error 'not found'
+  a_header Content-Type application/json
+  http_req GET /assets/missing.js ''
+  a_status 404
+  a_json_eq error 'not found'
+  http_req GET /healthz ''
+  a_status 200
+  a_json_eq status ok
+  http_req GET /v1/concepts ''
+  a_status 200
+  end_case
+else
+  fail_case H40 "API-only profile" "service failed to start: $(head -c 200 "$WORK/serve-console-off.log" | tr '\n' ' ')"
 fi
 stop_server
 

@@ -151,6 +151,7 @@ Copy `.env.example` to `.env` and adjust it. `config.Load` reads that file (defa
 | `AGENTMEM_ENV_FILE` | `.env` | Path to the env file |
 | `AGENTMEM_ADDR` | `127.0.0.1:8080` | HTTP listen address |
 | `AGENTMEM_MODE` | `dev` | `dev` or `production` (production requires a DSN) |
+| `AGENTMEM_CONSOLE_ENABLED` | `true` | Serve the embedded console at `GET /` and `/assets/*`; `false` makes those paths JSON `404` for a pure API deployment |
 | `AGENTMEM_GIT_ROOT` | `./data/bundle` | Root of the OKF bundle |
 | `AGENTMEM_GIT_AUTHOR_NAME` | `agentmem` | Git commit author name |
 | `AGENTMEM_GIT_AUTHOR_EMAIL` | `agentmem@localhost` | Git commit author email |
@@ -361,7 +362,7 @@ Each plugin owns a validated `plugin.yaml` with a declarative `sdk_boundary` (si
 
 ## 🧮 Attested Computations
 
-`POST /v1/computations` and `agentmem compute` load a sanctioned computation from OKF+Git, bind only declared parameter values, execute it through the `postgres` runtime, and return a value **only after** a deterministic Go attester verifies provenance and display-value fidelity. `bigquery`, `dbt`, `python` and `looker` execute through an outbound sidecar declared in `AGENTMEM_COMPUTE_SIDECARS` (`http` endpoint or bare `cli` command); with no sidecar they stay fail-closed and return `Unsupported`. A sidecar receipt must echo the SHA-256 of the body it ran, and job id, result and display value are always recomputed in Go. Protocol: [docs/compute-sidecar.md](docs/compute-sidecar.md). Every outcome (pass, rejection, error) is audited in `computation_runs` (offline: `data/meta.fake.json`).
+`POST /v1/computations` and `agentmem compute` load a sanctioned computation from OKF+Git, bind only declared parameter values, execute it through the `postgres` runtime, and return a value **only after** a deterministic Go attester verifies provenance and display-value fidelity. `bigquery`, `dbt`, `python` and `looker` execute through an outbound sidecar declared in `AGENTMEM_COMPUTE_SIDECARS` (`http` endpoint or bare `cli` command); with no sidecar they stay fail-closed and return `Unsupported`. A sidecar receipt must echo the SHA-256 of the body it ran, and job id, result and display value are always recomputed in Go. Protocol: [docs/compute-sidecar.md](docs/compute-sidecar.md); a runnable reference implementation with an offline mode lives in [examples/compute-sidecars](./examples/compute-sidecars). Every outcome (pass, rejection, error) is audited in `computation_runs` (offline: `data/meta.fake.json`).
 
 ```bash
 go run ./cmd/agentmem compute --id computations/revenue-postgres --param year=2026
@@ -395,6 +396,7 @@ Reports Recall@k, Precision@k, nDCG@k, MRR, MAP and HitRate@k as pure functions 
 `web/` is a dependency-free ES module console with two views: **Status** (health + recent routing decisions) and **API docs** (all 9 HTTP method + path combinations, request/response samples, conventions and error codes).
 
 - **Served by the binary.** Vite bundles `web/` straight into `internal/webui/dist`, `//go:embed` compiles that directory into `agentmem`, and `serve` answers `GET /` with the page and `/assets/*` with the hashed bundles. No reverse-proxy document root, no second process, no runtime JS dependency.
+- **Optional.** `AGENTMEM_CONSOLE_ENABLED=false` disables it at configuration time: `GET /` and `/assets/*` answer JSON `404`, and the nine API routes, the permission matrix, rate limiting and `GET /healthz` are unchanged. Use it when the service only ever needs an API surface.
 - **Try it in place.** Every endpoint row expands into a workbench: editable query parameters and JSON body, one click to send a real same-origin request, then status code, duration, response headers and a pretty-printed body. Write routes (`POST /v1/knowledge`, `POST /v1/migrate`, `POST /v1/computations`) require an explicit confirmation first.
 - **Credentials stay in the tab.** The bearer token is kept in `sessionStorage` only, sent as an `Authorization` header, never appended to a URL, a saved draft or a log line; closing the tab drops it.
 - 13 languages, matching agenthub: `en`, `zh`, `zh-TW`, `es`, `fr`, `de`, `it`, `ru`, `ja`, `ko`, `pt`, `ar`, `hi`. Resolution order is `?lang=` > local storage > browser language > English; English is the fallback for a missing key. Arabic flips the layout to RTL.
@@ -453,7 +455,7 @@ make e2e E2E_ARGS='--no-gates'         # black-box cases only
 ./scripts/e2e.sh --filter '^H' --keep  # HTTP cases only; keep the temp workspace
 ```
 
-What it covers: all 10 CLI commands and all 9 HTTP routes end-to-end, plus the auth/scope matrix, ACL, rate limiting, config fail-closed rules, Web console static checks and cross-process state. It finishes with the existing `go vet` / `go test` / `make validate` / `make check-trust-store` gates.
+What it covers: all 10 CLI commands and all 9 HTTP routes end-to-end, plus the auth/scope matrix, ACL, rate limiting, config fail-closed rules, Web console static checks, the bigquery/dbt/looker sidecar runtimes through the reference implementation, the API-only posture with the console switched off, and cross-process state. It finishes with the existing `go vet` / `go test` / `make validate` / `make check-trust-store` gates.
 
 Everything runs offline (`GOPROXY=off`, file-fake store, no Postgres/network/credentials). A missing optional `bun` or `openssl` is reported as `SKIP`, never silently passed. See [docs/e2e.md](./docs/e2e.md) for the full case matrix, exit codes and troubleshooting.
 

@@ -151,6 +151,7 @@ go run ./cmd/agentmem decisions --limit 10
 | `AGENTMEM_ENV_FILE` | `.env` | env 文件路径 |
 | `AGENTMEM_ADDR` | `127.0.0.1:8080` | HTTP 监听地址 |
 | `AGENTMEM_MODE` | `dev` | `dev` 或 `production`（production 必须有 DSN） |
+| `AGENTMEM_CONSOLE_ENABLED` | `true` | 是否在同一端口的 `GET /` 与 `/assets/*` 托管内嵌控制台；设为 `false` 后这些路径返回 JSON `404`，即纯 API 部署 |
 | `AGENTMEM_GIT_ROOT` | `./data/bundle` | OKF bundle 根目录 |
 | `AGENTMEM_GIT_AUTHOR_NAME` | `agentmem` | Git 提交作者名 |
 | `AGENTMEM_GIT_AUTHOR_EMAIL` | `agentmem@localhost` | Git 提交作者邮箱 |
@@ -361,7 +362,7 @@ AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 位十六进制>","subject":"console
 
 ## 🧮 受批准计算
 
-`POST /v1/computations` 与 `agentmem compute` 从 OKF+Git 加载受批准计算，只绑定声明参数值，经 `postgres` runtime 执行；只有确定性 Go attester 校验 provenance 与展示值 fidelity 通过后才返回数值。`bigquery` / `dbt` / `python` / `looker` 通过 `AGENTMEM_COMPUTE_SIDECARS` 声明的出向 sidecar 执行（`http` 端点或 `cli` 裸命令）；未配置 sidecar 时保持 fail-closed 并返回 `Unsupported`。sidecar 回执必须回传所执行正文的 SHA-256，job id、result 与 display value 始终由 Go 侧重算；协议见 [docs/compute-sidecar.md](docs/compute-sidecar.md)。成功、拒绝与错误都写入 `computation_runs` 审计（离线为 `data/meta.fake.json`）。
+`POST /v1/computations` 与 `agentmem compute` 从 OKF+Git 加载受批准计算，只绑定声明参数值，经 `postgres` runtime 执行；只有确定性 Go attester 校验 provenance 与展示值 fidelity 通过后才返回数值。`bigquery` / `dbt` / `python` / `looker` 通过 `AGENTMEM_COMPUTE_SIDECARS` 声明的出向 sidecar 执行（`http` 端点或 `cli` 裸命令）；未配置 sidecar 时保持 fail-closed 并返回 `Unsupported`。sidecar 回执必须回传所执行正文的 SHA-256，job id、result 与 display value 始终由 Go 侧重算；协议见 [docs/compute-sidecar.md](docs/compute-sidecar.md)，可运行的参考实现（含离线模式）在 [examples/compute-sidecars](./examples/compute-sidecars)。成功、拒绝与错误都写入 `computation_runs` 审计（离线为 `data/meta.fake.json`）。
 
 ```bash
 go run ./cmd/agentmem compute --id computations/revenue-postgres --param year=2026
@@ -395,6 +396,7 @@ go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
 `web/` 是零运行时依赖的原生 ES module 控制台，包含两个视图：**状态**（健康状态 + 最近路由决策）与 **API 文档**（全部 9 个 HTTP method + path 组合、请求/响应样例、通用约定与错误码）。
 
 - **由二进制托管**：Vite 直接打包输出到 `internal/webui/dist`，`//go:embed` 把该目录编进 `agentmem`，`serve` 用 `GET /` 返回页面、`/assets/*` 返回带哈希的产物。不再需要反向代理的 document root 或第二个进程，也不依赖运行时 JS。
+- **可关闭**：`AGENTMEM_CONSOLE_ENABLED=false` 在配置层关掉控制台，`GET /` 与 `/assets/*` 返回 JSON `404`，9 条 API 路由、权限矩阵、限流与 `GET /healthz` 均不变。只提供 API 的部署建议显式关闭，不必公开文档面。
 - **文档页可直接试调用**：展开任意端点即出现内联工作区——可编辑查询参数与 JSON 请求体，一键发出真实的同源请求，随后展示状态码、耗时、响应头子集与美化后的响应体。写操作（`POST /v1/knowledge`、`POST /v1/migrate`、`POST /v1/computations`）必须先显式确认。
 - **凭据只留在当前标签页**：Bearer 令牌仅存于 `sessionStorage`，只作为 `Authorization` 头发送，绝不进入 URL、草稿或日志；关闭标签页即失效。
 - 13 种语言，与 agenthub 一致：`en`、`zh`、`zh-TW`、`es`、`fr`、`de`、`it`、`ru`、`ja`、`ko`、`pt`、`ar`、`hi`。优先级为 `?lang=` > 本地存储 > 浏览器语言 > 英文；缺失键回退英文，阿拉伯语自动切换 RTL。
@@ -453,7 +455,7 @@ make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
 ./scripts/e2e.sh --filter '^H' --keep  # 只报告 HTTP 组；保留临时目录
 ```
 
-覆盖范围：全部 10 个 CLI 命令与 9 条 HTTP 路由的端到端流程，外加 scope 权限矩阵、ACL、限流、配置故障关闭、Web 控制台静态检查与跨进程状态，最后串联 `go vet` / `go test` / `make validate` / `make check-trust-store` 等既有门禁。
+覆盖范围：全部 10 个 CLI 命令与 9 条 HTTP 路由的端到端流程，外加 scope 权限矩阵、ACL、限流、配置故障关闭、Web 控制台静态检查、`bigquery` / `dbt` / `looker` 三个 runtime 经参考 sidecar 的真实执行、关闭控制台的纯 API 姿态，以及跨进程状态；最后串联 `go vet` / `go test` / `make validate` / `make check-trust-store` 等既有门禁。
 
 全程离线（`GOPROXY=off`、文件版 fake 存储、无 Postgres / 网络 / 凭据）；可选工具 `bun`、`openssl` 缺失时明确记为 `SKIP`，绝不静默通过。完整用例矩阵、退出码与排错方式见 [docs/e2e.md](./docs/e2e.md)。
 
