@@ -85,6 +85,8 @@ export const API_KEYS = [
   'epGraphRetrieve',
   'graphTitle',
   'graphBody',
+  'epMCPStream',
+  'epMCPClose',
 ]
 
 const rows = {
@@ -163,6 +165,8 @@ const rows = {
     'Reciprocal-rank fusion of the keyword and graph-neighbourhood rankers, listing the contributing sources per hit. Read-only.',
     'Graph, MCP and capability gates',
     'Graph routes are gated twice: by scope and by AGENTMEM_GRAPH_ENABLED. Turning the graph off answers JSON 404 for /v1/graph*, /v1/graph and /mcp while every other route keeps working. Writes always land in OKF+Git first; the adjacency index is a projection and can be rebuilt at any time.',
+    'Open the MCP event stream for a live session',
+    'Close an MCP session and its event stream',
   ],
   zh: [
     'API 文档',
@@ -239,6 +243,8 @@ const rows = {
     '关键词与图邻域两路排名的 RRF 融合；每条命中标注来源（text / graph），只读。',
     '图谱、MCP 与能力开关',
     '图路由受两道开关约束：权限 scope 与 AGENTMEM_GRAPH_ENABLED。关闭图能力后 /v1/graph*、/v1/graph 与 /mcp 统一返回 JSON 404，其余路由不受影响；写入总是先落 OKF+Git，邻接索引只是投影，可随时重建。',
+    '为活动会话打开 MCP 事件流',
+    '关闭 MCP 会话及其事件流',
   ],
   'zh-TW': [
     'API 文件',
@@ -315,6 +321,8 @@ const rows = {
     '關鍵字與圖鄰域兩路排名的 RRF 融合；每筆命中標註來源（text / graph），唯讀。',
     '圖譜、MCP 與能力開關',
     '圖路由受兩道開關約束：權限 scope 與 AGENTMEM_GRAPH_ENABLED。關閉圖能力後 /v1/graph*、/v1/graph 與 /mcp 一律回傳 JSON 404，其餘路由不受影響；寫入一律先落 OKF+Git，鄰接索引僅是投影，可隨時重建。',
+    '為活動工作階段開啟 MCP 事件流',
+    '關閉 MCP 工作階段及其事件流',
   ],
   es: [
     'Documentación de la API',
@@ -391,6 +399,8 @@ const rows = {
     'Fusión RRF de los rankings por palabra clave y por vecindad del grafo, con las fuentes de cada acierto. Solo lectura.',
     'Grafo, MCP y controles de capacidad',
     'Las rutas de grafo tienen dos puertas: el scope y AGENTMEM_GRAPH_ENABLED. Al desactivar el grafo, /v1/graph*, /v1/graph y /mcp responden JSON 404 y el resto sigue igual. Las escrituras van siempre primero a OKF+Git; el índice de adyacencia es una proyección reconstruible.',
+    'Abre el flujo de eventos MCP de una sesión activa',
+    'Cierra una sesión MCP y su flujo de eventos',
   ],
   fr: [
     'Documentation de l’API',
@@ -467,6 +477,8 @@ const rows = {
     'Fusion RRF des classements par mot-clé et par voisinage du graphe, avec les sources de chaque résultat. Lecture seule.',
     'Graphe, MCP et interrupteurs de capacité',
     'Les routes de graphe ont deux portes : le scope et AGENTMEM_GRAPH_ENABLED. Graphe désactivé, /v1/graph*, /v1/graph et /mcp répondent JSON 404 sans toucher aux autres routes. Les écritures vont toujours d\'abord dans OKF+Git ; l\'index d\'adjacence est une projection reconstructible.',
+    'Ouvre le flux d’événements MCP d’une session active',
+    'Ferme une session MCP et son flux d’événements',
   ],
   de: [
     'API-Dokumentation',
@@ -543,6 +555,8 @@ const rows = {
     'RRF-Fusion der Stichwort- und Graph-Nachbarschafts-Ranglisten, mit den beteiligten Quellen je Treffer. Nur lesend.',
     'Graph, MCP und Funktionsschalter',
     'Graph-Routen haben zwei Tore: den Scope und AGENTMEM_GRAPH_ENABLED. Ist der Graph aus, antworten /v1/graph*, /v1/graph und /mcp mit JSON 404, alle anderen Routen bleiben unverändert. Schreibvorgänge gehen immer zuerst nach OKF+Git; der Adjazenzindex ist eine jederzeit neu baubare Projektion.',
+    'Öffnet den MCP-Ereignisstrom einer aktiven Sitzung',
+    'Beendet eine MCP-Sitzung und ihren Ereignisstrom',
   ],
   it: [
     'Documentazione API',
@@ -619,6 +633,8 @@ const rows = {
     'Fusione RRF dei ranking per parola chiave e per vicinato del grafo, con le fonti di ogni risultato. Sola lettura.',
     'Grafo, MCP e interruttori di capacità',
     'Le rotte del grafo hanno due porte: lo scope e AGENTMEM_GRAPH_ENABLED. Con il grafo spento, /v1/graph*, /v1/graph e /mcp rispondono JSON 404 e le altre rotte restano invariate. Le scritture finiscono sempre prima in OKF+Git; l’indice di adiacenza è una proiezione ricostruibile.',
+    'Apre il flusso di eventi MCP di una sessione attiva',
+    'Chiude una sessione MCP e il suo flusso di eventi',
   ],
   ru: [
     'Документация API',
@@ -695,6 +711,8 @@ const rows = {
     'RRF-слияние ранжирования по словам и по окрестности графа; у каждого результата указаны источники. Только чтение.',
     'Граф, MCP и переключатели возможностей',
     'У маршрутов графа двое ворот: scope и AGENTMEM_GRAPH_ENABLED. При выключенном графе /v1/graph*, /v1/graph и /mcp отвечают JSON 404, остальные маршруты не меняются. Запись всегда идёт сначала в OKF+Git; индекс смежности — проекция, которую можно пересобрать в любой момент.',
+    'Открывает поток событий MCP для активной сессии',
+    'Закрывает сессию MCP и её поток событий',
   ],
   ja: [
     'API ドキュメント',
@@ -771,6 +789,8 @@ const rows = {
     'キーワード順位とグラフ近傍順位の RRF 融合。各ヒットに寄与したソースを明示します。読み取り専用。',
     'グラフ・MCP・機能スイッチ',
     'グラフ経路は scope と AGENTMEM_GRAPH_ENABLED の二重ゲートです。グラフを無効にすると /v1/graph*・/v1/graph・/mcp は JSON 404 を返し、他の経路は変わりません。書き込みは常に OKF+Git へ先に落ち、隣接インデックスは再構築可能な投影です。',
+    '有効なセッションの MCP イベントストリームを開く',
+    'MCP セッションとイベントストリームを閉じる',
   ],
   ko: [
     'API 문서',
@@ -847,6 +867,8 @@ const rows = {
     '키워드 순위와 그래프 이웃 순위를 RRF로 융합하고, 각 결과에 기여 출처를 표시합니다. 읽기 전용.',
     '그래프, MCP, 기능 스위치',
     '그래프 경로는 scope와 AGENTMEM_GRAPH_ENABLED의 이중 게이트를 통과합니다. 그래프를 끄면 /v1/graph*, /v1/graph, /mcp가 JSON 404를 반환하고 나머지 경로는 그대로입니다. 쓰기는 항상 OKF+Git에 먼저 기록되고, 인접 인덱스는 언제든 재구성 가능한 투영입니다.',
+    '활성 세션의 MCP 이벤트 스트림을 엽니다',
+    'MCP 세션과 이벤트 스트림을 닫습니다',
   ],
   pt: [
     'Documentação da API',
@@ -923,6 +945,8 @@ const rows = {
     'Fusão RRF dos rankings por palavra-chave e por vizinhança do grafo, com as fontes de cada resultado. Somente leitura.',
     'Grafo, MCP e chaves de capacidade',
     'As rotas de grafo têm dois portões: o scope e AGENTMEM_GRAPH_ENABLED. Com o grafo desligado, /v1/graph*, /v1/graph e /mcp respondem JSON 404 e as demais rotas seguem iguais. Escritas sempre vão primeiro para OKF+Git; o índice de adjacência é uma projeção reconstruível.',
+    'Abre o fluxo de eventos MCP de uma sessão ativa',
+    'Encerra uma sessão MCP e seu fluxo de eventos',
   ],
   ar: [
     'وثائق واجهة API',
@@ -999,6 +1023,8 @@ const rows = {
     'دمج RRF لترتيب الكلمات وترتيب جوار الرسم، مع بيان المصادر لكل نتيجة. للقراءة فقط.',
     'الرسم وMCP ومفاتيح القدرات',
     'لمسارات الرسم بوابتان: النطاق ومفتاح AGENTMEM_GRAPH_ENABLED. عند إيقاف الرسم تُرجع /v1/graph* و/v1/graph و/mcp الاستجابة JSON 404 وتبقى بقية المسارات كما هي. الكتابة تذهب دائمًا أولًا إلى OKF+Git، وفهرس الجوار إسقاط قابل لإعادة البناء.',
+    'يفتح بث أحداث MCP لجلسة نشطة',
+    'يغلق جلسة MCP وبث أحداثها',
   ],
   hi: [
     'API दस्तावेज़',
@@ -1075,6 +1101,8 @@ const rows = {
     'कीवर्ड और ग्राफ़-पड़ोस रैंकिंग का RRF संयोजन; हर परिणाम के साथ योगदान देने वाले स्रोत दर्शाए जाते हैं। केवल पढ़ने योग्य।',
     'ग्राफ़, MCP और क्षमता स्विच',
     'ग्राफ़ मार्गों के दो द्वार हैं: scope और AGENTMEM_GRAPH_ENABLED। ग्राफ़ बंद होने पर /v1/graph*, /v1/graph और /mcp JSON 404 लौटाते हैं और बाकी मार्ग अपरिवर्तित रहते हैं। लेखन हमेशा पहले OKF+Git में जाता है; आसन्नता सूचकांक एक पुनर्निर्मेय प्रक्षेपण है।',
+    'सक्रिय सत्र के लिए MCP इवेंट स्ट्रीम खोलता है',
+    'MCP सत्र और उसकी इवेंट स्ट्रीम बंद करता है',
   ],
 }
 

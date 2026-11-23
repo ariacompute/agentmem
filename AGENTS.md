@@ -12,6 +12,11 @@ console (status + HTTP API docs + try-it workbench) bundled into
 listener as the API. `AGENTMEM_CONSOLE_ENABLED=false` answers JSON `404` for the
 page and its assets, which is the supported pure-API posture.
 
+The same binary is also an MCP server: `internal/mcp` holds the JSON-RPC core,
+tool registry and session table, `POST`/`GET`/`DELETE /mcp` is its Streamable
+HTTP transport, and `agentmem mcp` is its stdio transport. Both share one
+`Backend` port implemented in `internal/service`. See `docs/mcp.md`.
+
 ## Layering (single direction, no upward imports)
 
 ```
@@ -19,6 +24,7 @@ auth / safepath / netsafe / okf / meta / config (L0, zero internal deps)
   -> vcs / adapter / bridges
   -> plugins (engine packages + manifest)
   -> router / eval / compute / graph
+  -> mcp (protocol core; consumes ports, imports nothing above service)
   -> service
   -> handlers / cli
   -> cmd/agentmem
@@ -47,7 +53,15 @@ upward import: `internal/auth` (consumed by `handlers` / `cli`),
   `graph` / `graph_schema` frontmatter; `graph_nodes` / `graph_edges` are
   discardable and rebuilt from Git. Only a declared edge type with mismatched
   endpoint types is rejected (`422`) — unknown types and dangling targets warn.
-  Graph reads never bypass `CheckACL`, and `/mcp` exposes no write tool.
+  Graph reads never bypass `CheckACL`, and `/mcp` reads never bypass it either.
+- **MCP write tools are off by default.** `/mcp` (Streamable HTTP) and
+  `agentmem mcp` (stdio) share one protocol core in `internal/mcp`. Read tools
+  are always listed; write tools are registered only when
+  `AGENTMEM_MCP_WRITE=true`, and every call still checks its own scope
+  (`knowledge:write` / `graph:write` / `compute:run` / `migrate:run`) *before*
+  reaching `service`, so a forbidden call creates no Git commit. A hidden write
+  tool must answer `-32602 unknown tool`, never a distinct status that would
+  advertise the disabled surface.
 - **Config is `.env` only.** `config.Load` reads `.env` (`--env` /
   `AGENTMEM_ENV_FILE` override the path), then layers process env on top;
   a missing file falls back to `Default()`. Docker Compose consumes the same
@@ -164,6 +178,7 @@ make web-verify  # rebuild and fail if internal/webui/dist is stale
 | System One | `internal/router/systemone.go` |
 | Write / read / migrate | `internal/router/write.go`, `read.go`, `migrate.go` |
 | Assembly | `internal/service/knowledge.go` |
+| MCP server (protocol, tools, sessions, both transports) | `internal/mcp/`, `internal/handlers/mcp.go`, `internal/handlers/mcp_http.go`, `internal/cli/mcp.go`, `internal/service/mcp_backend.go`, `docs/mcp.md` |
 | API / CLI | `internal/handlers/http.go`, `internal/cli/root.go` |
 | Authentication & permissions | `internal/auth/auth.go`, `internal/handlers/security.go` |
 | Path safety | `internal/safepath/safepath.go` |

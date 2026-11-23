@@ -121,7 +121,9 @@ graph_schema:
 | POST | `/v1/graph/retrieve` | `knowledge:read` | 文本 + 图邻域 RRF 融合检索 |
 | POST | `/v1/graph/index` | `migrate:run` | 从 Git 全量重建投影 |
 | POST | `/v1/graph/edges` | `graph:write` | 追加声明关系 |
-| POST | `/mcp` | `knowledge:read` | 只读 MCP JSON-RPC 传输 |
+| POST | `/mcp` | `knowledge:read` | MCP JSON-RPC 传输（工具级再校验 scope） |
+| GET | `/mcp` | `knowledge:read` | MCP 事件流（需 `Mcp-Session-Id`） |
+| DELETE | `/mcp` | `knowledge:read` | 关闭 MCP 会话（`204`） |
 
 `GET /v1/graph/schema` 的响应与其余端点一样使用 snake_case 键（本体文档本身仍是 YAML frontmatter）：
 
@@ -159,17 +161,29 @@ CLI 走本地可信路径（`AGENTMEM_AUTH_ENABLED=false` 时用 `AGENTMEM_ACL_D
 
 ## 8. MCP
 
-`POST /mcp` 是只读 JSON-RPC 2.0 传输，支持 `initialize` / `ping` / `tools/list` / `tools/call`；`notifications/*` 且不带 `id` 的通知返回 `202` 且没有结果体，请求体超过 4 MiB 返回 `413`。工具清单：
+`/mcp` 是 MCP server 的 Streamable HTTP 传输，支持 `initialize` / `ping` /
+`tools/list` / `tools/call`，`notifications/*` 且不带 `id` 的通知返回 `202`，
+请求体超过 4 MiB 返回 `413`；`GET /mcp` 为会话打开事件流，`DELETE /mcp` 关闭会话。
+完整协议（版本协商、会话、错误码、stdio 传输、客户端配置）见 `docs/mcp.md`。
+
+图相关工具（全部 `knowledge:read`）：
 
 | 工具 | 参数 | 对应读路径 |
 |---|---|---|
-| `search_terms` | `q`、`node_types`、`limit` | `GET /v1/graph/search` |
-| `get_node` | `id` | `GET /v1/graph/node` |
-| `neighbors` | `from`、`depth`、`direction`、`edge_types` | `GET /v1/graph/neighbors` |
-| `path` | `from`、`to`、`max_depth` | `GET /v1/graph/path` |
+| `search_terms` | `query`、`node_types`、`limit` | `GET /v1/graph/search` |
+| `get_node` | `concept_id` | `GET /v1/graph/node` |
+| `neighbors` | `concept_id`、`depth`、`direction`、`edge_types`、`node_types`、`limit` | `GET /v1/graph/neighbors` |
+| `path` | `from`、`to`、`max_depth`、`direction`、`edge_types` | `GET /v1/graph/path` |
 | `check_answerable` | `question` | `POST /v1/graph/answerability` |
+| `graph_schema` | — | `GET /v1/graph/schema` |
+| `graph_stats` | — | `GET /v1/graph` |
+| `graph_retrieve` | `query`、`top_k` | `POST /v1/graph/retrieve` |
 
-**没有任何写工具。** 外部 Agent 只能读，写入必须持 `graph:write` 令牌走 REST/CLI。
+写工具默认不登记：`AGENTMEM_MCP_WRITE=true` 才出现
+`put_knowledge` / `put_graph_node` / `append_graph_edge` / `run_computation` /
+`rebuild_graph_index`，并逐个校验 `knowledge:write` / `graph:write` /
+`compute:run` / `migrate:run`。关闭时调用写工具名按未知工具（`-32602`）处理，
+与 REST/CLI 共用同一 `service` 与 ACL，没有旁路。
 
 ## 9. 检索融合与可回答性
 

@@ -22,6 +22,7 @@ import (
 	"agentmem/internal/config"
 	"agentmem/internal/eval"
 	"agentmem/internal/handlers"
+	"agentmem/internal/mcp"
 	"agentmem/internal/okf"
 	"agentmem/internal/router"
 	"agentmem/internal/service"
@@ -42,6 +43,7 @@ Commands:
   validate    Validate configuration
   eval        Run ranking/routing evaluation on a JSONL dataset
   graph       Query or write the knowledge graph (run "graph help")
+  mcp         Serve MCP over stdio (for Claude Desktop, Cursor and similar)
 `
 
 // Run dispatches one CLI invocation. It is separated from main for testing.
@@ -76,6 +78,8 @@ func Run(args []string, out io.Writer) error {
 		return cmdEval(args[1:], out)
 	case "graph":
 		return cmdGraph(args[1:], out)
+	case "mcp":
+		return cmdMCP(args[1:], out)
 	default:
 		return fmt.Errorf("agentmem: unknown command %q\n%s", args[0], usage)
 	}
@@ -183,6 +187,7 @@ func serverOptions(cfg *config.Config, authenticator *auth.Authenticator) (handl
 		AllowedOrigins: cfg.Auth.AllowedOrigins,
 		RateRPS:        cfg.RateLimit.RPS,
 		RateBurst:      cfg.RateLimit.Burst,
+		MCP:            mcpConfig(cfg),
 	}
 	if !cfg.Console.Enabled {
 		return opts, nil
@@ -236,6 +241,18 @@ func buildAuthenticator(cfg *config.Config) (*auth.Authenticator, error) {
 		})
 	}
 	return auth.New(specs, cfg.Auth.Enabled)
+}
+
+// mcpConfig converts the .env-facing MCP configuration into the protocol
+// server's bounds. config stays a leaf package and never imports mcp.
+func mcpConfig(cfg *config.Config) mcp.Config {
+	return mcp.Config{
+		Write:       cfg.MCP.Write,
+		MaxLimit:    200,
+		MaxDepth:    cfg.Graph.MaxDepth,
+		SessionTTL:  time.Duration(cfg.MCP.SessionTTLMS) * time.Millisecond,
+		MaxSessions: cfg.MCP.MaxSessions,
+	}
 }
 
 func postgresMode(cfg *config.Config) string {

@@ -482,7 +482,8 @@ make_env "$BASE_ENV" "$PORT_BASE" 100000 1000000
 make_env "$AUTH_ENV" "$PORT_AUTH" 100000 1000000 \
   'AGENTMEM_AUTH_ENABLED=true' \
   "AGENTMEM_AUTH_TOKENS='$AUTH_JSON'" \
-  'AGENTMEM_ALLOWED_ORIGINS=https://console.example.test'
+  'AGENTMEM_ALLOWED_ORIGINS=https://console.example.test' \
+  'AGENTMEM_MCP_WRITE=true'
 make_env "$RATE_ENV" "$PORT_RATE" 1 5
 
 # Compute-plane sidecar config: the python runtime goes through a CLI child process and a local HTTP loopback stub.
@@ -766,6 +767,20 @@ begin_case F26 "a disabled graph still validates its bounds"
 run_cli validate --env "$WORK/bad-graph-off-bounds.env"
 a_rc 1
 a_cli_err 'graph.max_depth must be 1..8'
+end_case
+
+bad_env mcp-ttl 'AGENTMEM_MCP_SESSION_TTL_MS=1000'
+begin_case F27 "an out-of-range MCP session TTL is rejected"
+run_cli validate --env "$WORK/bad-mcp-ttl.env"
+a_rc 1
+a_cli_err 'mcp.session_ttl_ms must be 60000..86400000'
+end_case
+
+bad_env mcp-sessions 'AGENTMEM_MCP_MAX_SESSIONS=0'
+begin_case F28 "an out-of-range MCP session cap is rejected"
+run_cli validate --env "$WORK/bad-mcp-sessions.env"
+a_rc 1
+a_cli_err 'mcp.max_sessions must be 1..4096'
 end_case
 
 # ===========================================================================
@@ -1135,6 +1150,26 @@ a_rc 0
 a_cli_json_len_min warnings 1
 end_case
 
+begin_case C43 "mcp over stdio answers one JSON-RPC frame per line"
+printf '%s\n' \
+'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+'{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+| "$BIN" mcp "${ENVARG[@]}" --subject e2e --scopes knowledge:read >"$CLI_OUT" 2>"$CLI_ERR"
+CLI_RC=$?
+a_rc 0
+eq "$(wc -l < "$CLI_OUT" | tr -d ' ')" 2 'stdio frame count'
+a_cli_out 'protocolVersion'
+a_cli_out 'search_terms'
+a_cli_err 'stdio ready'
+end_case
+
+begin_case C44 "mcp over stdio refuses to start without an identity"
+run_cli mcp "${ENVARG[@]}"
+a_rc 1
+a_cli_err 'mcp: provide --token, or --subject with --scopes'
+if [[ -s "$CLI_OUT" ]]; then ck 1 'stdout must stay empty when the command refuses to start'; else ck 0 ''; fi
+end_case
+
 section "3. All HTTP API routes (auth-disabled profile)"
 # ===========================================================================
 if start_server base "$BASE_ENV" "$PORT_BASE"; then
@@ -1456,19 +1491,22 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_has pruned
   end_case
 
-  begin_case H51 "MCP initialize answers a read-only server identity"
+  begin_case H51 "MCP initialize negotiates the newest revision and a server identity"
   http_req POST /mcp '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
   a_status 200
   a_json_eq jsonrpc 2.0
   a_json_eq result.serverInfo.name agentmem
+  a_json_eq result.protocolVersion 2025-06-18
+  a_json_eq result.capabilities.tools.listChanged false
   end_case
 
-  begin_case H52 "MCP tools/list exposes only the five read tools"
+  begin_case H52 "MCP tools/list exposes the read tools and hides every write tool"
   http_req POST /mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
   a_status 200
   a_json_eq result.tools.0.name search_terms
-  a_json_len_min result.tools 5
-  a_body_hasnt 'graph_put'
+  a_json_len_min result.tools 13
+  hasnt "$(cat "$BODY")" 'put_knowledge' 'read-only tool list'
+  hasnt "$(cat "$BODY")" 'rebuild_graph_index' 'read-only tool list'
   end_case
 
   begin_case H53 "MCP notification without an id answers 202 with no body"
@@ -1495,7 +1533,7 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_eq result.isError false
   a_json_eq result.content.0.type text
   a_json_has result.structuredContent
-  a_json_has result.structuredContent.0.concept_id
+  a_json_has result.structuredContent.nodes.0.concept_id
   end_case
 
   begin_case H58 "MCP tools/call get_node reads one node through the same ACL"
@@ -1518,6 +1556,94 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   http_req POST /mcp "@$WORK/big.json"
   a_status 413
   a_json_eq error 'request body is too large'
+  end_case
+
+  begin_case H61 "a stateful MCP revision without a session is refused"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":11,"method":"ping"}' 'MCP-Protocol-Version: 2025-06-18'
+  a_status 404
+  a_json_eq error.code -32004
+  a_json_eq error.message 'Mcp-Session-Id header is required'
+  http_req POST /mcp '{"jsonrpc":"2.0","id":12,"method":"ping"}' \
+    'MCP-Protocol-Version: 2025-06-18' 'Mcp-Session-Id: unknown-session'
+  a_status 404
+  a_json_eq error.code -32004
+  end_case
+
+  begin_case H62 "initialize issues a session that carries calls and can be closed"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":13,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}'
+  a_status 200
+  a_json_eq result.protocolVersion 2025-03-26
+  MCP_SESSION="$(header_value Mcp-Session-Id)"
+  eq "$([[ -n "$MCP_SESSION" ]] && echo issued || echo missing)" issued 'session header'
+  http_req POST /mcp '{"jsonrpc":"2.0","id":14,"method":"tools/list"}' \
+    "Mcp-Session-Id: $MCP_SESSION" 'MCP-Protocol-Version: 2025-03-26'
+  a_status 200
+  a_json_len_min result.tools 13
+  http_req POST /mcp '{"jsonrpc":"2.0","id":15,"method":"ping"}' \
+    "Mcp-Session-Id: $MCP_SESSION" 'MCP-Protocol-Version: 2025-03-26'
+  a_status 200
+  http_req DELETE /mcp '' "Mcp-Session-Id: $MCP_SESSION"
+  a_status 204
+  http_req POST /mcp '{"jsonrpc":"2.0","id":16,"method":"ping"}' "Mcp-Session-Id: $MCP_SESSION"
+  a_status 404
+  a_json_eq error.code -32004
+  end_case
+
+  begin_case H63 "an SSE-preferring client receives the response as an event"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":17,"method":"ping"}' 'Accept: application/json, text/event-stream'
+  a_status 200
+  a_header Content-Type text/event-stream
+  a_body_has 'event: message'
+  a_body_has 'data: '
+  a_body_has '"jsonrpc":"2.0"'
+  end_case
+
+  begin_case H64 "GET /mcp opens an event stream for a live session"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":18,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
+  a_status 200
+  STREAM_SESSION="$(header_value Mcp-Session-Id)"
+  curl -sS --max-time 2 -o /dev/null -D "$WORK/stream.headers" \
+    -H "Mcp-Session-Id: $STREAM_SESSION" "http://127.0.0.1:${PORT}/mcp" >/dev/null 2>&1 || true
+  if grep -qi 'text/event-stream' "$WORK/stream.headers"; then ck 0 ''; else ck 1 'the event stream did not open'; fi
+  if grep -q '^HTTP/1.1 200' "$WORK/stream.headers"; then ck 0 ''; else ck 1 'the event stream must answer 200'; fi
+  http_req DELETE /mcp '' "Mcp-Session-Id: $STREAM_SESSION"
+  a_status 204
+  end_case
+
+  begin_case H65 "MCP read_knowledge returns the canonical body under the same ACL"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"read_knowledge","arguments":{"concept_id":"e2e/http-doc"}}}'
+  a_status 200
+  a_json_eq result.structuredContent.concept_id e2e/http-doc
+  a_json_eq result.structuredContent.title 'E2E HTTP'
+  a_json_eq result.structuredContent.visibility public
+  http_req POST /mcp '{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"read_knowledge","arguments":{"concept_id":"e2e/missing-doc"}}}'
+  a_status 200
+  a_json_eq error.code -32002
+  a_json_eq error.message 'document not found or access denied'
+  end_case
+
+  begin_case H66 "MCP read tools cover concepts, query and audit surfaces"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"list_concepts","arguments":{}}}'
+  a_status 200
+  a_json_has result.structuredContent.concepts
+  http_req POST /mcp '{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"query","arguments":{"query":"e2e","top_k":3}}}'
+  a_status 200
+  a_json_has result.structuredContent.query
+  a_json_has result.structuredContent.hits
+  http_req POST /mcp '{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"graph_schema","arguments":{}}}'
+  a_status 200
+  a_json_has result.structuredContent.node_types
+  a_json_has result.structuredContent.edge_types
+  end_case
+
+  begin_case H67 "disabled write tools are indistinguishable from unknown tools"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"put_knowledge","arguments":{"concept_id":"e2e/mcp-write","document":{"type":"Concept"}}}}'
+  a_status 200
+  a_json_eq error.code -32602
+  a_json_eq error.message 'unknown tool'
+  http_req GET '/v1/knowledge?id=e2e%2Fmcp-write' ''
+  a_status 404
+  a_json_eq error 'document not found or access denied'
   end_case
 
 else
@@ -1944,6 +2070,44 @@ if start_server auth "$AUTH_ENV" "$PORT_AUTH"; then
   a_header Content-Type text/html
   a_json_absent error
   end_case
+
+  begin_case S22 "MCP write tools follow the switch and the per-tool scope"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":31,"method":"tools/list"}' "Authorization: Bearer $TOK_ALL"
+  a_status 200
+  has "$(cat "$BODY")" 'put_knowledge' 'write tool list'
+  has "$(cat "$BODY")" 'rebuild_graph_index' 'write tool list'
+  http_req POST /mcp \
+    '{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"put_knowledge","arguments":{"concept_id":"e2e/mcp-write","document":{"type":"Concept","title":"MCP","visibility":"public"}}}}' \
+    "Authorization: Bearer $TOK_ALL"
+  a_status 200
+  a_json_eq result.isError false
+  a_json_eq result.structuredContent.concept_id e2e/mcp-write
+  a_json_has result.structuredContent.content_hash
+  http_req GET '/v1/knowledge?id=e2e%2Fmcp-write' '' "Authorization: Bearer $TOK_ALL"
+  a_status 200
+  a_json_eq title MCP
+  end_case
+
+  begin_case S23 "MCP write tools reject a caller without the matching scope"
+  http_req POST /mcp \
+    '{"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"put_knowledge","arguments":{"concept_id":"e2e/mcp-forbidden","document":{"type":"Concept"}}}}' \
+    "Authorization: Bearer $TOK_READ"
+  a_status 200
+  a_json_eq error.code -32003
+  a_json_eq error.message forbidden
+  a_json_absent result
+  http_req GET '/v1/knowledge?id=e2e%2Fmcp-forbidden' '' "Authorization: Bearer $TOK_ALL"
+  a_status 404
+  end_case
+
+  begin_case S24 "MCP write tools that need graph:write are refused for a knowledge writer"
+  http_req POST /mcp \
+    '{"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"put_graph_node","arguments":{"concept_id":"e2e/mcp-node"}}}' \
+    "Authorization: Bearer $TOK_ALL"
+  a_status 200
+  a_json_eq error.code -32003
+  a_json_eq error.message forbidden
+  end_case
 else
   fail_case S00 "auth case group" "service failed to start: $(head -c 200 "$WORK/serve-auth.log" | tr '\n' ' ')"
 fi
@@ -2026,9 +2190,9 @@ else
 fi
 end_case
 
-begin_case W03 "API docs mirror 21 method+path entries"
+begin_case W03 "API docs mirror 23 method+path entries"
 web_routes="$(grep -c "    method: '" "$REPO/web/src/lib/api-content.js")"
-eq "$web_routes" 21 'endpoint count'
+eq "$web_routes" 23 'endpoint count'
 end_case
 
 begin_case W04 "all 13 language directories present"

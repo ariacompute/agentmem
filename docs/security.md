@@ -19,9 +19,9 @@
 
 ### CLI 信任边界
 
-CLI **没有** Bearer 通道，主体由 `--subject` 自声明，令牌、权限矩阵、限流与 Origin 校验全部只覆盖 HTTP Handler 边界：
+CLI 的普通子命令**没有** Bearer 通道，主体由 `--subject` 自声明；唯一的例外是 MCP 的 stdio 传输（`agentmem mcp`），它可以用 `--token` / `--token-env` 把 bearer 令牌换成与 HTTP 完全相同的 `Principal`，未给令牌时才回退到 `--subject` + `--scopes`，而且这个回退在 `AGENTMEM_AUTH_ENABLED=true` 时被禁用（缺令牌直接拒绝启动）。令牌、权限矩阵、限流与 Origin 校验仍只覆盖 HTTP Handler 边界：
 
-- 存储层仍强制执行匿名写入拒绝（`router: anonymous write rejected`）、owner 匹配与 ACL 过滤，所以 CLI 不能绕过「能写什么 / 能读什么」的授权语义，只能「声称自己是谁」。
+- 存储层仍强制执行匿名写入拒绝（`router: anonymous write rejected`）、owner 匹配与 ACL 过滤，所以 CLI 不能绕过「能写什么 / 能读什么」的授权语义，只能「声称自己是谁」；`agentmem mcp` 用令牌时连「声称」都不需要，scope 由令牌摘要表决定。
 - 能读 `.env`（含令牌摘要、DSN、bundle 根）与能写 bundle 的本地进程，本就具备等效或更高权限；真正的边界是文件系统与操作系统账户权限。
 - 部署建议：CLI 只在本机或受控跳板运行，不把 shell 交给不受信调用方；多租户或远程访问一律走 HTTP + 令牌；审计以 `internal/meta` 落库的主体为准。详见 `SECURITY.md` 的 “CLI trust boundary” 小节。
 
@@ -39,13 +39,20 @@ CLI **没有** Bearer 通道，主体由 `--subject` 自声明，令牌、权限
 | `GET /v1/computations` | `audit:read` |
 | `POST /v1/computations` | `compute:run` |
 | `GET /v1/graph`、`GET /v1/graph/node`、`GET /v1/graph/neighbors`、`GET /v1/graph/path`、`GET /v1/graph/search`、`GET /v1/graph/schema` | `knowledge:read` |
-| `POST /v1/graph/answerability`、`POST /v1/graph/retrieve`、`POST /mcp` | `knowledge:read` |
+| `POST /v1/graph/answerability`、`POST /v1/graph/retrieve` | `knowledge:read` |
+| `POST /mcp`、`GET /mcp`、`DELETE /mcp` | `knowledge:read`（工具级再按 scope 校验） |
 | `PUT /v1/graph/node`、`POST /v1/graph/edges` | `graph:write` |
 | `POST /v1/graph/index` | `migrate:run`（重建投影，不改知识） |
 
 `health:read` 作为权限常量保留，供只读探针令牌使用；`/healthz` 本身始终公开，以便负载均衡器在鉴权配置错误时仍能判定进程存活。
 
-图读取复用 `knowledge:read`：能读正文就能读正文声明的边。写入口单列 `graph:write`，因此「只读的检索 Agent」无法通过图接口改写知识。图重建归 `migrate:run`，因为它只重建投影、不产生新知识；`/mcp` 只暴露只读工具，没有任何写工具。`AGENTMEM_GRAPH_ENABLED=false` 时 `/v1/graph*` 与 `/mcp` 一律 JSON `404`，且该判断发生在鉴权之后，不改变未授权请求先得到 `401` 的顺序。
+图读取复用 `knowledge:read`：能读正文就能读正文声明的边。写入口单列 `graph:write`，因此「只读的检索 Agent」无法通过图接口改写知识。图重建归 `migrate:run`，因为它只重建投影、不产生新知识。
+
+`/mcp` 的读写分离在**工具级**：三个传输方法的 `routePermissions` 都只要 `knowledge:read`，每个工具再声明自己的 scope（`read_knowledge` → `knowledge:read`、`list_decisions` / `list_computations` → `audit:read`、`put_knowledge` → `knowledge:write`、`put_graph_node` / `append_graph_edge` → `graph:write`、`run_computation` → `compute:run`、`rebuild_graph_index` → `migrate:run`）。写工具默认不登记：`AGENTMEM_MCP_WRITE=false`（默认）时 `tools/list` 不出现写工具，调用按 `-32602 unknown tool` 处理；开启后缺 scope 返回 `-32003 forbidden`，并在进入 `service` 之前拒绝，不产生 Git 提交。stdio 传输（`agentmem mcp`）在进程启动时一次性换出 `Principal`，鉴权开启时缺令牌直接拒绝启动。
+
+`AGENTMEM_GRAPH_ENABLED=false` 时 `/v1/graph*` 与 `/mcp` 一律 JSON `404`，且该判断发生在鉴权之后，不改变未授权请求先得到 `401` 的顺序。
+
+MCP 会话表是进程内内存：TTL 默认 30 分钟、容量默认 128（`AGENTMEM_MCP_SESSION_TTL_MS` / `AGENTMEM_MCP_MAX_SESSIONS`），超容量拒绝新会话而不是无界分配；`GET /mcp` 的事件流只对该连接解除写超时，5 分钟上限后关闭。
 
 失败口径：
 
@@ -155,7 +162,7 @@ AGENTMEM_AUTH_TOKENS='[
 | 请求自报身份（越权读私有文档） | `subject` 来自请求体/查询串 | 已修复：主体仅由中间件注入 |
 | 私有文档存在性泄露 | 404 与 403 可区分 | 已修复：统一 404 文案 |
 | 图接口绕过 ACL | 邻居/路径/检索可能返回未授权节点 | 已修复：读路径先 `CheckACL` 过滤再计数与返回；私有节点与不存在统一 404 |
-| 外部 Agent 经 MCP 改知识 | 工具清单可扩展 | 已修复：`/mcp` 只有 5 个只读工具，写入需 `graph:write` 令牌走 REST/CLI |
+| 外部 Agent 经 MCP 改知识 | 工具清单可扩展 | 已修复：写工具默认不登记（`AGENTMEM_MCP_WRITE=false`），开启后逐工具校验 `knowledge:write` / `graph:write` / `compute:run` / `migrate:run`，且与 REST/CLI 共用同一 `service` 与 ACL |
 | 令牌泄露 | 摘要写在版本化 `.env` | 缓解：只存摘要；`.env` 被 gitignore；建议按环境注入 `AGENTMEM_AUTH_TOKENS` |
 | 内部错误/DSN 泄露 | 直接回显 `err.Error()` | 已修复：分类文案 + 类型日志 |
 | SSRF（System One / HTTP 桥接） | 任意 URL | 已修复：装配期白名单 + 逐跳复检 + 私网字面量默认拒绝 |

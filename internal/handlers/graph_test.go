@@ -179,8 +179,16 @@ func TestMCPProtocol(t *testing.T) {
 	srv := newGraphServer(t)
 	defer srv.Close()
 
+	var session string
 	call := func(body string) (int, map[string]any) {
-		resp, out := doJSON(t, http.MethodPost, srv.URL+"/mcp", nil, body)
+		headers := map[string]string{}
+		if session != "" {
+			headers[mcpSessionHeader] = session
+		}
+		resp, out := doJSON(t, http.MethodPost, srv.URL+"/mcp", headers, body)
+		if issued := resp.Header.Get(mcpSessionHeader); issued != "" {
+			session = issued
+		}
 		var payload map[string]any
 		if out != "" {
 			_ = json.Unmarshal([]byte(out), &payload)
@@ -189,11 +197,14 @@ func TestMCPProtocol(t *testing.T) {
 	}
 
 	status, payload := call(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
-	if status != http.StatusOK || payload["result"].(map[string]any)["protocolVersion"] != mcpProtocolVersion {
+	if status != http.StatusOK || payload["result"].(map[string]any)["protocolVersion"] != "2025-06-18" {
 		t.Fatalf("initialize = %d %v", status, payload)
 	}
 	if _, ok := payload["result"].(map[string]any)["serverInfo"]; !ok {
 		t.Fatalf("initialize result = %v", payload)
+	}
+	if session == "" {
+		t.Fatal("initialize must issue a session id")
 	}
 
 	status, payload = call(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
@@ -201,8 +212,8 @@ func TestMCPProtocol(t *testing.T) {
 		t.Fatalf("tools/list = %d", status)
 	}
 	tools := payload["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 5 {
-		t.Fatalf("tools = %v", tools)
+	if len(tools) != 13 {
+		t.Fatalf("read tool count = %d", len(tools))
 	}
 
 	for _, tool := range []string{
@@ -236,7 +247,7 @@ func TestMCPProtocol(t *testing.T) {
 		{"missing tool name", `{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{}}`, http.StatusOK, -32602},
 		{"missing node", `{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"get_node","arguments":{"concept_id":"nope"}}}`, http.StatusOK, -32002},
 		{"unknown method", `{"jsonrpc":"2.0","id":14,"method":"tools/subscribe"}`, http.StatusOK, -32601},
-		{"not json", `{`, http.StatusOK, -32700},
+		{"not json", `{`, http.StatusBadRequest, -32700},
 		{"wrong version", `{"jsonrpc":"1.0","id":15,"method":"ping"}`, http.StatusOK, -32600},
 		{"invalid params", `{"jsonrpc":"2.0","id":16,"method":"tools/call","params":"nope"}`, http.StatusOK, -32602},
 	}
@@ -270,9 +281,13 @@ func TestMCPProtocol(t *testing.T) {
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized body = %d", resp.StatusCode)
 	}
-	// A non-POST method answers 405.
+	// GET without a session is a fixed 404; an unsupported method is 405.
 	resp, _ = doJSON(t, http.MethodGet, srv.URL+"/mcp", nil, "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET /mcp without session = %d", resp.StatusCode)
+	}
+	resp, _ = doJSON(t, http.MethodPatch, srv.URL+"/mcp", nil, "")
 	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Fatalf("GET /mcp = %d", resp.StatusCode)
+		t.Fatalf("PATCH /mcp = %d", resp.StatusCode)
 	}
 }

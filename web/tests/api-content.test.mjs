@@ -40,13 +40,15 @@ const EXPECTED_ROUTES = [
   'POST /v1/graph/index',
   'POST /v1/graph/edges',
   'POST /mcp',
+  'GET /mcp',
+  'DELETE /mcp',
 ]
 
 describe('api-content endpoints', () => {
-  it('lists exactly the 21 method+path combinations of the server', () => {
+  it('lists exactly the 23 method+path combinations of the server', () => {
     assert.deepEqual(ROUTE_KEYS, EXPECTED_ROUTES)
-    assert.equal(endpoints.length, 21)
-    assert.equal(new Set(ROUTE_KEYS).size, 21)
+    assert.equal(endpoints.length, 23)
+    assert.equal(new Set(ROUTE_KEYS).size, 23)
   })
 
   it('never documents the outbound sidecar wire protocol', () => {
@@ -101,11 +103,13 @@ describe('api-content endpoints', () => {
     assert.equal(block.lines, graphLines)
     assert.ok(graphLines.some((line) => line.includes('AGENTMEM_GRAPH_ENABLED=false')))
     assert.ok(graphLines.some((line) => line.includes('graph:write')))
+    assert.ok(graphLines.some((line) => line.includes('AGENTMEM_MCP_WRITE=false')))
+    assert.ok(graphLines.some((line) => line.includes('read_knowledge')))
   })
 
   it('describes every graph route on its own', () => {
     const graph = endpoints.filter((entry) => entry.group === 'graph')
-    assert.equal(graph.length, 12)
+    assert.equal(graph.length, 14)
     const keys = graph.map((entry) => entry.descKey)
     assert.equal(new Set(keys).size, keys.length, 'graph routes share a description')
     for (const key of keys) {
@@ -134,9 +138,14 @@ describe('api-content endpoints', () => {
 
   it('renders valid JSON samples with placeholder values only', () => {
     for (const entry of endpoints) {
-      assert.doesNotThrow(() => JSON.parse(entry.response), `${entry.method} ${entry.path} response`)
-      if (entry.method === 'GET') {
-        assert.ok(entry.request.startsWith('GET '), `${entry.path} request line`)
+      if (entry.json === false) {
+        // A transport sample: an SSE frame or 204 No Content, never JSON.
+        assert.ok(entry.response.length > 0, `${entry.method} ${entry.path} sample`)
+      } else {
+        assert.doesNotThrow(() => JSON.parse(entry.response), `${entry.method} ${entry.path} response`)
+      }
+      if (entry.method === 'GET' || entry.method === 'DELETE') {
+        assert.ok(entry.request.startsWith(`${entry.method} `), `${entry.path} request line`)
       } else {
         // POST and PUT both carry a JSON body.
         assert.doesNotThrow(() => JSON.parse(entry.request), `${entry.method} ${entry.path} request`)
@@ -195,6 +204,7 @@ describe('api-content authentication', () => {
     assert.deepEqual([...explained], [
       '200',
       '202',
+      '204',
       '400',
       '401',
       '403',

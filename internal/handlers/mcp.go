@@ -2,262 +2,236 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
-	"agentmem/internal/graph"
+	"agentmem/internal/auth"
+	"agentmem/internal/mcp"
 	"agentmem/internal/service"
 )
 
-// MCP is a read-only JSON-RPC endpoint. It exposes the same graph reads the
-// HTTP API does and has no write tool at all: an MCP client can never mutate
-// knowledge, so the transport adds no new privilege boundary.
+// mcpTransport is the HTTP binding of the MCP server. It owns only transport
+// concerns: the JSON-RPC payload, session headers and the server-sent event
+// stream. Tool authorisation and protocol negotiation live in internal/mcp, so
+// the stdio transport behaves identically.
 
-type mcpRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
-}
+const (
+	mcpSessionHeader  = "Mcp-Session-Id"
+	mcpVersionHeader  = "MCP-Protocol-Version"
+	mcpSSEPingPeriod  = 15 * time.Second
+	mcpSSEMaxLifetime = 5 * time.Minute
+)
 
-type mcpError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-type mcpResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  any             `json:"result,omitempty"`
-	Error   *mcpError       `json:"error,omitempty"`
-}
-
-const mcpProtocolVersion = "2024-11-05"
-
-func mcpRoute(w http.ResponseWriter, r *http.Request, svc *service.KnowledgeService) {
-	if !svc.GraphEnabled() {
-		writeError(w, http.StatusNotFound, "not found")
-		return
+func newMCPTransport(svc *service.KnowledgeService, cfg mcp.Config) *mcpTransport {
+	return &mcpTransport{
+		srv:     mcp.NewServer(service.NewMCPBackend(svc), cfg),
+		streams: make(map[string]chan struct{}),
 	}
-	if r.Method != http.MethodPost {
+}
+
+type mcpTransport struct {
+	srv *mcp.Server
+
+	mu      sync.Mutex
+	streams map[string]chan struct{}
+}
+
+// serve dispatches one /mcp request. A disabled graph feature answers JSON 404
+// before any method handling, exactly like the /v1/graph surfaces.
+func (t *mcpTransport) serve(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		t.post(w, r)
+	case http.MethodGet:
+		t.stream(w, r)
+	case http.MethodDelete:
+		t.close(w, r)
+	default:
+		w.Header().Set("Allow", "GET, POST, DELETE")
 		methodNotAllowed(w)
+	}
+}
+
+func (t *mcpTransport) post(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes+1))
-	if err != nil || len(body) > maxRequestBytes {
+	if len(body) > maxRequestBytes {
 		writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
 		return
 	}
-	var req mcpRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeMCP(w, mcpResponse{JSONRPC: "2.0", ID: json.RawMessage("null"),
-			Error: &mcpError{Code: -32700, Message: "parse error"}})
+	principal, ok := auth.PrincipalFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if req.JSONRPC != "2.0" || strings.TrimSpace(req.Method) == "" {
-		writeMCP(w, mcpResponse{JSONRPC: "2.0", ID: idOrNull(req.ID),
-			Error: &mcpError{Code: -32600, Message: "invalid request"}})
+	out, failure := t.srv.Handle(r.Context(), principal, body, mcp.Options{
+		Version:   r.Header.Get(mcpVersionHeader),
+		SessionID: r.Header.Get(mcpSessionHeader),
+	})
+	if failure != nil {
+		writeMCPFailure(w, failure)
 		return
 	}
-	// Notifications carry no id and expect no body.
-	if len(req.ID) == 0 && strings.HasPrefix(req.Method, "notifications/") {
+	if out.SessionID != "" {
+		w.Header().Set(mcpSessionHeader, out.SessionID)
+	}
+	if out.Version != "" {
+		w.Header().Set(mcpVersionHeader, out.Version)
+	}
+	if out.Payload == nil {
+		// A notification-only payload acknowledges without a body.
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	result, rerr := mcpDispatch(r, svc, req)
-	if rerr != nil {
-		writeMCP(w, mcpResponse{JSONRPC: "2.0", ID: idOrNull(req.ID), Error: rerr})
+	if acceptsEventStream(r) {
+		writeMCPEvent(w, out.Payload)
 		return
 	}
-	writeMCP(w, mcpResponse{JSONRPC: "2.0", ID: idOrNull(req.ID), Result: result})
-}
-
-func mcpDispatch(r *http.Request, svc *service.KnowledgeService, req mcpRequest) (any, *mcpError) {
-	switch req.Method {
-	case "initialize":
-		return map[string]any{
-			"protocolVersion": mcpProtocolVersion,
-			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "agentmem", "version": "graph"},
-		}, nil
-	case "ping":
-		return map[string]any{}, nil
-	case "tools/list":
-		return map[string]any{"tools": mcpTools()}, nil
-	case "tools/call":
-		return mcpCall(r, svc, req.Params)
-	default:
-		return nil, &mcpError{Code: -32601, Message: "method not found"}
-	}
-}
-
-func mcpTools() []map[string]any {
-	object := func(props map[string]any, required ...string) map[string]any {
-		return map[string]any{"type": "object", "properties": props, "required": required}
-	}
-	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
-	num := func(desc string) map[string]any { return map[string]any{"type": "integer", "description": desc} }
-	arr := func(desc string) map[string]any {
-		return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
-	}
-	return []map[string]any{
-		{
-			"name": "search_terms", "description": "Find graph nodes by keyword.",
-			"inputSchema": object(map[string]any{"query": str("search text"), "limit": num("max hits, 1..200")}, "query"),
-		},
-		{
-			"name": "get_node", "description": "Read one node with lineage and edges.",
-			"inputSchema": object(map[string]any{"concept_id": str("concept id")}, "concept_id"),
-		},
-		{
-			"name": "neighbors", "description": "Expand a bounded neighbourhood.",
-			"inputSchema": object(map[string]any{
-				"concept_id": str("root concept id"), "depth": num("1..8"),
-				"direction": str("out, in or both"), "edge_types": arr("edge type filter"),
-				"node_types": arr("node type filter"), "limit": num("max nodes, 1..200"),
-			}, "concept_id"),
-		},
-		{
-			"name": "path", "description": "Shortest readable path between two nodes.",
-			"inputSchema": object(map[string]any{
-				"from": str("start concept id"), "to": str("target concept id"),
-				"max_depth": num("1..8"), "direction": str("out, in or both"),
-				"edge_types": arr("edge type filter"),
-			}, "from", "to"),
-		},
-		{
-			"name": "check_answerable", "description": "Report ontology coverage and gaps for a question.",
-			"inputSchema": object(map[string]any{"question": str("natural language question")}, "question"),
-		},
-	}
-}
-
-type mcpCallParams struct {
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
-}
-
-func mcpCall(r *http.Request, svc *service.KnowledgeService, raw json.RawMessage) (any, *mcpError) {
-	var call mcpCallParams
-	if err := json.Unmarshal(raw, &call); err != nil || strings.TrimSpace(call.Name) == "" {
-		return nil, &mcpError{Code: -32602, Message: "invalid params"}
-	}
-	subject, ok := subjectFrom(r)
-	if !ok {
-		return nil, &mcpError{Code: -32001, Message: "authentication required"}
-	}
-	var (
-		out any
-		err error
-	)
-	switch call.Name {
-	case "search_terms":
-		var args struct {
-			Query string `json:"query"`
-			Limit int    `json:"limit"`
-		}
-		if jerr := json.Unmarshal(call.Arguments, &args); jerr != nil {
-			return nil, &mcpError{Code: -32602, Message: "invalid arguments"}
-		}
-		out, err = svc.GraphSearch(r.Context(), subject, graph.SearchQuery{Text: args.Query, Limit: clampLimit(args.Limit)})
-	case "get_node":
-		var args struct {
-			ConceptID string `json:"concept_id"`
-		}
-		if jerr := json.Unmarshal(call.Arguments, &args); jerr != nil {
-			return nil, &mcpError{Code: -32602, Message: "invalid arguments"}
-		}
-		out, err = svc.GraphNode(r.Context(), subject, args.ConceptID)
-	case "neighbors":
-		var args struct {
-			ConceptID string   `json:"concept_id"`
-			Depth     int      `json:"depth"`
-			Direction string   `json:"direction"`
-			EdgeTypes []string `json:"edge_types"`
-			NodeTypes []string `json:"node_types"`
-			Limit     int      `json:"limit"`
-		}
-		if jerr := json.Unmarshal(call.Arguments, &args); jerr != nil {
-			return nil, &mcpError{Code: -32602, Message: "invalid arguments"}
-		}
-		out, err = svc.GraphNeighbors(r.Context(), subject, graph.WalkQuery{
-			From: args.ConceptID, Depth: args.Depth, Direction: args.Direction,
-			EdgeTypes: args.EdgeTypes, NodeTypes: args.NodeTypes, Limit: clampLimit(args.Limit),
-		})
-	case "path":
-		var args struct {
-			From      string   `json:"from"`
-			To        string   `json:"to"`
-			MaxDepth  int      `json:"max_depth"`
-			Direction string   `json:"direction"`
-			EdgeTypes []string `json:"edge_types"`
-		}
-		if jerr := json.Unmarshal(call.Arguments, &args); jerr != nil {
-			return nil, &mcpError{Code: -32602, Message: "invalid arguments"}
-		}
-		out, err = svc.GraphPath(r.Context(), subject, graph.PathQuery{
-			From: args.From, To: args.To, MaxDepth: args.MaxDepth,
-			Direction: args.Direction, EdgeTypes: args.EdgeTypes, Limit: graphMaxLimit,
-		})
-	case "check_answerable":
-		var args struct {
-			Question string `json:"question"`
-		}
-		if jerr := json.Unmarshal(call.Arguments, &args); jerr != nil {
-			return nil, &mcpError{Code: -32602, Message: "invalid arguments"}
-		}
-		out, err = svc.GraphAnswerability(r.Context(), subject, args.Question)
-	default:
-		return nil, &mcpError{Code: -32602, Message: "unknown tool"}
-	}
-	if err != nil {
-		return nil, mcpGraphError(err)
-	}
-	text, merr := json.Marshal(out)
-	if merr != nil {
-		return nil, &mcpError{Code: -32603, Message: "internal error"}
-	}
-	return map[string]any{
-		"content":           []map[string]any{{"type": "text", "text": string(text)}},
-		"structuredContent": out,
-		"isError":           false,
-	}, nil
-}
-
-func mcpGraphError(err error) *mcpError {
-	switch {
-	case errors.Is(err, graph.ErrDisabled):
-		return &mcpError{Code: -32601, Message: "graph is disabled"}
-	case errors.Is(err, graph.ErrNotFound):
-		return &mcpError{Code: -32002, Message: "node not found or access denied"}
-	case errors.Is(err, graph.ErrInvalid):
-		return &mcpError{Code: -32602, Message: "graph request rejected"}
-	default:
-		return &mcpError{Code: -32603, Message: "internal error"}
-	}
-}
-
-func clampLimit(n int) int {
-	if n <= 0 {
-		return 20
-	}
-	if n > graphMaxLimit {
-		return graphMaxLimit
-	}
-	return n
-}
-
-func idOrNull(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return json.RawMessage("null")
-	}
-	return raw
-}
-
-func writeMCP(w http.ResponseWriter, resp mcpResponse) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+	_, _ = w.Write(out.Payload)
+}
+
+// stream opens the server-to-client event stream. The stream only carries
+// keep-alive comments: every result is answered on the POST that requested it,
+// so an idle connection can never be mistaken for a lost response.
+func (t *mcpTransport) stream(w http.ResponseWriter, r *http.Request) {
+	session, ok := t.srv.Sessions().Touch(r.Header.Get(mcpSessionHeader))
+	if !ok {
+		writeMCPFailure(w, &mcp.Failure{Code: mcp.CodeSession, Message: "session not found", Status: http.StatusNotFound})
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-store")
+	h.Set("Connection", "keep-alive")
+	h.Set("X-Accel-Buffering", "no")
+	controller := http.NewResponseController(w)
+	// The serve loop sets WriteTimeout, which would otherwise cut every event
+	// stream after 30 seconds. Clearing the deadline here is the supported way
+	// to keep one long-lived response alive; an in-memory recorder does not
+	// support it, and the stream still works there.
+	_ = controller.SetWriteDeadline(time.Time{})
+	w.WriteHeader(http.StatusOK)
+	if err := controller.Flush(); err != nil {
+		return
+	}
+	closed := t.register(session.ID)
+	defer t.unregister(session.ID, closed)
+
+	ticker := time.NewTicker(mcpSSEPingPeriod)
+	defer ticker.Stop()
+	lifetime := time.NewTimer(mcpSSEMaxLifetime)
+	defer lifetime.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-closed:
+			return
+		case <-lifetime.C:
+			return
+		case <-ticker.C:
+			if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
+				return
+			}
+			if err := controller.Flush(); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// close ends a session and any event stream attached to it.
+func (t *mcpTransport) close(w http.ResponseWriter, r *http.Request) {
+	id := r.Header.Get(mcpSessionHeader)
+	if id == "" || !t.srv.DeleteSession(id) {
+		writeMCPFailure(w, &mcp.Failure{Code: mcp.CodeSession, Message: "session not found", Status: http.StatusNotFound})
+		return
+	}
+	t.closeStream(id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (t *mcpTransport) register(id string) chan struct{} {
+	closed := make(chan struct{})
+	t.mu.Lock()
+	if previous, ok := t.streams[id]; ok {
+		// One stream per session: the newest connection wins.
+		close(previous)
+	}
+	t.streams[id] = closed
+	t.mu.Unlock()
+	return closed
+}
+
+func (t *mcpTransport) unregister(id string, closed chan struct{}) {
+	t.mu.Lock()
+	if current, ok := t.streams[id]; ok && current == closed {
+		delete(t.streams, id)
+	}
+	t.mu.Unlock()
+}
+
+func (t *mcpTransport) closeStream(id string) {
+	t.mu.Lock()
+	if closed, ok := t.streams[id]; ok {
+		close(closed)
+		delete(t.streams, id)
+	}
+	t.mu.Unlock()
+}
+
+// acceptsEventStream reports whether the client is willing to receive the
+// response as an SSE event, which is what Streamable HTTP clients prefer.
+func acceptsEventStream(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
+		if strings.HasPrefix(strings.TrimSpace(part), "text/event-stream") {
+			return true
+		}
+	}
+	return false
+}
+
+func writeMCPEvent(w http.ResponseWriter, payload []byte) {
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-store")
+	h.Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	// A JSON-RPC payload is single-line JSON, so one data field is enough and
+	// no escaping is needed.
+	_, _ = w.Write([]byte("event: message\ndata: "))
+	_, _ = w.Write(payload)
+	_, _ = w.Write([]byte("\n\n"))
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// writeMCPFailure answers a transport-level rejection with the JSON-RPC error
+// object and the status the protocol layer chose.
+func writeMCPFailure(w http.ResponseWriter, failure *mcp.Failure) {
+	status := failure.Status
+	if status < 400 || status > 599 {
+		status = http.StatusInternalServerError
+	}
+	payload, err := json.Marshal(mcp.Response{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage("null"),
+		Error:   &mcp.Error{Code: failure.Code, Message: failure.Message},
+	})
+	if err != nil {
+		writeError(w, status, "internal error")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(payload)
 }

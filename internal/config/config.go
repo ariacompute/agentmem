@@ -30,6 +30,7 @@ type Config struct {
 	Router    RouterConfig    `json:"router" yaml:"router"`
 	Compute   ComputeConfig   `json:"compute" yaml:"compute"`
 	Graph     GraphConfig     `json:"graph" yaml:"graph"`
+	MCP       MCPConfig       `json:"mcp" yaml:"mcp"`
 	Adapters  []AdapterConfig `json:"adapters" yaml:"adapters"`
 	ACL       ACLConfig       `json:"acl" yaml:"acl"`
 	Auth      AuthConfig      `json:"auth" yaml:"auth"`
@@ -94,6 +95,23 @@ func DefaultGraph() GraphConfig {
 		MaxDepth: 3, MaxNodes: 100000, MaxEdges: 500000,
 		CoverageMin: 0.6, RRFK: 60,
 	}
+}
+
+// MCPConfig controls the MCP server. Write defaults to false, so an existing
+// deployment keeps the read-only tool surface: a write tool only appears in
+// tools/list after the operator opts in, and every call still needs the scope
+// that tool declares. SessionTTLMS and MaxSessions bound the in-memory session
+// table used by the Streamable HTTP transport.
+type MCPConfig struct {
+	Write        bool `json:"write" yaml:"write"`
+	SessionTTLMS int  `json:"session_ttl_ms" yaml:"session_ttl_ms"`
+	MaxSessions  int  `json:"max_sessions" yaml:"max_sessions"`
+}
+
+// DefaultMCP is the safe default: no write tools, 30-minute idle sessions and
+// at most 128 concurrent sessions.
+func DefaultMCP() MCPConfig {
+	return MCPConfig{Write: false, SessionTTLMS: 1800000, MaxSessions: 128}
 }
 
 // knownComputeRuntimes mirrors compute's non-postgres runtime names. config is
@@ -213,6 +231,7 @@ func Default() *Config {
 		},
 		Compute: DefaultCompute(),
 		Graph:   DefaultGraph(),
+		MCP:     DefaultMCP(),
 		Adapters: []AdapterConfig{
 			{Name: "okf", Kind: "okf", Enabled: true},
 			{Name: "memory", Kind: "memory", Enabled: true},
@@ -267,6 +286,12 @@ func (c *Config) Validate() error {
 	}
 	if err := c.validateGraph(); err != nil {
 		return err
+	}
+	if c.MCP.SessionTTLMS < 60000 || c.MCP.SessionTTLMS > 86400000 {
+		return errors.New("config: mcp.session_ttl_ms must be 60000..86400000")
+	}
+	if c.MCP.MaxSessions < 1 || c.MCP.MaxSessions > 4096 {
+		return errors.New("config: mcp.max_sessions must be 1..4096")
 	}
 	seen := map[string]bool{}
 	for _, a := range c.Adapters {

@@ -270,7 +270,7 @@ describe('console shell', () => {
     assert.ok(ids.get('sec-errors'), 'errors section is missing')
     assert.equal(
       descendants(app).filter((node) => node._classes.has('endpoint-row')).length,
-      21,
+      23,
     )
 
     const row = descendants(app).find((node) => node._classes.has('endpoint-row'))

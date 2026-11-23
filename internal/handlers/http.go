@@ -153,9 +153,16 @@ func NewHandler(svc *service.KnowledgeService, opts Options) http.Handler {
 	mux.HandleFunc("/v1/graph/", func(w http.ResponseWriter, r *http.Request) {
 		graphRoute(w, r, svc)
 	})
-	// MCP is a read-only JSON-RPC transport over the same graph reads.
+	// MCP is a Streamable HTTP JSON-RPC transport over the same use cases as
+	// REST. Write tools are hidden unless AGENTMEM_MCP_WRITE is enabled, and
+	// every tool call is authorised individually.
+	mcpServer := newMCPTransport(svc, opts.MCP)
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
-		mcpRoute(w, r, svc)
+		if !svc.GraphEnabled() {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		mcpServer.serve(w, r)
 	})
 	// Unregistered /v1 paths answer JSON, never HTML: the console catch-all
 	// below must not turn an API client's typo into a page.

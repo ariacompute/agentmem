@@ -164,6 +164,29 @@ func LocalPrincipal(subject string) Principal {
 	return Principal{subject: subject, scopes: scopes}
 }
 
+// DeclaredPrincipal builds a principal from an explicit subject and scope list.
+// It exists for the stdio transport, where the process boundary is the trust
+// boundary and there is no bearer token to digest; the CLI only calls it when
+// authentication is disabled. Unknown permissions and an empty subject or scope
+// list fail closed.
+func DeclaredPrincipal(subject string, scopes []Permission) (Principal, error) {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return Principal{}, errors.New("auth: declared principal requires a subject")
+	}
+	if len(scopes) == 0 {
+		return Principal{}, errors.New("auth: declared principal requires at least one scope")
+	}
+	set := make(map[Permission]struct{}, len(scopes))
+	for _, p := range scopes {
+		if _, ok := allPermissions[p]; !ok {
+			return Principal{}, fmt.Errorf("auth: declared principal has unknown scope %q", p)
+		}
+		set[p] = struct{}{}
+	}
+	return Principal{subject: subject, scopes: set}, nil
+}
+
 type contextKey struct{}
 
 func WithPrincipal(ctx context.Context, p Principal) context.Context {

@@ -159,6 +159,19 @@
 - [x] 文档修正：`docs/graph.md §10` 的 `AGENTMEM_GRAPH_REMOTE_URL` 示例去掉多余的 `/v1`（客户端自身补 `/v1/graph/*`），并写明端点只写基址；`docs/e2e.md` 同步依赖（`timeout`）、七个档位、用例矩阵与新计数；中英 README 的验收条目补上本体/远程引擎。
 - [x] 验收：`make e2e` 185 条全绿（`PASS=185 FAIL=0 SKIP=0`，新增 26 条：`F20`–`F26`、`T01`–`T06`、`E01`–`E09`、`H57`–`H60`）；`make e2e E2E_ARGS='--no-gates'` 为 179 条并记一条 `SKIP G00`。
 
+## 阶段 18 · MCP server（Streamable HTTP + stdio）
+
+目标：把只读 `/mcp` 片段升级为完整 MCP server，一份协议内核同时经 HTTP 与 stdio 暴露，工具面覆盖全部读路径并在显式开关下提供写工具。
+
+- [x] `internal/mcp` 协议内核：JSON-RPC 2.0（单条 + batch ≤ 32）、版本协商（`2025-06-18` / `2025-03-26` / `2024-11-05` 回退）、固定错误码表、会话表（TTL + 容量 + 惰性清扫）、工具注册表与 `Backend` 端口；不 import `service` / `handlers` / `cli`。
+- [x] 工具面：13 个只读（图读 8 个 + `query`、`list_concepts`、`read_knowledge`、审计 2 个）常驻；5 个写工具（`put_knowledge`、`put_graph_node`、`append_graph_edge`、`run_computation`、`rebuild_graph_index`）仅在 `AGENTMEM_MCP_WRITE=true` 时登记，调用前逐工具校验 scope，隐藏时按 `-32602 unknown tool` 处理。
+- [x] Streamable HTTP（`internal/handlers/mcp_http.go`）：`initialize` 下发 `Mcp-Session-Id`、`MCP-Protocol-Version` 校验、`Accept: text/event-stream` 的 SSE 响应、`GET /mcp` 事件流（15s 心跳、5 分钟上限、`ResponseController` 只解除单连接写超时）、`DELETE /mcp` 关会话；会话缺失/未知 `404` + `-32004`。
+- [x] stdio（`internal/cli/mcp.go`）：`agentmem mcp` 逐行 JSON-RPC，`stdout` 只写协议帧、日志走 `stderr`、EOF 退出 0、单行超限回 `-32700` 后继续；身份优先 `--token` / `--token-env` / `AGENTMEM_MCP_TOKEN`，仅在鉴权关闭时回退 `--subject` + `--scopes`，否则拒绝启动。
+- [x] 配置：`AGENTMEM_MCP_WRITE`（默认 `false`）、`AGENTMEM_MCP_SESSION_TTL_MS`（60s–24h）、`AGENTMEM_MCP_MAX_SESSIONS`（1–4096）进入封闭白名单与 `Validate()`；`.env.example` 同步；`routePermissions` 增 `GET`/`DELETE /mcp`（均 `knowledge:read`）。
+- [x] 测试：新增 `internal/mcp`（协议/工具/会话）、`handlers`（会话、SSE、事件流、版本、写开关）、`cli`（身份解析、stdio 循环、超长行）、`config` 与 `auth` 用例；e2e 新增 `F27`/`F28`、`C43`/`C44`、`H61`–`H67`、`S22`–`S24`，`H52`/`H57`/`W03` 按新工具面与 23 条路由改写。
+- [x] 文档：新增 `docs/mcp.md`；`AGENTS.md` 把「`/mcp` 无写工具」改为「默认关闭 + 逐工具 scope」并补 `internal/mcp` 层位；`requirements.md`、`docs/security.md`、`docs/architecture.md`、`docs/graph.md`、`docs/e2e.md`、中英 README、三份发布说明与控制台 API 文档（23 条组合 + 13 语言新增文案）同步。
+- [x] 验收：`go test ./...`、`go vet ./...`、`go build ./...`、`make check-boundaries`、`make web-audit`、`bun test`、`make e2e` 全绿；`make e2e` 199 条（`PASS=199 FAIL=0 SKIP=0`）。
+
 ## 验收
 
 ```bash

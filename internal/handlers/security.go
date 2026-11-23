@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agentmem/internal/auth"
+	"agentmem/internal/mcp"
 )
 
 // apiPolicy is the policy for every JSON response: nothing may be loaded or
@@ -40,13 +41,20 @@ type Options struct {
 	// Console is nil when the console is not embedded, which keeps the
 	// API-only posture reproducible in tests.
 	Console Console
+	// MCP configures the MCP server: the write switch, result clamps and the
+	// session bounds. The zero value is the safe default (read-only tools).
+	MCP mcp.Config
 }
 
 // routePermissions is the single, auditable permission matrix. It mirrors the
-// 21 method+path combinations registered in NewHandler. Anything not listed
+// 23 method+path combinations registered in NewHandler. Anything not listed
 // here is handled by the router's own 405 logic, so an unsupported method on a
 // known path never widens access. The console paths are not listed: they are
 // public reads, resolved by Console.Public instead.
+//
+// /mcp is listed once per transport method with the read scope: every MCP
+// request needs knowledge:read to reach the dispatcher, and each tool then
+// checks its own scope (write tools additionally require AGENTMEM_MCP_WRITE).
 func routePermissions(r *http.Request) (auth.Permission, bool) {
 	switch r.Method + " " + r.URL.Path {
 	case "POST /v1/knowledge":
@@ -61,7 +69,8 @@ func routePermissions(r *http.Request) (auth.Permission, bool) {
 		return auth.PermComputeRun, true
 	case "GET /v1/graph", "GET /v1/graph/node", "GET /v1/graph/neighbors",
 		"GET /v1/graph/path", "GET /v1/graph/search", "GET /v1/graph/schema",
-		"POST /v1/graph/answerability", "POST /v1/graph/retrieve", "POST /mcp":
+		"POST /v1/graph/answerability", "POST /v1/graph/retrieve",
+		"POST /mcp", "GET /mcp", "DELETE /mcp":
 		return auth.PermKnowledgeRead, true
 	case "PUT /v1/graph/node", "POST /v1/graph/edges":
 		return auth.PermGraphWrite, true

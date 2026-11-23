@@ -68,7 +68,7 @@ The design draws on [HKUDS/DeepTutor][deeptutor-link] (pluggable retrievers, ver
 - 🧭 **Rules run before System One** — A probabilistic choice can never override a deterministic authoritative decision. Ambiguity reaches the model; everything else short-circuits.
 - 🔒 **Fail closed, not fail open** — Routing timeouts and errors land on the canonical body. There is no switch to disable that fallback.
 - 🧪 **Offline tests are a hard constraint** — `go test ./...` passes without Postgres, network or credentials. Every external dependency has a fake.
-- ✅ **User-perspective acceptance** — `make e2e` drives the real binary and HTTP API offline: 11 CLI commands, 21 routes, graph reads and writes, the typed ontology, the remote read-only engine, auth, config fail-closed rules and the web console.
+- ✅ **User-perspective acceptance** — `make e2e` drives the real binary and HTTP API offline: 12 CLI commands, 23 routes, graph reads and writes, the typed ontology, MCP over HTTP and stdio, the remote read-only engine, auth, config fail-closed rules and the web console.
 - 🧩 **Explicit engine registry** — Plugins are declared in `plugin.yaml` with a machine-checked `sdk_boundary`. Go `.so` plugins are deliberately avoided.
 - 🕸️ **The graph is declared, not inferred** — A concept is both a document and a node; typed relations and the ontology live in frontmatter, PostgreSQL keeps only a discardable adjacency index, and unknown types or dangling targets warn instead of rejecting. Reads fuse text and neighbourhood rankers with RRF and report coverage gaps rather than answering from thin evidence.
 - 🪶 **Zero-dependency console** — `web/` is plain ES modules, monochrome, 13 locales, no runtime framework and no CDN asset.
@@ -134,8 +134,11 @@ The example bundle under `testdata/bundle/` contains a runnable Attested Computa
 | `computations` | `--id` `--limit` (20) | Show the Attested Computation verdict audit |
 | `validate` | — | Validate configuration |
 | `eval` | `--dataset` `--k` (5) | Ranking evaluation on a JSONL dataset |
+| `mcp` | `--token` `--token-env` `--subject` `--scopes` | Serve MCP over stdio (JSON-RPC per line) |
 
-`serve`, `put`, `query`, `migrate`, `decisions`, `concepts`, `compute`, `computations` and `validate` all accept `--env`; `AGENTMEM_ENV_FILE` selects the default env file. `eval` is the one command that reads no configuration.
+`serve`, `put`, `query`, `migrate`, `decisions`, `concepts`, `compute`, `computations`, `validate` and `mcp` all accept `--env`; `AGENTMEM_ENV_FILE` selects the default env file. `eval` is the one command that reads no configuration.
+
+`agentmem mcp` needs an identity before it starts: prefer `--token` (or `--token-env NAME`, default `AGENTMEM_MCP_TOKEN`) to resolve the same `Principal` a Bearer token would; with `AGENTMEM_AUTH_ENABLED=false` you may instead declare `--subject` plus `--scopes`. Missing both is a hard startup error, and protocol frames are the only thing written to `stdout`.
 
 <div align="right">
 
@@ -283,7 +286,9 @@ Logs: `docker compose logs -f agentmem`. Stop: `docker compose down` (add `-v` t
 | POST | `/v1/graph/retrieve` | `knowledge:read` | RRF fusion of text and graph rankers |
 | POST | `/v1/graph/index` | `migrate:run` | Rebuild the projection from Git |
 | POST | `/v1/graph/edges` | `graph:write` | Append a declared relation |
-| POST | `/mcp` | `knowledge:read` | Read-only MCP JSON-RPC transport |
+| POST | `/mcp` | `knowledge:read` | MCP JSON-RPC transport (Streamable HTTP) |
+| GET | `/mcp` | `knowledge:read` | MCP event stream for a session |
+| DELETE | `/mcp` | `knowledge:read` | Close an MCP session (`204`) |
 
 Every route except `GET /healthz` requires the scope above; the same matrix is reproduced in [Authentication and access control](#-authentication-and-access-control). `401` / `403` / `429` match the error table in the console; a registered path with an unsupported method answers `405`. `POST /v1/computations` returns `200` for a verified value, `422` for an attestation failure or an unsupported runtime, `400` for an invalid contract or parameters, and `502` for an executor failure. Failed responses never carry `display_value`, and error bodies never echo SQL, DSNs or driver text.
 
@@ -446,6 +451,39 @@ Editing the console means rebuilding the embed output: `cd web && bun install --
 
 </div>
 
+## 🤖 MCP server
+
+The binary is an MCP server on two transports that share one protocol core (`internal/mcp`) and one authorisation path:
+
+| Transport | Entry point | Identity |
+|---|---|---|
+| Streamable HTTP | `POST` / `GET` / `DELETE /mcp` | the existing `Authorization: Bearer` middleware |
+| stdio | `agentmem mcp` | `--token` / `--token-env`, or `--subject` + `--scopes` when auth is off |
+
+- Revisions: `2025-06-18` (default), `2025-03-26`, and a stateless `2024-11-05` fallback. `initialize` echoes the requested revision; every result carries both `structuredContent` and a `content[0].text` JSON string.
+- Sessions: `initialize` returns `Mcp-Session-Id`; a stateful revision without a valid session is `404` + `-32004`; `GET /mcp` streams events for a session and `DELETE /mcp` closes it with `204`.
+- Read tools (always listed, all reaching the same ACL): `search_terms`, `get_node`, `neighbors`, `path`, `check_answerable`, `graph_schema`, `graph_stats`, `graph_retrieve`, `query`, `list_concepts`, `read_knowledge`, `list_decisions`, `list_computations`.
+- Write tools (`put_knowledge`, `put_graph_node`, `append_graph_edge`, `run_computation`, `rebuild_graph_index`) are registered only when `AGENTMEM_MCP_WRITE=true`, and each call is checked against its own scope (`knowledge:write` / `graph:write` / `compute:run` / `migrate:run`) before it reaches `service`. With the switch off they are indistinguishable from unknown tools (`-32602`).
+
+```json
+{
+  "mcpServers": {
+    "agentmem": {
+      "command": "agentmem",
+      "args": ["mcp", "--env", "/etc/agentmem.env", "--subject", "alice", "--scopes", "knowledge:read"]
+    }
+  }
+}
+```
+
+Full protocol, error codes and client setup: [`docs/mcp.md`](./docs/mcp.md).
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
 ## 🔏 Trust store security
 
 The 2026-10 eMudhra (emSign) intermediate CA key compromise is covered in two layers: Go 1.27.3 ships the `crypto/x509` blocklist, and the runtime image refreshes its Alpine `ca-certificates` bundle at build time. `make check-trust-store` scans a system or image CA bundle offline for the known root/intermediate SHA-256 fingerprints (exit `0` clean, `1` hit, `2` unreadable):
@@ -523,6 +561,7 @@ All detailed docs live under [`docs/`](./docs) and are written in Chinese:
 | [Attested Computation](./docs/computations.md) | Contract, parameter binding, attester chain, verdict audit |
 | [Routing](./docs/routing.md) | Rule-first decision, System One, dual-path reconciliation |
 | [Knowledge graph](./docs/graph.md) | Frontmatter declarations, typed ontology, projection sync, RRF and answerability |
+| [MCP server](./docs/mcp.md) | Streamable HTTP + stdio transports, protocol versions, sessions, tool catalogue and scopes |
 | [E2E acceptance](./docs/e2e.md) | User-perspective offline black-box suite, case matrix and troubleshooting |
 
 <div align="right">

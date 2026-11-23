@@ -45,12 +45,24 @@ and a rule-first smart router.
 - **Smart routing**: deterministic `R1`–`R7` rules first, AFM-D System One
   fallback with 5000 ms timeout, 256-entry cache, low-score protection and
   fail-closed behaviour. Dual-path reads/writes plus resumable migration.
+- **MCP server**: one protocol core (`internal/mcp`) behind two transports —
+  Streamable HTTP (`POST` / `GET` / `DELETE /mcp`, `Mcp-Session-Id`, SSE event
+  stream, `MCP-Protocol-Version`) and stdio (`agentmem mcp`, JSON-RPC per line).
+  Revisions `2025-06-18` / `2025-03-26` negotiate with a stateless
+  `2024-11-05` fallback, and every result carries both `structuredContent` and
+  a `content[0].text` JSON string. Thirteen read tools mirror the whole read
+  surface (graph, `query`, `read_knowledge`, audit lists); five write tools are
+  registered only with `AGENTMEM_MCP_WRITE=true` and each call is checked
+  against its own scope before reaching `service`, so a forbidden write never
+  creates a Git commit. stdio resolves identity from `--token` /
+  `AGENTMEM_MCP_TOKEN`, falls back to `--subject` + `--scopes` only while
+  authentication is off, and refuses to start with neither.
 - **Interfaces**: JSON HTTP API (including `/v1/computations`, the
-  `/v1/graph*` family and a read-only `/mcp` JSON-RPC transport), eleven CLI
-  commands (including `compute`, `computations` and `graph`) and pure-function
-  ranking and routing evaluation.
+  `/v1/graph*` family and the `/mcp` transport), twelve CLI commands (including
+  `compute`, `computations`, `graph` and `mcp`) and pure-function ranking and
+  routing evaluation.
 - **Web console, compiled in**: a dependency-free ES module page with a status
-  view, an in-app HTTP API reference (21 method+path combinations) and a graph
+  view, an in-app HTTP API reference (23 method+path combinations) and a graph
   view (index freshness, node search, sticky lineage and edge tables, bounded
   neighbourhood walk, answerability meter), with request/response JSON samples,
   conventions and error/status codes. Vite
@@ -64,7 +76,7 @@ and a rule-first smart router.
   until explicitly chosen. Offline `node:test` suites guard copy coverage,
   endpoint drift and the palette. `AGENTMEM_CONSOLE_ENABLED` (default `true`)
   switches the page off: with it set to `false`, `GET /`, `/assets/*` and
-  unknown static paths answer JSON `404` while the nine API routes, the
+  unknown static paths answer JSON `404` while the 23 API routes, the
   permission matrix, rate limiting and `GET /healthz` stay identical — an
   API-only deployment needs no rebuild.
 - **Interactive API reference**: every endpoint row expands into a workbench

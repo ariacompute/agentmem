@@ -68,7 +68,7 @@ agentmem 只回答 Agent 的一个问题：*这份知识的哪一份副本才算
 - 🧭 **规则先于 System One** —— 概率选择永远不能覆盖确定性的权威判断；只有真正模糊的任务才交给模型。
 - 🔒 **失败关闭而非失败放行** —— 路由超时或报错一律回落到主干正文，且不存在关闭该行为的开关。
 - 🧪 **离线测试是硬约束** —— `go test ./...` 无需 Postgres、网络或凭据即可通过，每个外部依赖都有 fake。
-- ✅ **用户视角验收** —— `make e2e` 离线驱动真实二进制与 HTTP API，覆盖 11 条 CLI 命令、21 条路由、图读写、类型化本体、远程只读引擎、鉴权、配置故障关闭与 Web 控制台。
+- ✅ **用户视角验收** —— `make e2e` 离线驱动真实二进制与 HTTP API，覆盖 12 条 CLI 命令、23 条路由、图读写、类型化本体、HTTP 与 stdio 两条 MCP 传输、远程只读引擎、鉴权、配置故障关闭与 Web 控制台。
 - 🧩 **显式引擎注册表** —— 插件由 `plugin.yaml` 声明，`sdk_boundary` 由机器校验；刻意不使用 Go `.so` 动态插件。
 - 🕸️ **图靠声明而非推断** —— 概念既是文档也是节点：类型化关系与本体写在 frontmatter，PostgreSQL 只存可丢弃的邻接索引，未知类型与断链只告警不拒绝；读路径用 RRF 融合文本与邻域排序，并在证据不足时给出覆盖率缺口而不是硬答。
 - 🪶 **零依赖控制台** —— `web/` 是原生 ES module，单色、13 语言、无运行时框架、无 CDN 资源。
@@ -134,8 +134,11 @@ go run ./cmd/agentmem decisions --limit 10
 | `computations` | `--id` `--limit`（20） | 查看 Attested Computation verdict 审计 |
 | `validate` | — | 校验配置 |
 | `eval` | `--dataset` `--k`（5） | 在 JSONL 数据集上跑排序评测 |
+| `mcp` | `--token` `--token-env` `--subject` `--scopes` | 以 stdio 提供 MCP（逐行 JSON-RPC） |
 
-`serve`、`put`、`query`、`migrate`、`decisions`、`concepts`、`compute`、`computations`、`validate` 均支持 `--env`；`AGENTMEM_ENV_FILE` 指定默认 env 文件。`eval` 是唯一不读配置的命令。
+`serve`、`put`、`query`、`migrate`、`decisions`、`concepts`、`compute`、`computations`、`validate`、`mcp` 均支持 `--env`；`AGENTMEM_ENV_FILE` 指定默认 env 文件。`eval` 是唯一不读配置的命令。
+
+`agentmem mcp` 启动前必须有身份：优先 `--token`（或 `--token-env NAME`，默认读 `AGENTMEM_MCP_TOKEN`）换取与 Bearer 完全相同的 `Principal`；`AGENTMEM_AUTH_ENABLED=false` 时可用 `--subject` + `--scopes` 声明。两者都没有则拒绝启动，`stdout` 只写协议帧。
 
 <div align="right">
 
@@ -283,7 +286,9 @@ go run ./cmd/agentmem validate --env .env
 | POST | `/v1/graph/retrieve` | `knowledge:read` | 文本与图邻域的 RRF 融合检索 |
 | POST | `/v1/graph/index` | `migrate:run` | 从 Git 重建投影 |
 | POST | `/v1/graph/edges` | `graph:write` | 追加声明关系 |
-| POST | `/mcp` | `knowledge:read` | 只读 MCP JSON-RPC 传输 |
+| POST | `/mcp` | `knowledge:read` | MCP JSON-RPC 传输（Streamable HTTP） |
+| GET | `/mcp` | `knowledge:read` | 为会话打开 MCP 事件流 |
+| DELETE | `/mcp` | `knowledge:read` | 关闭 MCP 会话（`204`） |
 
 除 `GET /healthz` 外每条路由都需要上表中的权限，同一矩阵在 [身份认证与访问控制](#-身份认证与访问控制) 处复述。`401` / `403` / `429` 与控制台里的错误码表一致；路径存在但方法不支持返回 `405`。`POST /v1/computations` 验证通过返回 `200`；attestation 失败或 runtime 未实现返回 `422`；契约/参数非法返回 `400`；执行器故障返回 `502`。失败响应一律不携带 `display_value`，错误体也不会回显 SQL、DSN 或驱动信息。
 
@@ -412,7 +417,7 @@ go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
 `web/` 是零运行时依赖的原生 ES module 控制台，包含三个视图：**状态**（健康状态 + 最近路由决策）、**API 文档**（全部 21 个 HTTP method + path 组合、请求/响应样例、通用约定与错误码）与 **图谱**（索引新鲜度、节点检索、血缘、邻域探索与可回答性）。
 
 - **由二进制托管**：Vite 直接打包输出到 `internal/webui/dist`，`//go:embed` 把该目录编进 `agentmem`，`serve` 用 `GET /` 返回页面、`/assets/*` 返回带哈希的产物。不再需要反向代理的 document root 或第二个进程，也不依赖运行时 JS。
-- **可关闭**：`AGENTMEM_CONSOLE_ENABLED=false` 在配置层关掉控制台，`GET /` 与 `/assets/*` 返回 JSON `404`，21 条 API 路由、权限矩阵、限流与 `GET /healthz` 均不变。只提供 API 的部署建议显式关闭，不必公开文档面。
+- **可关闭**：`AGENTMEM_CONSOLE_ENABLED=false` 在配置层关掉控制台，`GET /` 与 `/assets/*` 返回 JSON `404`，23 条 API 路由、权限矩阵、限流与 `GET /healthz` 均不变。只提供 API 的部署建议显式关闭，不必公开文档面。
 - **文档页可直接试调用**：展开任意端点即出现内联工作区——可编辑查询参数与 JSON 请求体，一键发出真实的同源请求，随后展示状态码、耗时、响应头子集与美化后的响应体。写操作（`POST /v1/knowledge`、`POST /v1/migrate`、`POST /v1/computations`、`PUT /v1/graph/node`、`POST /v1/graph/index`、`POST /v1/graph/edges`）必须先显式确认。
 - **图谱视图**：`?view=graph` 是第三个视图——索引新鲜度徽标（`fresh` / `stale` / `rebuilding`）、按关键词与节点类型过滤的结果列表、粘性详情面板（来源与血缘、属性、受批准计算摘要、出边/入边表格）、深度与方向有界的邻域探索，以及用原生 `<progress>` 表达覆盖率并并列缺口清单的可回答性面板。表格是查询容器：窄于 560px 时逐格注入列名并堆叠，滚动时表头始终粘住。
 - **凭据只留在当前标签页**：Bearer 令牌仅存于 `sessionStorage`，只作为 `Authorization` 头发送，绝不进入 URL、草稿或日志；关闭标签页即失效。
@@ -439,6 +444,39 @@ bun x impeccable detect http://localhost:5173 --quiet
 ```
 
 修改控制台后需要重建内嵌产物：`cd web && bun install --frozen-lockfile && bun run build`（或 `make web`）会重写 `internal/webui/dist`；该目录已入库，因此 `go build` 与 `go test ./...` 无需 Bun、全程离线。`make web-verify` 会重建并在产物过期时失败。Go 二进制不依赖 Bun 或任何 JS 运行时。前端校验使用 Bun 内置测试运行器，离线执行且无新增依赖：`cd web && bun test`。
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🤖 MCP server
+
+同一个二进制同时是 MCP server，两条传输共用一份协议内核（`internal/mcp`）与同一条授权路径：
+
+| 传输 | 入口 | 身份 |
+|---|---|---|
+| Streamable HTTP | `POST` / `GET` / `DELETE /mcp` | 现有 `Authorization: Bearer` 中间件 |
+| stdio | `agentmem mcp` | `--token` / `--token-env`，或鉴权关闭时的 `--subject` + `--scopes` |
+
+- 协议版本：`2025-06-18`（默认）、`2025-03-26`，以及无状态的 `2024-11-05` 回退。`initialize` 回显请求的版本，每条结果同时给 `structuredContent` 与 `content[0].text` 的 JSON 字符串。
+- 会话：`initialize` 下发 `Mcp-Session-Id`；声明有状态版本却没有合法会话时返回 `404` + `-32004`；`GET /mcp` 为该会话推事件流，`DELETE /mcp` 以 `204` 关闭。
+- 只读工具（常驻，全部走同一 ACL）：`search_terms`、`get_node`、`neighbors`、`path`、`check_answerable`、`graph_schema`、`graph_stats`、`graph_retrieve`、`query`、`list_concepts`、`read_knowledge`、`list_decisions`、`list_computations`。
+- 写工具（`put_knowledge`、`put_graph_node`、`append_graph_edge`、`run_computation`、`rebuild_graph_index`）仅在 `AGENTMEM_MCP_WRITE=true` 时登记，且每次调用都先按自身 scope（`knowledge:write` / `graph:write` / `compute:run` / `migrate:run`）校验再进入 `service`；关闭时与未知工具不可区分（`-32602`）。
+
+```json
+{
+  "mcpServers": {
+    "agentmem": {
+      "command": "agentmem",
+      "args": ["mcp", "--env", "/etc/agentmem.env", "--subject", "alice", "--scopes", "knowledge:read"]
+    }
+  }
+}
+```
+
+完整协议、错误码与客户端配置见 [`docs/mcp.md`](./docs/mcp.md)。
 
 <div align="right">
 
@@ -523,6 +561,7 @@ make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
 | [受批准计算](./docs/computations.md) | 契约、参数绑定、attester 链路、verdict 审计 |
 | [路由](./docs/routing.md) | 规则优先决策、System One、双程对账 |
 | [知识图谱](./docs/graph.md) | frontmatter 声明、类型化本体、投影同步、RRF 与可回答性 |
+| [MCP server](./docs/mcp.md) | Streamable HTTP 与 stdio 两条传输、协议版本、会话、工具清单与 scope |
 | [端到端验收](./docs/e2e.md) | 用户视角离线黑盒套件、用例矩阵与排错 |
 
 <div align="right">

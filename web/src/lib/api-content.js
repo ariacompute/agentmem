@@ -5,9 +5,9 @@
 // `titleKey`, `bodyKey` and `groupKey` pointers cross into api-copy.js.
 //
 // This table mirrors internal/handlers/http.go. When a route changes there it
-// changes here too; web/tests/api-content.test.mjs pins the exact 21 method+path
-// combinations — including the /v1/graph* family and the read-only /mcp
-// transport — so the console cannot drift from the server.
+// changes here too; web/tests/api-content.test.mjs pins the exact 23 method+path
+// combinations — including the /v1/graph* family and the three /mcp transport
+// methods — so the console cannot drift from the server.
 //
 // The sidecar wire protocol in internal/bridges/httpbridge.go (/put, /query,
 // /delete) is an outbound channel to RAG engines, not part of this API.
@@ -38,6 +38,7 @@ export const headerLines = [
   'authorization: Bearer <access-token>   ·   CORS headers: none   ·   pagination: none',
   'scopes: knowledge:read · knowledge:write · migrate:run · audit:read · compute:run · graph:write',
   'rate limit: 20 req/s per client, burst 40   ·   Origin allow-list enforced',
+  'MCP: Mcp-Session-Id + MCP-Protocol-Version (2025-06-18 · 2025-03-26 · 2024-11-05)',
 ]
 
 export const errorLines = [
@@ -61,7 +62,9 @@ export const graphLines = [
   'reads: knowledge:read   ·   PUT /v1/graph/node · POST /v1/graph/edges: graph:write',
   'POST /v1/graph/index: migrate:run (projection rebuild, body is {})',
   'depth 1-8, default 3 (AGENTMEM_GRAPH_MAX_DEPTH) · limit <= 200 · ontology mismatch 422 · unknown type or dangling target warns',
-  'POST /mcp: JSON-RPC 2.0, read-only tools search_terms · get_node · neighbors · path · check_answerable',
+  'POST /mcp: JSON-RPC 2.0 · read tools search_terms · get_node · neighbors · path · check_answerable · graph_schema · graph_stats · graph_retrieve · query · list_concepts · read_knowledge · list_decisions · list_computations',
+  'GET /mcp: event stream for a live session · DELETE /mcp: close it (204) · 2024-11-05 stays stateless',
+  'AGENTMEM_MCP_WRITE=false hides write tools; true registers put_knowledge · put_graph_node · append_graph_edge · run_computation · rebuild_graph_index, each gated by its own scope',
 ]
 
 /** Prose blocks on the overview section. Samples stay untranslated. */
@@ -81,9 +84,10 @@ export const endpointGroups = [
 ]
 
 /**
- * The 21 method+path combinations served by NewHandler.
- * `request` is a JSON body for POST routes and a request line for GET routes.
- * `response` is always a JSON sample. All values are placeholders.
+ * The 23 method+path combinations served by NewHandler.
+ * `request` is a JSON body for POST/PUT routes and a request line for
+ * GET/DELETE routes. `response` is a JSON sample unless `json: false` marks a
+ * transport that answers an event stream or 204 No Content.
  */
 export const endpoints = [
   {
@@ -489,7 +493,7 @@ export const endpoints = [
     method: 'POST',
     path: '/mcp',
     descKey: 'epMCP',
-    statuses: ['200', '202', '401', '403', '405', '413', '429'],
+    statuses: ['200', '202', '400', '401', '403', '404', '405', '413', '429'],
     request: `{
   "jsonrpc": "2.0",
   "id": 1,
@@ -498,8 +502,29 @@ export const endpoints = [
     response: `{
   "jsonrpc": "2.0",
   "id": 1,
-  "result": { "tools": [{ "name": "search_terms" }] }
+  "result": { "tools": [{ "name": "search_terms", "inputSchema": {}, "outputSchema": {} }] }
 }`,
+  },
+  {
+    group: 'graph',
+    method: 'GET',
+    path: '/mcp',
+    descKey: 'epMCPStream',
+    json: false,
+    statuses: ['200', '401', '403', '404', '405', '429'],
+    request: 'GET /mcp',
+    response: `event: message
+data: {"jsonrpc": "2.0", "id": 1, "result": {}}`,
+  },
+  {
+    group: 'graph',
+    method: 'DELETE',
+    path: '/mcp',
+    descKey: 'epMCPClose',
+    json: false,
+    statuses: ['204', '401', '403', '404', '405', '429'],
+    request: 'DELETE /mcp',
+    response: '204 No Content',
   },
 ]
 
@@ -547,6 +572,10 @@ export const tryMeta = {
   'POST /v1/graph/index': { write: true, query: {} },
   'POST /v1/graph/edges': { write: true, query: {} },
   'POST /mcp': { write: false, query: {} },
+  // Transport methods: the workbench sends them without a body and shows the
+  // raw response (an event stream or an empty 204).
+  'GET /mcp': { write: false, query: {} },
+  'DELETE /mcp': { write: false, query: {} },
 }
 
 /** Status rows for the errors section. `codes` is a wire-level hint. */
@@ -554,6 +583,7 @@ export const statusGroups = [
   { status: '200', descKey: 'status200', codes: 'ok' },
   // JSON-RPC notifications have no id and therefore no result body.
   { status: '202', descKey: 'status202', codes: 'accepted / notification' },
+  { status: '204', descKey: 'status200', codes: 'MCP session closed' },
   { status: '400', descKey: 'status400', codes: 'invalid JSON / required / boundary' },
   { status: '401', descKey: 'status401', codes: 'missing / unknown credentials' },
   { status: '403', descKey: 'status403', codes: 'missing scope / origin' },

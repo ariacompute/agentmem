@@ -178,6 +178,9 @@ var envSpecs = []struct {
 	{"AGENTMEM_GRAPH_MAX_EDGES", intSetter(func(c *Config) *int { return &c.Graph.MaxEdges })},
 	{"AGENTMEM_GRAPH_COVERAGE_MIN", floatSetter(func(c *Config) *float64 { return &c.Graph.CoverageMin })},
 	{"AGENTMEM_GRAPH_RRF_K", intSetter(func(c *Config) *int { return &c.Graph.RRFK })},
+	{"AGENTMEM_MCP_WRITE", boolSetter(func(c *Config) *bool { return &c.MCP.Write })},
+	{"AGENTMEM_MCP_SESSION_TTL_MS", intSetter(func(c *Config) *int { return &c.MCP.SessionTTLMS })},
+	{"AGENTMEM_MCP_MAX_SESSIONS", intSetter(func(c *Config) *int { return &c.MCP.MaxSessions })},
 	{AdaptersVar, adaptersSetter},
 	{"AGENTMEM_ACL_DEFAULT_VISIBILITY", strSetter(func(c *Config) *string { return &c.ACL.DefaultVisibility })},
 	{"AGENTMEM_ACL_DEFAULT_OWNER", strSetter(func(c *Config) *string { return &c.ACL.DefaultOwner })},
@@ -187,6 +190,11 @@ var envSpecs = []struct {
 	{"AGENTMEM_EGRESS_ALLOWED_HOSTS", listSetter(func(c *Config) *[]string { return &c.Egress.AllowedHosts })},
 	{"AGENTMEM_RATE_RPS", intSetter(func(c *Config) *int { return &c.RateLimit.RPS })},
 	{"AGENTMEM_RATE_BURST", intSetter(func(c *Config) *int { return &c.RateLimit.Burst })},
+	// Read directly by the stdio MCP transport (`agentmem mcp`), which resolves
+	// it into a bearer token without ever storing it in Config. It is declared
+	// so the closed whitelist also covers process-environment keys; a value in
+	// a .env file is deliberately ignored (no credentials in files).
+	{"AGENTMEM_MCP_TOKEN", func(*Config, string) error { return nil }},
 	// Read directly by the optional Postgres integration test; declared so the
 	// closed whitelist also covers process-environment keys.
 	{"AGENTMEM_TEST_PG_DSN", func(*Config, string) error { return nil }},

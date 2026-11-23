@@ -35,7 +35,9 @@ flowchart TB
   CMP --> PG
 ```
 
-包依赖单向：`auth` / `safepath` / `netsafe` / `webui` 与 `okf` / `meta` / `config`（L0，零内部依赖）→ `vcs` / `adapter` / `bridges` → `plugins`（清单 + 引擎包）→ `router` / `eval` / `compute` / `graph` → `service` → `handlers` / `cli` → `cmd/agentmem`。端口定义在消费方，实现注入。`gorm` 只在 `internal/meta` 内出现；`compute.SQLExecutor` 与 `meta.GraphIndex` 都定义在 `meta`（消费方分别是 `compute` 与 `graph`），其 GORM 实现留在 `internal/meta`，避免下层反向 import。`internal/graph` 只依赖 `okf` / `meta` / `netsafe` 三个叶子与半叶子包，不 import `router`（RRF 融合在包内自带，避免同级耦合）。
+包依赖单向：`auth` / `safepath` / `netsafe` / `webui` 与 `okf` / `meta` / `config`（L0，零内部依赖）→ `vcs` / `adapter` / `bridges` → `plugins`（清单 + 引擎包）→ `router` / `eval` / `compute` / `graph` → `mcp` → `service` → `handlers` / `cli` → `cmd/agentmem`。端口定义在消费方，实现注入。`gorm` 只在 `internal/meta` 内出现；`compute.SQLExecutor` 与 `meta.GraphIndex` 都定义在 `meta`（消费方分别是 `compute` 与 `graph`），其 GORM 实现留在 `internal/meta`，避免下层反向 import。`internal/graph` 只依赖 `okf` / `meta` / `netsafe` 三个叶子与半叶子包，不 import `router`（RRF 融合在包内自带，避免同级耦合）。
+
+`internal/mcp` 是 MCP 的协议内核：JSON-RPC 2.0 编解码与 batch、版本协商、会话表、工具注册表与 `Backend` 端口。它只 import `auth` 与 `graph` / `router` / `compute` / `okf` / `meta` 的类型，不 import `service` / `handlers` / `cli`；`Backend` 端口由 `internal/service/mcp_backend.go` 直接转发现有 service 用例，两个传输（HTTP 在 `handlers`、stdio 在 `cli`）各自只做 I/O，协议与鉴权只有一份实现。
 
 四个叶子包只依赖标准库，因此不产生向上的依赖：
 
@@ -46,7 +48,7 @@ flowchart TB
 | `internal/netsafe` | `bridges` / `router` | 出向端点 scheme/host 白名单校验与逐跳重定向复检 |
 | `internal/webui` | `handlers` / `cli` | `//go:embed` 内嵌的控制台产物、只读静态服务、页面级 CSP（启动时对首页内联脚本现算摘要） |
 
-控制台与 API 共用同一个监听端口：`handlers.NewHandler` 注册 21 条 API 路由（9 条知识/路由/计算 + 11 条 `/v1/graph*` + `POST /mcp`）与 `/v1/` 的 JSON 404 兜底后，把 `/` 交给 `webui.Handler`（`GET`/`HEAD` 只读，其余方法 405）。`handlers.Console` 端口定义在消费方，`webui` 因此不需要认识 `handlers`。页面与资源是匿名可读的公开前缀，其余路径仍走鉴权与权限矩阵。
+控制台与 API 共用同一个监听端口：`handlers.NewHandler` 注册 23 条 API 路由（9 条知识/路由/计算 + 11 条 `/v1/graph*` + `POST` / `GET` / `DELETE /mcp`）与 `/v1/` 的 JSON 404 兜底后，把 `/` 交给 `webui.Handler`（`GET`/`HEAD` 只读，其余方法 405）。`handlers.Console` 端口定义在消费方，`webui` 因此不需要认识 `handlers`。页面与资源是匿名可读的公开前缀，其余路径仍走鉴权与权限矩阵。
 
 `config` 包不引入第三方 dotenv 依赖：`.env` 由标准库解析。加载顺序为 `Default()` → `.env`（`--env` / `AGENTMEM_ENV_FILE` 指定路径）→ 进程环境变量 → `Validate()`。封闭的 `AGENTMEM_*` 键白名单（同时覆盖进程环境中出现的未知 `AGENTMEM_*` 键）让未知键、非法数值、非法 `AGENTMEM_ADAPTERS` JSON 全部 fail closed；`POSTGRES_*` 等非前缀键留给 Docker Compose。`.env` 不进镜像，Compose 用 `env_file` 与 `${...}` 插值读取同一文件。
 
@@ -54,7 +56,7 @@ flowchart TB
 
 身份只在 Handler 边界建立一次。`handlers.security` 中间件依次做 panic 恢复、安全响应头、单进程限流与 Origin 校验，然后解析 `Authorization: Bearer`，由 `auth.Authenticator` 以 SHA-256 摘要 + `crypto/subtle` 常量时间比较得到 `Principal` 并注入 `context`。Handler 从 context 取主体、按权限矩阵判定后，才把**主体字符串**交给 `service` / `router` / `meta` / `store`；底层沿用既有的 `subject string` 签名，但已没有任何请求自报身份的入口（请求体与查询串里的 `subject` 一律忽略）。
 
-因此：仅经 Handler 的流量被视为可信；CLI 属于本地可信操作，`AGENTMEM_AUTH_ENABLED=false` 时使用 `AGENTMEM_ACL_DEFAULT_OWNER` 作为本地主体。对外错误只保留固定分类文案与稳定状态码，内部 `slog` 仅记录错误类型（`%T`），不记录正文、DSN、SQL 参数或外部进程 stderr。权限矩阵、令牌轮换与威胁模型见 [security.md](security.md)。
+因此：仅经 Handler 的流量被视为可信；CLI 属于本地可信操作，`AGENTMEM_AUTH_ENABLED=false` 时使用 `AGENTMEM_ACL_DEFAULT_OWNER` 作为本地主体。`agentmem mcp` 是 CLI 中唯一有 Bearer 通道的子命令：它可以用 `--token` 换出与 HTTP 相同的 `Principal`，或在鉴权关闭时用 `--subject` + `--scopes` 显式声明，两者都没有就拒绝启动。对外错误只保留固定分类文案与稳定状态码，内部 `slog` 仅记录错误类型（`%T`），不记录正文、DSN、SQL 参数或外部进程 stderr。权限矩阵、令牌轮换与威胁模型见 [security.md](security.md)。
 
 ## 计算数据流
 

@@ -36,7 +36,9 @@ func TestAllRoutesRejectUnsupportedMethods(t *testing.T) {
 		{http.MethodGet, "/v1/graph/retrieve"},
 		{http.MethodGet, "/v1/graph/index"},
 		{http.MethodGet, "/v1/graph/edges"},
-		{http.MethodGet, "/mcp"},
+		// GET and DELETE /mcp are transport methods (session-gated), so only a
+		// genuinely unknown method is a 405.
+		{http.MethodPatch, "/mcp"},
 	}
 	for _, tc := range cases {
 		resp, err := http.DefaultClient.Do(mustReq(t, tc.method, srv.URL+tc.path, nil, ""))
