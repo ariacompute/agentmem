@@ -26,6 +26,7 @@
 **上手**
 
 - [✨ 功能](#-功能)
+- [🗺 架构](#-架构)
 - [💾 存储职责](#-存储职责)
 - [🚀 快速开始](#-快速开始)
 - [🧰 命令行](#-命令行)
@@ -72,6 +73,28 @@ agentmem 只回答 Agent 的一个问题：*这份知识的哪一份副本才算
 - 🧩 **显式引擎注册表** —— 插件由 `plugin.yaml` 声明，`sdk_boundary` 由机器校验；刻意不使用 Go `.so` 动态插件。
 - 🕸️ **图靠声明而非推断** —— 概念既是文档也是节点：类型化关系与本体写在 frontmatter，PostgreSQL 只存可丢弃的邻接索引，未知类型与断链只告警不拒绝；读路径用 RRF 融合文本与邻域排序，并在证据不足时给出覆盖率缺口而不是硬答。
 - 🪶 **零依赖控制台** —— `web/` 是原生 ES module，单色、13 语言、无运行时框架、无 CDN 资源。
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🗺 架构
+
+`arch_cn.png` 总览分层与信任边界：入口层、handler/auth 关卡、MCP 协议内核、service 用例、规则优先路由与受批准计算，底层是 OKF + Git 与 PostgreSQL。箭头遵循单向依赖规则；只有 `auth` / `safepath` / `netsafe` / `webui` 是仅依赖标准库的叶子包。英文版：[`arch.png`](./arch.png)。
+
+<p align="center">
+  <img src="./arch_cn.png" alt="agentmem 架构图" width="1100" />
+</p>
+
+`dataflow_cn.png` 追踪五条端到端路径 —— 写入、读取、图、计算与迁移 —— 并标出每条路径与 Git、PostgreSQL、可重建 RAG 投影的交点，以及失败关闭点：投影失败不回滚正文，计算失败不返回 `display_value`。英文版：[`dataflow.png`](./dataflow.png)。
+
+<p align="center">
+  <img src="./dataflow_cn.png" alt="agentmem 数据流图" width="1100" />
+</p>
+
+完整说明见 [docs/architecture.md](./docs/architecture.md)。
 
 <div align="right">
 
@@ -514,6 +537,8 @@ make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
 
 全程离线（`GOPROXY=off`、文件版 fake 存储、无 Postgres / 网络 / 凭据）；可选工具 `bun`、`openssl` 缺失时明确记为 `SKIP`，绝不静默通过。完整用例矩阵、退出码与排错方式见 [docs/e2e.md](./docs/e2e.md)。
 
+`make cover` 是硬门禁：每个包都必须由**本包内**的测试覆盖，只靠其他包的测试顺带跑到仍然算失败。PostgreSQL 存储层用 `sqlmock` 离线覆盖，真实 SQL 语义仍由每日 `postgres-integration` 作业验证。测量口径、排除策略（当前为空）与接缝清单一见 [docs/testing.md](./docs/testing.md)。
+
 <div align="right">
 
 [![][back-to-top]](#readme-top)
@@ -537,6 +562,7 @@ make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
 | `make web-audit` | 通过 impeccable 做源码级 web 渲染/反模式检查 |
 | `make clean` | 清理 `bin/`（`internal/webui/dist` 是入库的构建输入，不会被清理） |
 | `make e2e` | 用户视角离线黑盒验收（见[测试](#-测试)） |
+| `make cover` | 每包语句覆盖率 100% 门禁（见 [docs/testing.md](./docs/testing.md)） |
 
 `go test ./...` 无需 Postgres、网络或凭据即可通过。设置 `AGENTMEM_TEST_PG_DSN` 可启用可选的真实 PostgreSQL 集成测试。
 
@@ -562,6 +588,7 @@ make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
 | [路由](./docs/routing.md) | 规则优先决策、System One、双程对账 |
 | [知识图谱](./docs/graph.md) | frontmatter 声明、类型化本体、投影同步、RRF 与可回答性 |
 | [MCP server](./docs/mcp.md) | Streamable HTTP 与 stdio 两条传输、协议版本、会话、工具清单与 scope |
+| [测试与覆盖率](./docs/testing.md) | 每包 100% 语句门禁、PostgreSQL 替身、接缝清单 |
 | [端到端验收](./docs/e2e.md) | 用户视角离线黑盒套件、用例矩阵与排错 |
 
 <div align="right">

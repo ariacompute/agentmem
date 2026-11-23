@@ -26,6 +26,7 @@ and **Attested Computations** turn sanctioned SQL kept in Git into verified, aud
 **Get started**
 
 - [✨ Features](#-features)
+- [🗺 Architecture](#-architecture)
 - [💾 Storage split](#-storage-split)
 - [🚀 Quick start](#-quick-start)
 - [🧰 Command line](#-command-line)
@@ -72,6 +73,28 @@ The design draws on [HKUDS/DeepTutor][deeptutor-link] (pluggable retrievers, ver
 - 🧩 **Explicit engine registry** — Plugins are declared in `plugin.yaml` with a machine-checked `sdk_boundary`. Go `.so` plugins are deliberately avoided.
 - 🕸️ **The graph is declared, not inferred** — A concept is both a document and a node; typed relations and the ontology live in frontmatter, PostgreSQL keeps only a discardable adjacency index, and unknown types or dangling targets warn instead of rejecting. Reads fuse text and neighbourhood rankers with RRF and report coverage gaps rather than answering from thin evidence.
 - 🪶 **Zero-dependency console** — `web/` is plain ES modules, monochrome, 13 locales, no runtime framework and no CDN asset.
+
+<div align="right">
+
+[![][back-to-top]](#readme-top)
+
+</div>
+
+## 🗺 Architecture
+
+`arch.png` shows the layers and trust boundary at a glance: entry points, the handler/auth gate, the MCP protocol core, service use cases, the rule-first router and attested computation on top of OKF + Git and PostgreSQL. Arrows follow the single-direction dependency rule; only `auth` / `safepath` / `netsafe` / `webui` are standard-library-only leaves. Chinese version: [`arch_cn.png`](./arch_cn.png).
+
+<p align="center">
+  <img src="./arch.png" alt="agentmem architecture" width="1100" />
+</p>
+
+`dataflow.png` traces five end-to-end paths — write, read, graph, computation and migration — and marks where each one touches Git, PostgreSQL and the rebuildable RAG projections. It also shows the fail-closed points: projection failure never rolls back a body, and a failed computation never returns `display_value`. Chinese version: [`dataflow_cn.png`](./dataflow_cn.png).
+
+<p align="center">
+  <img src="./dataflow.png" alt="agentmem data flows" width="1100" />
+</p>
+
+For the full narrative, see [docs/architecture.md](./docs/architecture.md).
 
 <div align="right">
 
@@ -510,7 +533,7 @@ make e2e E2E_ARGS='--no-gates'         # black-box cases only
 ./scripts/e2e.sh --filter '^H' --keep  # HTTP cases only; keep the temp workspace
 ```
 
-What it covers: all 10 CLI commands and all 9 HTTP routes end-to-end, plus the auth/scope matrix, ACL, rate limiting, config fail-closed rules, Web console static checks, the bigquery/dbt/looker sidecar runtimes through the reference implementation, the API-only posture with the console switched off, and cross-process state. It finishes with the existing `go vet` / `go test` / `make validate` / `make check-trust-store` gates.
+What it covers: all 12 CLI commands and all 23 HTTP routes end-to-end, plus the auth/scope matrix, ACL, rate limiting, config fail-closed rules, MCP over HTTP and stdio, Web console static checks, the bigquery/dbt/looker sidecar runtimes through the reference implementation, the API-only posture with the console switched off, and cross-process state. It finishes with the existing `go vet` / `go test` / `go build` / `make validate` / `make check-boundaries` / `make eval` / `make check-trust-store` gates, plus a case that proves the coverage gate rejects an under-covered profile.
 
 Everything runs offline (`GOPROXY=off`, file-fake store, no Postgres/network/credentials). A missing optional `bun` or `openssl` is reported as `SKIP`, never silently passed. See [docs/e2e.md](./docs/e2e.md) for the full case matrix, exit codes and troubleshooting.
 
@@ -537,8 +560,16 @@ Everything runs offline (`GOPROXY=off`, file-fake store, no Postgres/network/cre
 | `make web-audit` | source-level web rendering/slop check via impeccable |
 | `make clean` | remove `bin/` (`internal/webui/dist` is a committed build input) |
 | `make e2e` | user-perspective offline black-box acceptance ([Test](#-test)) |
+| `make cover` | per-package statement coverage gate at 100% ([docs/testing.md](./docs/testing.md)) |
 
 `go test ./...` passes without Postgres, network or credentials. Set `AGENTMEM_TEST_PG_DSN` to enable the optional real-PostgreSQL integration test.
+
+`make cover` is a hard gate: every package must be exercised by tests inside that
+package, so a package covered only from another package's tests still fails. The
+PostgreSQL store is covered offline through `sqlmock`, while the daily
+`postgres-integration` job keeps proving the real SQL semantics. See
+[docs/testing.md](./docs/testing.md) for the measurement rules, the exclusion
+policy (currently empty) and the seam inventory.
 
 <div align="right">
 
@@ -562,6 +593,7 @@ All detailed docs live under [`docs/`](./docs) and are written in Chinese:
 | [Routing](./docs/routing.md) | Rule-first decision, System One, dual-path reconciliation |
 | [Knowledge graph](./docs/graph.md) | Frontmatter declarations, typed ontology, projection sync, RRF and answerability |
 | [MCP server](./docs/mcp.md) | Streamable HTTP + stdio transports, protocol versions, sessions, tool catalogue and scopes |
+| [Testing and coverage](./docs/testing.md) | Per-package 100% statement gate, PostgreSQL doubles, seam inventory |
 | [E2E acceptance](./docs/e2e.md) | User-perspective offline black-box suite, case matrix and troubleshooting |
 
 <div align="right">
