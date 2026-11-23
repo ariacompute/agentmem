@@ -501,6 +501,45 @@ The binary is an MCP server on two transports that share one protocol core (`int
 
 Full protocol, error codes and client setup: [`docs/mcp.md`](./docs/mcp.md).
 
+### Test the MCP server
+
+stdio — one JSON-RPC frame per line on stdin, and only protocol frames on `stdout`:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | go run ./cmd/agentmem mcp --subject alice --scopes knowledge:read
+```
+
+Streamable HTTP — start `go run ./cmd/agentmem serve` in one terminal, then send requests from another. The `curl -N` event stream blocks until you stop it or close the session, so run that line in a separate terminal:
+
+```bash
+# 1. initialize: copy Mcp-Session-Id from the response headers
+curl -i -sS http://127.0.0.1:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
+
+# 2. call a read tool with that session and the negotiated version
+curl -sS http://127.0.0.1:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Mcp-Session-Id: <session-id>' \
+  -H 'MCP-Protocol-Version: 2025-06-18' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_terms","arguments":{"query":"churn","limit":5}}}'
+
+# 3. in another terminal, open the event stream; then close the session
+curl -N -sS -H 'Mcp-Session-Id: <session-id>' http://127.0.0.1:8080/mcp
+curl -i -sS -X DELETE -H 'Mcp-Session-Id: <session-id>' http://127.0.0.1:8080/mcp
+```
+
+With `AGENTMEM_AUTH_ENABLED=true`, add `Authorization: Bearer <token>` to every `/mcp` call; write tools additionally need `AGENTMEM_MCP_WRITE=true` and the tool's own scope (`put_knowledge` needs `knowledge:write`). The offline acceptance suite covers these paths end to end (`C43`–`C46`, `H51`–`H82`, `S22`–`S25`):
+
+```bash
+make e2e E2E_ARGS='--filter ^H'  # HTTP group, including MCP sessions, tools, errors and capacity
+```
+
+`--filter` only narrows reporting; the requests still run in the same order so session state stays consistent. See [docs/e2e.md](./docs/e2e.md) for the case matrix.
+
 <div align="right">
 
 [![][back-to-top]](#readme-top)

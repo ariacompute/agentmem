@@ -501,6 +501,45 @@ bun x impeccable detect http://localhost:5173 --quiet
 
 完整协议、错误码与客户端配置见 [`docs/mcp.md`](./docs/mcp.md)。
 
+### 本地测试 MCP
+
+stdio —— 在 stdin 上每行写一个 JSON-RPC 请求，`stdout` 只输出协议帧：
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | go run ./cmd/agentmem mcp --subject alice --scopes knowledge:read
+```
+
+Streamable HTTP —— 在一个终端运行 `go run ./cmd/agentmem serve`，再从另一个终端发请求。`curl -N` 事件流会一直阻塞，直到你中断它或关闭会话，因此该行请放到单独的终端执行：
+
+```bash
+# 1. initialize：从响应头复制 Mcp-Session-Id
+curl -i -sS http://127.0.0.1:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
+
+# 2. 带上会话与协商版本调用只读工具
+curl -sS http://127.0.0.1:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Mcp-Session-Id: <session-id>' \
+  -H 'MCP-Protocol-Version: 2025-06-18' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_terms","arguments":{"query":"churn","limit":5}}}'
+
+# 3. 在另一个终端打开事件流，随后关闭会话
+curl -N -sS -H 'Mcp-Session-Id: <session-id>' http://127.0.0.1:8080/mcp
+curl -i -sS -X DELETE -H 'Mcp-Session-Id: <session-id>' http://127.0.0.1:8080/mcp
+```
+
+开启 `AGENTMEM_AUTH_ENABLED=true` 后，每次调用 `/mcp` 都要带 `Authorization: Bearer <token>`；写工具还需要 `AGENTMEM_MCP_WRITE=true` 及对应 scope（`put_knowledge` 需要 `knowledge:write`）。离线验收套件已端到端覆盖这些路径（`C43`–`C46`、`H51`–`H82`、`S22`–`S25`）：
+
+```bash
+make e2e E2E_ARGS='--filter ^H'  # HTTP 组，包含 MCP 会话、工具、错误与容量用例
+```
+
+`--filter` 只缩小报告范围，请求仍按原顺序执行，以免会话状态被打乱。用例矩阵见 [docs/e2e.md](./docs/e2e.md)。
+
 <div align="right">
 
 [![][back-to-top]](#readme-top)
