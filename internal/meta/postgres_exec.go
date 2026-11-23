@@ -48,6 +48,11 @@ func (s *PostgresStore) Query(ctx context.Context, statement string, args []any,
 	return out, nil
 }
 
+// scanRow is a seam over (*sql.Rows).Scan: with []any destinations a scan
+// failure is only observable with a driver that misbehaves, so the seam keeps
+// that branch testable. Production always calls the driver directly.
+var scanRow = func(rows *sql.Rows, dst []any) error { return rows.Scan(dst...) }
+
 // scanRows converts driver rows into the closed SQLRows shape and caps the
 // result before it ever leaves the metadata layer. It is a separate function so
 // the column and scan failure paths stay testable without a live database.
@@ -67,7 +72,7 @@ func scanRows(rows *sql.Rows, maxRows int) (SQLRows, error) {
 		for i := range cells {
 			ptrs[i] = &cells[i]
 		}
-		if err := rows.Scan(ptrs...); err != nil {
+		if err := scanRow(rows, ptrs); err != nil {
 			return SQLRows{}, err
 		}
 		row := make([]any, len(cells))

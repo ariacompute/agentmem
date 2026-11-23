@@ -187,7 +187,7 @@ func (d *Document) SetGraph(decl GraphDecl) error {
 			To: e.To, Type: e.Type, Evidence: e.Evidence, Properties: e.Properties,
 		})
 	}
-	n, err := nodeOf(out)
+	n, err := encodeNode(out)
 	if err != nil {
 		return fmt.Errorf("okf: encode graph declaration: %w", err)
 	}
@@ -301,7 +301,7 @@ func (d *Document) SetGraphSchema(s GraphSchema) error {
 		d.clearExtra(graphSchemaKey)
 		return nil
 	}
-	n, err := nodeOf(out)
+	n, err := encodeNode(out)
 	if err != nil {
 		return fmt.Errorf("okf: encode graph schema: %w", err)
 	}

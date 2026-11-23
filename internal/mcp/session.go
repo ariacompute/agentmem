@@ -48,9 +48,13 @@ func NewSessions(ttl time.Duration, max int) *Sessions {
 	}
 }
 
+// randRead is a seam so the entropy-failure path stays testable; production
+// always reads from crypto/rand.
+var randRead = rand.Read
+
 func randomID() (string, error) {
 	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
+	if _, err := randRead(buf[:]); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(buf[:]), nil

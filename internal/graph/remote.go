@@ -44,6 +44,10 @@ const maxRemoteBody = 8 << 20
 
 // NewRemote fails closed: a missing endpoint, a missing token or a host outside
 // AGENTMEM_EGRESS_ALLOWED_HOSTS is a startup error, never a silent fallback.
+// parseURL is a seam: netsafe already parsed the endpoint, so this failure is
+// only reachable with an injected parser. Production always uses net/url.
+var parseURL = url.Parse
+
 func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	endpoint := strings.TrimSpace(cfg.Endpoint)
 	if endpoint == "" {
@@ -55,7 +59,7 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	if err := netsafe.ValidateEndpoint(endpoint, cfg.AllowedHosts); err != nil {
 		return nil, fmt.Errorf("graph: remote endpoint rejected: %w", err)
 	}
-	base, err := url.Parse(endpoint)
+	base, err := parseURL(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("graph: remote endpoint is invalid")
 	}

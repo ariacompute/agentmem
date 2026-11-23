@@ -153,18 +153,21 @@ func (s *SystemOneDecisioner) Decide(ctx context.Context, task DecisionTask) (Ro
 	return d, nil
 }
 
+// newRequest is a seam: the endpoint is already validated, so a request
+// construction failure is only reachable with an injected builder. Production
+// always uses net/http.
+var newRequest = http.NewRequestWithContext
+
 func (s *SystemOneDecisioner) call(ctx context.Context, task DecisionTask, eligible []string) (RouteDecision, error) {
 	// Re-check the endpoint on the way out: assembly validates it once, but a
 	// standalone constructor must not be able to reach an unlisted host.
 	if err := netsafe.ValidateEndpoint(s.cfg.Endpoint, s.hosts); err != nil {
 		return RouteDecision{}, fmt.Errorf("systemone: %w", err)
 	}
-	payload, err := json.Marshal(s.buildBody(task, eligible))
-	if err != nil {
-		return RouteDecision{}, err
-	}
+	// buildBody returns a fixed struct, so encoding cannot fail.
+	payload, _ := json.Marshal(s.buildBody(task, eligible))
 	url := strings.TrimRight(s.cfg.Endpoint, "/") + "/v1/systemone"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	req, err := newRequest(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return RouteDecision{}, err
 	}

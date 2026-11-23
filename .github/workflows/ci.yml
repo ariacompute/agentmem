@@ -36,6 +36,11 @@ jobs:
         run: go vet ./...
       - name: Test (offline, no services)
         run: go test ./... -count=1
+      # Every package must be exercised by tests inside that package. The
+      # profile only instruments the package under test, so this fails when a
+      # package is covered solely from another package's tests (docs/testing.md).
+      - name: Coverage gate (100% per package)
+        run: make cover
       - name: Build
         run: go build -o bin/agentmem ./cmd/agentmem
       - name: Validate .env.example

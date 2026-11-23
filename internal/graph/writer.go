@@ -122,12 +122,17 @@ func (w *Writer) load(ctx context.Context, subject, id string) (*okf.Document, e
 	return &okf.Document{Type: "concept"}, nil
 }
 
+// nodeFrom is a seam over NodeFrom: a document that just passed SetGraph can
+// always be converted, so the failure branch is only reachable with an injected
+// converter. Production always calls NodeFrom.
+var nodeFrom = NodeFrom
+
 func (w *Writer) commit(ctx context.Context, subject, id string, doc *okf.Document) (WriteResult, []string, error) {
 	schema, schemaWarnings, err := w.Projector.LoadSchema(ctx)
 	if err != nil {
 		return WriteResult{}, nil, err
 	}
-	probe, edges, _, err := NodeFrom(id, doc, "", "")
+	probe, edges, _, err := nodeFrom(id, doc, "", "")
 	if err != nil {
 		return WriteResult{}, nil, err
 	}

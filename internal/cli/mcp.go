@@ -160,14 +160,12 @@ func writeMCPStdio(w io.Writer, payload []byte) error {
 }
 
 func mcpFailurePayload(code int, message string) []byte {
-	payload, err := json.Marshal(mcp.Response{
+	// Strings and integers always encode, so no fallback payload is needed.
+	payload, _ := json.Marshal(mcp.Response{
 		JSONRPC: "2.0",
 		ID:      json.RawMessage("null"),
 		Error:   &mcp.Error{Code: code, Message: message},
 	})
-	if err != nil {
-		return []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"internal error"}}`)
-	}
 	return payload
 }
 

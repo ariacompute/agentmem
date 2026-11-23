@@ -115,20 +115,16 @@ func (s *PostgresStore) GraphNeighbors(ctx context.Context, q GraphWalk) (GraphR
 	if len(sources) == 0 {
 		return GraphResult{Depths: map[string]int{}}, nil
 	}
-	seed, err := json.Marshal(sources)
-	if err != nil {
-		return GraphResult{}, fmt.Errorf("meta: encode graph sources: %w", err)
-	}
+	// sources is a []string, so encoding cannot fail.
+	seed, _ := json.Marshal(sources)
 	typesJSON := []byte("[]")
 	marker := ""
 	if len(q.EdgeTypes) > 0 {
 		marker = "1"
-		if typesJSON, err = json.Marshal(q.EdgeTypes); err != nil {
-			return GraphResult{}, fmt.Errorf("meta: encode edge types: %w", err)
-		}
+		typesJSON, _ = json.Marshal(q.EdgeTypes)
 	}
 	var rows []graphWalkRow
-	err = s.db.WithContext(ctx).Raw(graphWalkSQL,
+	err := s.db.WithContext(ctx).Raw(graphWalkSQL,
 		string(seed), q.Direction, q.Direction, q.Direction, q.Depth,
 		marker, string(typesJSON), q.MaxNodes+1,
 	).Scan(&rows).Error
@@ -353,12 +349,10 @@ func (s *PostgresStore) PruneGraphNodes(ctx context.Context, keep []string) (int
 		}
 		return int(total), nil
 	}
-	encoded, err := json.Marshal(keep)
-	if err != nil {
-		return 0, fmt.Errorf("meta: encode graph keep set: %w", err)
-	}
+	// keep is a []string, so encoding cannot fail.
+	encoded, _ := json.Marshal(keep)
 	removed := int64(0)
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Where("NOT (concept_id IN (SELECT jsonb_array_elements_text(?::jsonb)))", string(encoded)).
 			Delete(&GraphNodeRecord{})
 		if res.Error != nil {

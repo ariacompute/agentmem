@@ -2253,6 +2253,19 @@ else
   else
     skip_case G08 "make check-trust-store" "openssl not installed"
   fi
+
+  begin_case G09 "the coverage gate rejects a profile below 100%"
+  printf 'mode: atomic\nagentmem/internal/mcp/protocol.go:1.1,2.2 1 1\nagentmem/internal/mcp/protocol.go:3.3,4.4 1 0\n' >"$WORK/incomplete.out"
+  gate_rc=0
+  go run ./scripts/coverage -profile "$WORK/incomplete.out" >"$WORK/gate-G09.log" 2>&1 || gate_rc=$?
+  ck $(( gate_rc == 1 ? 0 : 1 )) "exit code $gate_rc (want 1)"
+  has "$(cat "$WORK/gate-G09.log")" '50.0% < 100.0%' 'below-threshold report'
+  end_case
+
+  begin_case G10 "the coverage gate is wired into make and CI"
+  has "$(cat "$REPO/Makefile")" 'cover:' 'make cover target'
+  has "$(cat "$REPO/.github/workflows/ci.yml")" 'make cover' 'CI step'
+  end_case
 fi
 
 # ===========================================================================

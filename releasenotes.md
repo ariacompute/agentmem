@@ -79,6 +79,15 @@ and a rule-first smart router.
   unknown static paths answer JSON `404` while the 23 API routes, the
   permission matrix, rate limiting and `GET /healthz` stay identical — an
   API-only deployment needs no rebuild.
+- **Coverage gate**: `make cover` requires 100% statement coverage for every
+  package in `go list ./...`, measured per package so a package covered only
+  from another package's tests still fails. The PostgreSQL store is covered
+  offline through `sqlmock` doubles (no database, no network) while the daily
+  `postgres-integration` job keeps proving the real SQL semantics. The gate
+  prints a per-package table, fails on missing coverage data, supports a
+  documented exclusion file (currently empty), and runs in CI. Seven provably
+  unreachable branches were deleted or wrapped in production-defaulted seams,
+  each listed in `docs/testing.md`.
 - **Interactive API reference**: every endpoint row expands into a workbench
   that fires a real same-origin request — editable query parameters and JSON
   body, `Ctrl/Cmd+Enter` to send, then status code, duration, response headers

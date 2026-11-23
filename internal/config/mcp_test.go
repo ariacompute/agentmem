@@ -50,6 +50,20 @@ func TestMCPBoundsFailClosed(t *testing.T) {
 	}
 }
 
+func TestMCPTokenKeyIsKnownButIgnored(t *testing.T) {
+	// The stdio transport reads AGENTMEM_MCP_TOKEN from the process environment
+	// only; the closed whitelist must still recognise the key in a file so a
+	// stale .env does not fail validation, and the value must not be stored.
+	p := writeEnv(t, "AGENTMEM_MCP_TOKEN=secret-value\n")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("AGENTMEM_MCP_TOKEN must be a known key: %v", err)
+	}
+	if cfg.MCP.Write {
+		t.Fatal("a token must not flip the write switch")
+	}
+}
+
 func TestMCPWriteMustBeBoolean(t *testing.T) {
 	p := writeEnv(t, "AGENTMEM_MCP_WRITE=yes-please\n")
 	if _, err := Load(p); err == nil {

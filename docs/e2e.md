@@ -52,7 +52,7 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 | 限流 | `R01` | 独立低限额档位，突发请求触发 429 及固定错误体 |
 | 跨进程 | `X01`–`X05` | 服务停止后 CLI 仍能看到 HTTP 写入的概念、路由审计、计算留痕；快照合法；OKF 正文落盘 |
 | Web | `W01`–`W06` | 自带 CSP、无外链 CDN、API 文档镜像 23 条 method+path、13 语言与 8 个离线测试文件、`bun test`、`W06` 试调用元数据与 `sessionStorage` 令牌约定 |
-| 门禁 | `G02`–`G08` | `go vet`、`go test ./... -count=1`、`go build ./...`、`make validate`、`make check-boundaries`、`make eval`、`make check-trust-store` |
+| 门禁 | `G02`–`G10` | `go vet`、`go test ./... -count=1`、`go build ./...`、`make validate`、`make check-boundaries`、`make eval`、`make check-trust-store`；`G09` 用一份故意 50% 的 profile 证明覆盖率门禁会失败，`G10` 证明 `make cover` 同时接在 `Makefile` 与 CI |
 
 不含真实浏览器 UI 自动化。`make web-audit` 不在脚本内执行（impeccable 在 CI 的 `web` job 中按 lockfile 固定版本运行），但 `W02` 之类静态检查仍在离线套件内。
 

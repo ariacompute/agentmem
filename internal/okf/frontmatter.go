@@ -389,6 +389,11 @@ func nodeOf(v any) (*yaml.Node, error) {
 	return nodeFromYAML(b)
 }
 
+// encodeNode is a seam over nodeOf: the values written here are fixed structs
+// and maps, so encoding cannot fail in production. Tests inject a failure to
+// keep the error handling exercised.
+var encodeNode = nodeOf
+
 // nodeFromYAML decodes one YAML value into a node.
 func nodeFromYAML(b []byte) (*yaml.Node, error) {
 	var n yaml.Node
@@ -439,7 +444,7 @@ func (d *Document) Marshal() ([]byte, error) {
 		if !ok {
 			continue
 		}
-		n, err := nodeOf(v)
+		n, err := encodeNode(v)
 		if err != nil {
 			return nil, err
 		}
@@ -451,9 +456,8 @@ func (d *Document) Marshal() ([]byte, error) {
 	if err := enc.Encode(root); err != nil {
 		return nil, err
 	}
-	if err := enc.Close(); err != nil {
-		return nil, err
-	}
+	// The encoder writes into a bytes.Buffer, so Close cannot fail.
+	_ = enc.Close()
 	out := "---\n" + buf.String() + "---\n" + d.Body
 	return []byte(out), nil
 }

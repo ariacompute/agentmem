@@ -58,7 +58,7 @@
 - HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`、`/v1/graph`（`node` / `neighbors` / `path` / `search` / `schema` / `answerability` / `retrieve` / `index` / `edges`）与 MCP `/mcp`（`POST` JSON-RPC、`GET` 事件流、`DELETE` 会话）；同一 listener 另提供控制台静态路由 `GET /`（含 `/index.html`）与 `GET /assets/*`，匿名可读白名单只含 `GET /healthz` 与控制台（详见第 8 节）。
 - 评测：Recall@k / Precision@k / nDCG / MRR / MAP / HitRate@k 纯函数；显式区分覆盖率 Recall 与二值 HitRate。
 - 文档、CI、Docker、compose；`web/` 零运行时依赖原生 ES module 控制台（详见第 8 节）。
-- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`make check-trust-store`、`make web-audit`（impeccable 版本由 `web/package.json` 精确固定）、`make e2e`、`cd web && bun test`、`cd web && bun run build` 全绿，离线无外部服务（`make web-audit` 源码级渲染检查 0 反模式；`make e2e` 以真实二进制驱动 CLI 与 HTTP 服务）。上述门禁全部在 CI 中执行；真实 Postgres 另由 `postgres-integration` 作业每日定时（保留手动派发）在临时 pgvector service container 上验证，不参与离线验收线。
+- 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make cover`（每个包语句覆盖率 100%，PostgreSQL 层用 `sqlmock` 替身离线覆盖）、`make check-boundaries`、`make check-trust-store`、`make web-audit`（impeccable 版本由 `web/package.json` 精确固定）、`make e2e`、`cd web && bun test`、`cd web && bun run build` 全绿，离线无外部服务（`make web-audit` 源码级渲染检查 0 反模式；`make e2e` 以真实二进制驱动 CLI 与 HTTP 服务）。上述门禁全部在 CI 中执行；真实 Postgres 另由 `postgres-integration` 作业每日定时（保留手动派发）在临时 pgvector service container 上验证，不参与离线验收线。覆盖率口径、排除策略与接缝清单见 [docs/testing.md](./docs/testing.md)。
 
 ## 8. Web 控制台
 

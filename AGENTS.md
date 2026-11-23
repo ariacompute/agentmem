@@ -44,6 +44,13 @@ upward import: `internal/auth` (consumed by `handlers` / `cli`),
 
 - **Offline tests are a hard constraint.** `go test ./...` must pass without
   Postgres, network, or credentials. Every external dependency has a fake.
+- **Coverage is a gate, measured per package.** `make cover` requires 100%
+  statement coverage for *every* package in `go list ./...`; a package covered
+  only from another package's tests still fails, and a package with no tests
+  fails too. PostgreSQL paths are covered offline with `sqlmock` doubles, so no
+  exclusion list is needed; adding one requires a stated reason in
+  `docs/testing.md`. New seams default to the production implementation and are
+  listed there as well.
 - **OKF conformance is permissive.** Only `type` is required. Never reject a
   bundle for unknown keys, unknown types, broken links, or a missing index.
 - **Git is the only authority for bodies.** PostgreSQL stores metadata only,
@@ -184,6 +191,7 @@ make web-verify  # rebuild and fail if internal/webui/dist is stale
 | Path safety | `internal/safepath/safepath.go` |
 | Outbound allowlist | `internal/netsafe/netsafe.go` |
 | Security posture docs | `docs/security.md`, `SECURITY.md` |
+| Coverage gate, doubles and seams | `scripts/coverage/`, `docs/testing.md`, `Makefile` (`make cover`) |
 | Trust-store scan | `scripts/check-emudhra.sh`, `make check-trust-store` |
 | Web shell / views | `web/index.html`, `web/src/main.js`, `web/src/views/` |
 | Embedded console, CSP, `AGENTMEM_CONSOLE_ENABLED` | `internal/webui/`, `internal/cli/root.go`, `.env.example` |

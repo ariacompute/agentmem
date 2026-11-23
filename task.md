@@ -172,6 +172,18 @@
 - [x] 文档：新增 `docs/mcp.md`；`AGENTS.md` 把「`/mcp` 无写工具」改为「默认关闭 + 逐工具 scope」并补 `internal/mcp` 层位；`requirements.md`、`docs/security.md`、`docs/architecture.md`、`docs/graph.md`、`docs/e2e.md`、中英 README、三份发布说明与控制台 API 文档（23 条组合 + 13 语言新增文案）同步。
 - [x] 验收：`go test ./...`、`go vet ./...`、`go build ./...`、`make check-boundaries`、`make web-audit`、`bun test`、`make e2e` 全绿；`make e2e` 199 条（`PASS=199 FAIL=0 SKIP=0`）。
 
+## 阶段 19 · 覆盖率门禁与补齐
+
+目标：把「每包语句覆盖率 100%」变成可执行门禁，并补齐 9 个包共 268 条未覆盖语句。
+
+- [x] 门禁：新增 `scripts/coverage`（profile 解析、按包聚合、缺包检测、阈值与退出码、可选排除清单）与自测（100% 覆盖自身）；`make cover` 串起 `go test -covermode=atomic` 与门禁；CI 的 `go` job 在 `go test` 之后执行。
+- [x] 数据库层：`internal/meta` 用既有 `sqlmock` 骨架补齐 `postgres_graph.go` / `postgres_exec.go` 的全部错误分支、空集合分支、截断、过滤与 `GraphShortestPath` 委托；`sqlmock` 由 indirect 升为直接依赖，无新增下载。
+- [x] 包内补强：handlers（图 handler 失败注入、计算 422 展示门、审计/列举错误、MCP 事件流心跳/寿命/关闭）、mcp（全部 18 个工具的错误与参数边界、batch、版本回退、熵源失败）、cli（10 个图子命令的解析/装配/服务错误、stdio 读写失败、超长行、`consoleMode`）、service（`MCPBackend` 逐方法等值）、okf（schema 预算与畸形条目、解析期属性错误）、graph/router/config 各剩余分支。
+- [x] 接缝与死代码：新增 `randRead`、`scanRow`、`encodeNode`、`newRequest`、`parseURL`、`nodeFrom` 与 SSE 间隔变量，删除固定结构的 `json.Marshal` 分支、`encoder.Close` 分支与 `shortestPathByLevel` 的重复 parent 检查；全部登记在 `docs/testing.md`。
+- [x] e2e：新增 `G09`（门禁对 50% profile 返回 1）与 `G10`（`make cover` 已接入 Makefile 与 CI），用例 199 → 201。
+- [x] 文档：新增 `docs/testing.md`（口径、命令、排除策略、替身理由、接缝清单），同步 `docs/e2e.md`、`AGENTS.md`、`requirements.md`、中英 README 与三份发布说明。
+- [x] 验收：`make cover` 全 29 个包 100%（7672/7672 语句）；`go build ./...`、`go vet ./...`、`go test ./...`、`make check-boundaries`、`make e2e`（201 条）全绿。
+
 ## 验收
 
 ```bash

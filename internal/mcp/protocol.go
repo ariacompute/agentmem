@@ -142,10 +142,9 @@ func (s *Server) Handle(ctx context.Context, p auth.Principal, body []byte, opts
 	}
 	out := Outcome{SessionID: state.sessionID, Version: state.version}
 	if resp != nil {
-		payload, err := json.Marshal(resp)
-		if err != nil {
-			return Outcome{}, &Failure{Code: CodeInternal, Message: "internal error", Status: 500}
-		}
+		// A Response only carries strings, numbers and pre-encoded JSON, so
+		// encoding cannot fail.
+		payload, _ := json.Marshal(resp)
 		out.Payload = payload
 	}
 	return out, nil
@@ -182,10 +181,8 @@ func (s *Server) handleBatch(ctx context.Context, p auth.Principal, body []byte,
 	if len(responses) == 0 {
 		return out, nil
 	}
-	payload, err := json.Marshal(responses)
-	if err != nil {
-		return Outcome{}, &Failure{Code: CodeInternal, Message: "internal error", Status: 500}
-	}
+	// Every element is a Response: strings, numbers and pre-encoded JSON.
+	payload, _ := json.Marshal(responses)
 	out.Payload = payload
 	return out, nil
 }

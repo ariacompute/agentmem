@@ -69,29 +69,7 @@ func NewHandler(svc *service.KnowledgeService, opts Options) http.Handler {
 			methodNotAllowed(w)
 			return
 		}
-		var req queryRequest
-		if !decode(w, r, &req) {
-			return
-		}
-		if req.Query == "" {
-			writeError(w, http.StatusBadRequest, "query is empty")
-			return
-		}
-		if req.TopK < 0 || req.TopK > maxTopK {
-			writeError(w, http.StatusBadRequest, "top_k is out of range")
-			return
-		}
-		subject, ok := subjectFrom(r)
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-		res, err := svc.Query(r.Context(), subject, req.Query, req.TopK)
-		if err != nil {
-			serverError(w, "query", err)
-			return
-		}
-		writeJSON(w, http.StatusOK, res)
+		handleQuery(w, r, svc)
 	})
 	mux.HandleFunc("/v1/migrate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -183,6 +161,32 @@ func NewHandler(svc *service.KnowledgeService, opts Options) http.Handler {
 		})
 	}
 	return newSecurity(opts).wrap(mux)
+}
+
+func handleQuery(w http.ResponseWriter, r *http.Request, svc *service.KnowledgeService) {
+	var req queryRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Query == "" {
+		writeError(w, http.StatusBadRequest, "query is empty")
+		return
+	}
+	if req.TopK < 0 || req.TopK > maxTopK {
+		writeError(w, http.StatusBadRequest, "top_k is out of range")
+		return
+	}
+	subject, ok := subjectFrom(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	res, err := svc.Query(r.Context(), subject, req.Query, req.TopK)
+	if err != nil {
+		serverError(w, "query", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func handleComputation(w http.ResponseWriter, r *http.Request, svc *service.KnowledgeService) {

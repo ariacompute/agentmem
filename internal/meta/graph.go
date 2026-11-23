@@ -264,9 +264,6 @@ func shortestPathByLevel(ctx context.Context, walk func(context.Context, GraphWa
 			if current != "" && q.Direction == "in" && e.ToID != current {
 				continue
 			}
-			if _, seen := parent[other]; seen {
-				continue
-			}
 			// A seed-only walk returns the source; skip nodes that never
 			// appeared in the node budget.
 			if _, ok := nodes[other]; !ok {

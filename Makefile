@@ -1,7 +1,9 @@
-.PHONY: build test vet eval validate check-boundaries check-trust-store run clean web web-verify web-audit e2e
+.PHONY: build test vet eval validate check-boundaries check-trust-store run clean web web-verify web-audit e2e cover
 
 BINARY := bin/agentmem
 PKG := ./...
+# Coverage profile is a build artifact, not a committed file (see .gitignore).
+COVERPROFILE ?= coverage.out
 
 # The console is compiled in: internal/webui/dist is the Vite output and is
 # committed, so `go build` and `go test ./...` stay offline and bun-free.
@@ -10,6 +12,14 @@ build:
 
 test:
 	go test $(PKG) -count=1
+
+# Per-package statement coverage is a hard gate: every package must be
+# exercised by tests inside that package (see docs/testing.md). The script also
+# fails when a package has no tests at all, so a new package cannot slip in
+# uncovered. Exclusions are supported but currently empty on purpose.
+cover:
+	go test $(PKG) -count=1 -covermode=atomic -coverprofile=$(COVERPROFILE)
+	go run ./scripts/coverage -profile $(COVERPROFILE)
 
 vet:
 	go vet $(PKG)
@@ -72,3 +82,4 @@ e2e:
 # removing it would break `go build` for everyone without bun.
 clean:
 	rm -rf bin
+	rm -f $(COVERPROFILE)

@@ -28,29 +28,30 @@ func notFound(msg string) error { return &domainError{code: CodeNotFound, msg: m
 func (s *Server) listTools() []map[string]any {
 	out := make([]map[string]any, 0, len(s.ordered))
 	for _, t := range s.ordered {
-		if t.Mutating && !s.cfg.Write {
-			continue
+		if !t.Mutating || s.cfg.Write {
+			out = append(out, toolEntry(t))
 		}
-		entry := map[string]any{
-			"name":        t.Name,
-			"description": t.Description,
-			"inputSchema": t.InputSchema,
-		}
-		if t.OutputSchema != nil {
-			entry["outputSchema"] = t.OutputSchema
-		}
-		if t.Mutating {
-			entry["annotations"] = map[string]any{
-				"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false,
-			}
-		} else {
-			entry["annotations"] = map[string]any{
-				"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true,
-			}
-		}
-		out = append(out, entry)
 	}
 	return out
+}
+
+// toolEntry renders one tool exactly as tools/list must expose it. Mutating
+// tools are annotated so a client can warn before calling them.
+func toolEntry(t *Tool) map[string]any {
+	entry := map[string]any{
+		"name":        t.Name,
+		"description": t.Description,
+		"inputSchema": t.InputSchema,
+	}
+	if t.OutputSchema != nil {
+		entry["outputSchema"] = t.OutputSchema
+	}
+	entry["annotations"] = map[string]any{
+		"readOnlyHint":    !t.Mutating,
+		"destructiveHint": false,
+		"idempotentHint":  !t.Mutating,
+	}
+	return entry
 }
 
 func (s *Server) callTool(ctx context.Context, req Request, p auth.Principal) *Response {

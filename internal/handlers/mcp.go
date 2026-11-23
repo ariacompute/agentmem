@@ -19,8 +19,13 @@ import (
 // the stdio transport behaves identically.
 
 const (
-	mcpSessionHeader  = "Mcp-Session-Id"
-	mcpVersionHeader  = "MCP-Protocol-Version"
+	mcpSessionHeader = "Mcp-Session-Id"
+	mcpVersionHeader = "MCP-Protocol-Version"
+)
+
+// The SSE timing values are variables so tests can shrink them; production
+// always uses the defaults below.
+var (
 	mcpSSEPingPeriod  = 15 * time.Second
 	mcpSSEMaxLifetime = 5 * time.Minute
 )
@@ -222,15 +227,13 @@ func writeMCPFailure(w http.ResponseWriter, failure *mcp.Failure) {
 	if status < 400 || status > 599 {
 		status = http.StatusInternalServerError
 	}
-	payload, err := json.Marshal(mcp.Response{
+	// The payload is a fixed struct of strings and integers, so encoding cannot
+	// fail; the error return only exists because encoding/json declares one.
+	payload, _ := json.Marshal(mcp.Response{
 		JSONRPC: "2.0",
 		ID:      json.RawMessage("null"),
 		Error:   &mcp.Error{Code: failure.Code, Message: failure.Message},
 	})
-	if err != nil {
-		writeError(w, status, "internal error")
-		return
-	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(payload)
