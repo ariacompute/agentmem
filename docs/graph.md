@@ -123,6 +123,16 @@ graph_schema:
 | POST | `/v1/graph/edges` | `graph:write` | 追加声明关系 |
 | POST | `/mcp` | `knowledge:read` | 只读 MCP JSON-RPC 传输 |
 
+`GET /v1/graph/schema` 的响应与其余端点一样使用 snake_case 键（本体文档本身仍是 YAML frontmatter）：
+
+```json
+{
+  "node_types": { "metric": { "description": "a measure" } },
+  "edge_types": { "derived_from": { "from": ["metric"], "to": ["metric"] } },
+  "warnings": []
+}
+```
+
 约定：
 
 - `depth` / `max_depth` 由 `AGENTMEM_GRAPH_MAX_DEPTH`（默认 3，合法区间 1–8）夹紧；`limit` 上限 200（服务端常量 `graphMaxLimit`），越界一律 `400`。

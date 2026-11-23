@@ -56,21 +56,25 @@ func (g GraphDecl) Empty() bool {
 }
 
 // NodeType declares one legal node type.
+//
+// The JSON tags keep `/v1/graph/schema` in the same snake_case shape as every
+// other response instead of leaking Go field names onto the wire. Frontmatter
+// parsing is manual (see Document.GraphSchema), so the tags are wire-only.
 type NodeType struct {
-	Description string
+	Description string `json:"description,omitempty"`
 }
 
 // EdgeType declares one legal relation and the node types it may connect.
 type EdgeType struct {
-	From        []string
-	To          []string
-	Description string
+	From        []string `json:"from,omitempty"`
+	To          []string `json:"to,omitempty"`
+	Description string   `json:"description,omitempty"`
 }
 
 // GraphSchema is the typed ontology declared by ontology-schema documents.
 type GraphSchema struct {
-	NodeTypes map[string]NodeType
-	EdgeTypes map[string]EdgeType
+	NodeTypes map[string]NodeType `json:"node_types"`
+	EdgeTypes map[string]EdgeType `json:"edge_types"`
 }
 
 // Empty reports whether the schema declares nothing.

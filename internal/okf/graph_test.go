@@ -1,6 +1,7 @@
 package okf
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -318,3 +319,19 @@ func manyProps(n int) map[string]string {
 
 // minIdent keeps generated type names unique and legal.
 func minIdent(i int) int { return 1 + i%8 }
+
+func TestGraphSchemaJSONMatchesTheWireContract(t *testing.T) {
+	schema := GraphSchema{
+		NodeTypes: map[string]NodeType{"metric": {Description: "a measure"}},
+		EdgeTypes: map[string]EdgeType{"derived_from": {From: []string{"metric"}, To: []string{"metric"}}},
+	}
+	data, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"node_types":{"metric":{"description":"a measure"}},` +
+		`"edge_types":{"derived_from":{"from":["metric"],"to":["metric"]}}}`
+	if string(data) != want {
+		t.Fatalf("schema wire shape drifted:\n got %s\nwant %s", data, want)
+	}
+}

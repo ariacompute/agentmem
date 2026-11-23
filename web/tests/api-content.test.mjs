@@ -10,9 +10,11 @@ import {
   endpointGroups,
   endpoints,
   errorLines,
+  graphLines,
   headerLines,
   serverBase,
   statusGroups,
+  tryMeta,
 } from '../src/lib/api-content.js'
 
 /** Mirrors internal/handlers/http.go NewHandler and routePermissions. */
@@ -88,6 +90,45 @@ describe('api-content endpoints', () => {
       for (const key of pointers) {
         assert.ok(typeof table[key] === 'string' && table[key].length > 0, `${code}.${key}`)
       }
+    }
+  })
+
+  it('documents the graph gates as machine data, not prose', () => {
+    const block = conventionBlocks.find((entry) => entry.bodyKey === 'graphBody')
+    assert.ok(block, 'graph convention block')
+    assert.equal(block.titleKey, 'graphTitle')
+    assert.ok(graphLines.length >= 4)
+    assert.equal(block.lines, graphLines)
+    assert.ok(graphLines.some((line) => line.includes('AGENTMEM_GRAPH_ENABLED=false')))
+    assert.ok(graphLines.some((line) => line.includes('graph:write')))
+  })
+
+  it('describes every graph route on its own', () => {
+    const graph = endpoints.filter((entry) => entry.group === 'graph')
+    assert.equal(graph.length, 12)
+    const keys = graph.map((entry) => entry.descKey)
+    assert.equal(new Set(keys).size, keys.length, 'graph routes share a description')
+    for (const key of keys) {
+      assert.notEqual(key, 'epGraphRead')
+    }
+  })
+
+  it('keeps the schema sample in the same snake_case shape the server emits', () => {
+    const schema = endpoints.find((entry) => entry.path === '/v1/graph/schema')
+    const body = JSON.parse(schema.response)
+    assert.deepEqual(Object.keys(body), ['node_types', 'edge_types', 'warnings'])
+    assert.deepEqual(Object.keys(body.edge_types.derived_from), ['from', 'to'])
+    assert.doesNotMatch(schema.response, /"(Description|From|To)"/)
+  })
+
+  it('marks every graph mutation as a confirmed write', () => {
+    const writes = ['PUT /v1/graph/node', 'POST /v1/graph/edges', 'POST /v1/graph/index']
+    for (const key of writes) {
+      assert.equal(tryMeta[key].write, true, key)
+    }
+    const reads = ['GET /v1/graph', 'GET /v1/graph/node', 'POST /v1/graph/retrieve', 'POST /mcp']
+    for (const key of reads) {
+      assert.equal(tryMeta[key].write, false, key)
     }
   })
 

@@ -5,8 +5,9 @@
 // `titleKey`, `bodyKey` and `groupKey` pointers cross into api-copy.js.
 //
 // This table mirrors internal/handlers/http.go. When a route changes there it
-// changes here too; web/tests/api-content.test.mjs pins the exact 9 method+path
-// combinations so the console cannot drift from the server.
+// changes here too; web/tests/api-content.test.mjs pins the exact 21 method+path
+// combinations — including the /v1/graph* family and the read-only /mcp
+// transport — so the console cannot drift from the server.
 //
 // The sidecar wire protocol in internal/bridges/httpbridge.go (/put, /query,
 // /delete) is an outbound channel to RAG engines, not part of this API.
@@ -46,13 +47,28 @@ export const errorLines = [
   '{"error": "document not found or access denied"}',
   '{"error": "query is empty"}',
   '{"error": "method not allowed"}',
+  '{"error": "node not found or access denied"}',
+  '{"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "method not found"}}',
   '{"error": "computation rejected", "envelope": {"concept_id": "computations/example", "display_allowed": false, "verified": false}}',
+]
+
+/**
+ * Machine data for the capability gates: which scope a graph route needs and
+ * what happens when the graph is switched off. Rules, not prose.
+ */
+export const graphLines = [
+  'AGENTMEM_GRAPH_ENABLED=false   /v1/graph* and /mcp answer JSON 404',
+  'reads: knowledge:read   ·   PUT /v1/graph/node · POST /v1/graph/edges: graph:write',
+  'POST /v1/graph/index: migrate:run (projection rebuild, body is {})',
+  'depth 1-8, default 3 (AGENTMEM_GRAPH_MAX_DEPTH) · limit <= 200 · ontology mismatch 422 · unknown type or dangling target warns',
+  'POST /mcp: JSON-RPC 2.0, read-only tools search_terms · get_node · neighbors · path · check_answerable',
 ]
 
 /** Prose blocks on the overview section. Samples stay untranslated. */
 export const conventionBlocks = [
   { titleKey: 'baseUrlTitle', bodyKey: 'baseUrlBody', lines: serverBaseLines },
   { titleKey: 'conventionsTitle', bodyKey: 'conventionsBody', lines: headerLines },
+  { titleKey: 'graphTitle', bodyKey: 'graphBody', lines: graphLines },
   { titleKey: 'errorFormatTitle', bodyKey: 'errorsBody', lines: errorLines },
 ]
 
@@ -302,7 +318,7 @@ export const endpoints = [
     group: 'graph',
     method: 'GET',
     path: '/v1/graph/node',
-    descKey: 'epGraphRead',
+    descKey: 'epGraphNode',
     statuses: ['200', '400', '401', '403', '404', '405', '429', '500'],
     request: 'GET /v1/graph/node?id=metrics/example',
     response: `{
@@ -343,7 +359,7 @@ export const endpoints = [
     group: 'graph',
     method: 'GET',
     path: '/v1/graph/neighbors',
-    descKey: 'epGraphRead',
+    descKey: 'epGraphNeighbors',
     statuses: ['200', '400', '401', '403', '404', '405', '429', '500'],
     request: 'GET /v1/graph/neighbors?from=metrics/example&depth=1&direction=both',
     response: `{
@@ -358,7 +374,7 @@ export const endpoints = [
     group: 'graph',
     method: 'GET',
     path: '/v1/graph/path',
-    descKey: 'epGraphRead',
+    descKey: 'epGraphPath',
     statuses: ['200', '400', '401', '403', '404', '405', '429', '500'],
     request: 'GET /v1/graph/path?from=metrics/example&to=tables/example',
     response: `{
@@ -374,9 +390,9 @@ export const endpoints = [
     group: 'graph',
     method: 'GET',
     path: '/v1/graph/search',
-    descKey: 'epGraphRead',
+    descKey: 'epGraphSearch',
     statuses: ['200', '400', '401', '403', '405', '429', '500'],
-    request: 'GET /v1/graph/search?q=example&limit=20',
+    request: 'GET /v1/graph/search?q=example&node_types=metric&limit=20',
     response: `[
   {
     "concept_id": "metrics/example",
@@ -391,12 +407,12 @@ export const endpoints = [
     group: 'graph',
     method: 'GET',
     path: '/v1/graph/schema',
-    descKey: 'epGraphRead',
+    descKey: 'epGraphSchema',
     statuses: ['200', '401', '403', '405', '429', '500'],
     request: 'GET /v1/graph/schema',
     response: `{
-  "node_types": { "metric": { "Description": "" } },
-  "edge_types": { "derived_from": { "From": ["metric"], "To": ["metric"] } },
+  "node_types": { "metric": { "description": "" } },
+  "edge_types": { "derived_from": { "from": ["metric"], "to": ["metric"] } },
   "warnings": []
 }`,
   },
@@ -423,7 +439,7 @@ export const endpoints = [
     group: 'graph',
     method: 'POST',
     path: '/v1/graph/retrieve',
-    descKey: 'epGraphAnswer',
+    descKey: 'epGraphRetrieve',
     statuses: ['200', '400', '401', '403', '405', '429', '500'],
     request: `{
   "query": "example metric",
@@ -454,7 +470,7 @@ export const endpoints = [
     group: 'graph',
     method: 'POST',
     path: '/v1/graph/edges',
-    descKey: 'epGraphWrite',
+    descKey: 'epGraphEdges',
     statuses: ['200', '400', '401', '403', '405', '422', '429', '500'],
     request: `{
   "concept_id": "metrics/example",
@@ -521,7 +537,10 @@ export const tryMeta = {
     write: false,
     query: { from: 'metrics/example', to: 'tables/example', max_depth: '3' },
   },
-  'GET /v1/graph/search': { write: false, query: { q: 'example', limit: '20' } },
+  'GET /v1/graph/search': {
+    write: false,
+    query: { q: 'example', node_types: 'metric', limit: '20' },
+  },
   'GET /v1/graph/schema': { write: false, query: {} },
   'POST /v1/graph/answerability': { write: false, query: {} },
   'POST /v1/graph/retrieve': { write: false, query: {} },
@@ -541,7 +560,7 @@ export const statusGroups = [
   { status: '404', descKey: 'status404', codes: 'not found / refused' },
   { status: '405', descKey: 'status405', codes: 'method not allowed' },
   { status: '413', descKey: 'status413', codes: 'body too large' },
-  { status: '422', descKey: 'status422', codes: 'unsupported / attestation' },
+  { status: '422', descKey: 'status422', codes: 'unsupported / attestation / ontology' },
   { status: '429', descKey: 'status429', codes: 'client rate limit' },
   { status: '500', descKey: 'status500', codes: 'store / router' },
   { status: '502', descKey: 'status502', codes: 'executor' },
