@@ -171,7 +171,7 @@ go run ./cmd/agentmem decisions --limit 10
 
 ## 🔧 配置
 
-复制 `.env.example` 为 `.env` 并按需调整。`config.Load` 读取该文件（默认 `.env`，可由 `--env` 或 `AGENTMEM_ENV_FILE` 覆盖），再把进程环境变量叠加其上；文件缺失时回退 `Default()`。`AGENTMEM_*` 采用封闭白名单：未知键、非法值与未实现能力一律报错（等价于 `KnownFields(true)`）。`POSTGRES_*` 等非 `AGENTMEM_*` 键留给 Docker Compose。密钥只存在于被 git 忽略的 `.env`，不写入版本化文件或日志。
+复制 `.env.example` 为 `.env` 并按需调整。`config.Load` 读取该文件（默认 `.env`，可由 `--env` 或 `AGENTMEM_ENV_FILE` 覆盖），再把进程环境变量叠加其上；文件缺失时回退 `Default()`。`AGENTMEM_*` 采用封闭白名单：未知键、非法值与未实现能力一律报错（相当于 `.env` 版 `KnownFields(true)`）。`POSTGRES_*` 等非 `AGENTMEM_*` 键留给 Docker Compose。密钥只存在于被 git 忽略的 `.env`，不写入版本化文件或日志。
 
 | 变量 | 默认值 | 作用 |
 |---|---|---|
@@ -273,7 +273,7 @@ go run ./cmd/agentmem validate --env .env
 
 数据与 OKF bundle 存于命名卷（`pgdata`、`agentmem_data`）；容器内 `AGENTMEM_GIT_ROOT` 为 `/app/data/bundle`。如需初始化 bundle，可将 `testdata/bundle/` 复制进该卷（例如通过临时容器或对运行中的服务执行 `docker compose cp`）。
 
-镜像内不含静态目录：控制台已编入二进制，`http://127.0.0.1:8080/` 即控制台页面，同一监听端口继续提供文档中的 9 条 API 路径。前置反向代理仍建议保留用于 TLS，但不再需要配置 document root。
+镜像内不含静态目录：控制台已编入二进制，`http://127.0.0.1:8080/` 即控制台页面，同一监听端口继续提供文档中的 23 条 API 路径。前置反向代理仍建议保留用于 TLS，但不再需要配置 document root。
 
 **信任库刷新。** 2026-10 eMudhra/emSign 中间 CA 私钥泄露后，请重新拉取 `pgvector/pgvector:pg16` 并重建 agentmem 镜像以刷新随附信任库；可用 `make check-trust-store` 离线核验。
 
@@ -437,10 +437,10 @@ go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
 
 ## 🌐 Web 控制台
 
-`web/` 是零运行时依赖的原生 ES module 控制台，包含三个视图：**状态**（健康状态 + 最近路由决策）、**API 文档**（全部 21 个 HTTP method + path 组合、请求/响应样例、通用约定与错误码）与 **图谱**（索引新鲜度、节点检索、血缘、邻域探索与可回答性）。
+`web/` 是零运行时依赖的原生 ES module 控制台，包含三个视图：**状态**（健康状态 + 最近路由决策）、**API 文档**（全部 23 个 HTTP method + path 组合、请求/响应样例、通用约定与错误码）与 **图谱**（索引新鲜度、节点检索、血缘、邻域探索与可回答性）。
 
-- **由二进制托管**：Vite 直接打包输出到 `internal/webui/dist`，`//go:embed` 把该目录编进 `agentmem`，`serve` 用 `GET /` 返回页面、`/assets/*` 返回带哈希的产物。不再需要反向代理的 document root 或第二个进程，也不依赖运行时 JS。
-- **可关闭**：`AGENTMEM_CONSOLE_ENABLED=false` 在配置层关掉控制台，`GET /` 与 `/assets/*` 返回 JSON `404`，23 条 API 路由、权限矩阵、限流与 `GET /healthz` 均不变。只提供 API 的部署建议显式关闭，不必公开文档面。
+- **由二进制托管**：Vite 把 `web/` 直接打包输出到 `internal/webui/dist`，`//go:embed` 把该目录编进 `agentmem`，`serve` 用 `GET /` 返回页面、`/assets/*` 返回带哈希的产物。不再需要反向代理的 document root 或第二个进程，也不依赖运行时 JS。
+- **可关闭**：`AGENTMEM_CONSOLE_ENABLED=false` 在配置层关掉控制台，`GET /` 与 `/assets/*` 返回 JSON `404`，23 条 API 路由、权限矩阵、限流与 `GET /healthz` 均不变。服务只需要 API 面时使用它。
 - **文档页可直接试调用**：展开任意端点即出现内联工作区——可编辑查询参数与 JSON 请求体，一键发出真实的同源请求，随后展示状态码、耗时、响应头子集与美化后的响应体。写操作（`POST /v1/knowledge`、`POST /v1/migrate`、`POST /v1/computations`、`PUT /v1/graph/node`、`POST /v1/graph/index`、`POST /v1/graph/edges`）必须先显式确认。
 - **图谱视图**：`?view=graph` 是第三个视图——索引新鲜度徽标（`fresh` / `stale` / `rebuilding`）、按关键词与节点类型过滤的结果列表、粘性详情面板（来源与血缘、属性、受批准计算摘要、出边/入边表格）、深度与方向有界的邻域探索，以及用原生 `<progress>` 表达覆盖率并并列缺口清单的可回答性面板。表格是查询容器：窄于 560px 时逐格注入列名并堆叠，滚动时表头始终粘住。
 - **凭据只留在当前标签页**：Bearer 令牌仅存于 `sessionStorage`，只作为 `Authorization` 头发送，绝不进入 URL、草稿或日志；关闭标签页即失效。
@@ -537,8 +537,6 @@ make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
 
 全程离线（`GOPROXY=off`、文件版 fake 存储、无 Postgres / 网络 / 凭据）；可选工具 `bun`、`openssl` 缺失时明确记为 `SKIP`，绝不静默通过。完整用例矩阵、退出码与排错方式见 [docs/e2e.md](./docs/e2e.md)。
 
-`make cover` 是硬门禁：每个包都必须由**本包内**的测试覆盖，只靠其他包的测试顺带跑到仍然算失败。PostgreSQL 存储层用 `sqlmock` 离线覆盖，真实 SQL 语义仍由每日 `postgres-integration` 作业验证。测量口径、排除策略（当前为空）与接缝清单一见 [docs/testing.md](./docs/testing.md)。
-
 <div align="right">
 
 [![][back-to-top]](#readme-top)
@@ -565,6 +563,8 @@ make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
 | `make cover` | 每包语句覆盖率 100% 门禁（见 [docs/testing.md](./docs/testing.md)） |
 
 `go test ./...` 无需 Postgres、网络或凭据即可通过。设置 `AGENTMEM_TEST_PG_DSN` 可启用可选的真实 PostgreSQL 集成测试。
+
+`make cover` 是硬门禁：每个包都必须由**本包内**的测试覆盖，只靠其他包的测试顺带跑到仍然算失败。PostgreSQL 存储层用 `sqlmock` 离线覆盖，真实 SQL 语义仍由每日 `postgres-integration` 作业验证。测量口径、排除策略（当前为空）与接缝清单一见 [docs/testing.md](./docs/testing.md)。
 
 <div align="right">
 
@@ -647,11 +647,11 @@ This project is [MIT](./LICENSE) licensed.
 [lastcommit-shield]: https://img.shields.io/github/last-commit/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
 [lastcommit-link]: https://github.com/ariacompute/agentmem/commits
 
-[httpapi-shield]: https://img.shields.io/badge/HTTP_API-9_routes-555?style=flat-square&labelColor=black
+[httpapi-shield]: https://img.shields.io/badge/HTTP_API-23_routes-555?style=flat-square&labelColor=black
 [httpapi-link]: #-http-api
 [tests-shield]: https://img.shields.io/badge/tests-offline_first-555?style=flat-square&labelColor=black
 [tests-link]: ./Makefile
-[docs-shield]: https://img.shields.io/badge/docs-8_guides-555?style=flat-square&labelColor=black
+[docs-shield]: https://img.shields.io/badge/docs-12_guides-555?style=flat-square&labelColor=black
 [docs-link]: ./docs
 [i18n-shield]: https://img.shields.io/badge/console-13_locales-555?style=flat-square&labelColor=black
 [web-console-link]: #-web-控制台

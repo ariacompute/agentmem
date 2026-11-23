@@ -273,7 +273,7 @@ The repository ships `docker-compose.yml` (PostgreSQL + agentmem) and a multi-st
 
 Data and the OKF bundle live in named volumes (`pgdata`, `agentmem_data`); `AGENTMEM_GIT_ROOT` is `/app/data/bundle` inside the container. To seed the bundle, copy `testdata/bundle/` into the volume (e.g. via a temporary container or `docker compose cp` against the running service).
 
-The image carries no static directory: the console is compiled into the binary, so `http://127.0.0.1:8080/` serves the page and the same listener keeps answering the 9 documented API paths. An existing reverse proxy still belongs in front for TLS, but it no longer needs a document root.
+The image carries no static directory: the console is compiled into the binary, so `http://127.0.0.1:8080/` serves the page and the same listener keeps answering the 23 documented API paths. An existing reverse proxy still belongs in front for TLS, but it no longer needs a document root.
 
 **Trust-store refresh.** After the 2026-10 eMudhra/emSign CA key compromise, re-pull `pgvector/pgvector:pg16` and rebuild the agentmem image to refresh the shipped trust stores; verify offline with `make check-trust-store`.
 
@@ -437,10 +437,10 @@ Reports Recall@k, Precision@k, nDCG@k, MRR, MAP and HitRate@k as pure functions 
 
 ## 🌐 Web console
 
-`web/` is a dependency-free ES module console with three views: **Status** (health + recent routing decisions), **API docs** (all 21 HTTP method + path combinations, request/response samples, conventions and error codes) and **Graph** (index freshness, node search, lineage, neighbourhood walk and answerability).
+`web/` is a dependency-free ES module console with three views: **Status** (health + recent routing decisions), **API docs** (all 23 HTTP method + path combinations, request/response samples, conventions and error codes) and **Graph** (index freshness, node search, lineage, neighbourhood walk and answerability).
 
 - **Served by the binary.** Vite bundles `web/` straight into `internal/webui/dist`, `//go:embed` compiles that directory into `agentmem`, and `serve` answers `GET /` with the page and `/assets/*` with the hashed bundles. No reverse-proxy document root, no second process, no runtime JS dependency.
-- **Optional.** `AGENTMEM_CONSOLE_ENABLED=false` disables it at configuration time: `GET /` and `/assets/*` answer JSON `404`, and the 21 API routes, the permission matrix, rate limiting and `GET /healthz` are unchanged. Use it when the service only ever needs an API surface.
+- **Optional.** `AGENTMEM_CONSOLE_ENABLED=false` disables it at configuration time: `GET /` and `/assets/*` answer JSON `404`, and the 23 API routes, the permission matrix, rate limiting and `GET /healthz` are unchanged. Use it when the service only ever needs an API surface.
 - **Try it in place.** Every endpoint row expands into a workbench: editable query parameters and JSON body, one click to send a real same-origin request, then status code, duration, response headers and a pretty-printed body. Write routes (`POST /v1/knowledge`, `POST /v1/migrate`, `POST /v1/computations`, `PUT /v1/graph/node`, `POST /v1/graph/index`, `POST /v1/graph/edges`) require an explicit confirmation first.
 - **Graph view.** `?view=graph` adds the third view: index freshness (`fresh` / `stale` / `rebuilding`), a keyword and type filter over declared nodes, a sticky detail panel with lineage, properties, Attested Computation summary and in/out edge tables, a depth- and direction-bounded neighbourhood walk, and an answerability panel that renders coverage with a native `<progress>` next to the explicit gap list. Tables are query containers: below 560px each cell is relabelled and stacked, and every column header stays sticky while scrolling.
 - **Credentials stay in the tab.** The bearer token is kept in `sessionStorage` only, sent as an `Authorization` header, never appended to a URL, a saved draft or a log line; closing the tab drops it.
@@ -533,7 +533,7 @@ make e2e E2E_ARGS='--no-gates'         # black-box cases only
 ./scripts/e2e.sh --filter '^H' --keep  # HTTP cases only; keep the temp workspace
 ```
 
-What it covers: all 12 CLI commands and all 23 HTTP routes end-to-end, plus the auth/scope matrix, ACL, rate limiting, config fail-closed rules, MCP over HTTP and stdio (JSON-RPC error codes, batching and session capacity), Web console static checks, the bigquery/dbt/looker sidecar runtimes through the reference implementation, the API-only posture with the console switched off, and cross-process state. It finishes with the existing `go vet` / `go test` / `go build` / `make validate` / `make check-boundaries` / `make eval` / `make check-trust-store` gates, plus a case that proves the coverage gate rejects an under-covered profile.
+What it covers: all 12 CLI commands and all 23 HTTP routes end-to-end, plus the auth/scope matrix, ACL, rate limiting, config fail-closed rules, MCP over HTTP and stdio (JSON-RPC error codes, batching and session capacity), Web console static checks, the `bigquery` / `dbt` / `looker` sidecar runtimes through the reference implementation, the API-only posture with the console switched off, and cross-process state. It finishes with the existing `go vet` / `go test` / `go build` / `make validate` / `make check-boundaries` / `make eval` / `make check-trust-store` gates, plus a case that proves the coverage gate rejects an under-covered profile.
 
 Everything runs offline (`GOPROXY=off`, file-fake store, no Postgres/network/credentials). A missing optional `bun` or `openssl` is reported as `SKIP`, never silently passed. See [docs/e2e.md](./docs/e2e.md) for the full case matrix, exit codes and troubleshooting.
 
@@ -652,11 +652,11 @@ This project is [MIT](./LICENSE) licensed.
 [lastcommit-shield]: https://img.shields.io/github/last-commit/ariacompute/agentmem?style=flat-square&labelColor=black&color=555
 [lastcommit-link]: https://github.com/ariacompute/agentmem/commits
 
-[httpapi-shield]: https://img.shields.io/badge/HTTP_API-9_routes-555?style=flat-square&labelColor=black
+[httpapi-shield]: https://img.shields.io/badge/HTTP_API-23_routes-555?style=flat-square&labelColor=black
 [httpapi-link]: #-http-api
 [tests-shield]: https://img.shields.io/badge/tests-offline_first-555?style=flat-square&labelColor=black
 [tests-link]: ./Makefile
-[docs-shield]: https://img.shields.io/badge/docs-8_guides-555?style=flat-square&labelColor=black
+[docs-shield]: https://img.shields.io/badge/docs-12_guides-555?style=flat-square&labelColor=black
 [docs-link]: ./docs
 [i18n-shield]: https://img.shields.io/badge/console-13_locales-555?style=flat-square&labelColor=black
 [web-console-link]: #-web-console
