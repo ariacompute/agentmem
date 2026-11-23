@@ -28,6 +28,10 @@ type RebuildReport struct {
 	Warnings []string `json:"warnings"`
 }
 
+// marshalDocument is a seam so the "cannot render the body" branches stay
+// testable: okf.Document.Marshal never fails for a parsed document.
+var marshalDocument = (*okf.Document).Marshal
+
 func (p *Projector) logger() *slog.Logger {
 	if p.Log != nil {
 		return p.Log
@@ -142,7 +146,7 @@ func (p *Projector) SyncWith(ctx context.Context, id string, schema okf.GraphSch
 // contentIdentity derives the hash from the body itself so a rebuild matches
 // what a canonical write would have stored.
 func contentIdentity(doc *okf.Document, m meta.ConceptMeta) (string, string, error) {
-	data, err := doc.Marshal()
+	data, err := marshalDocument(doc)
 	if err != nil {
 		return "", "", fmt.Errorf("%w: marshal document: %v", ErrInvalid, err)
 	}
@@ -245,7 +249,7 @@ func (p *Projector) EnsureFresh(ctx context.Context, id string) (meta.GraphNodeR
 	// The body hash, not the metadata hash, is the freshness signal: a git
 	// checkout or another CLI process can change the body without touching
 	// concepts_meta.
-	data, err := doc.Marshal()
+	data, err := marshalDocument(doc)
 	if err != nil {
 		return meta.GraphNodeRecord{}, false, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}

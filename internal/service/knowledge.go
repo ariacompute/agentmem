@@ -26,6 +26,10 @@ import (
 	"agentmem/internal/vcs"
 )
 
+// openPostgres is a seam so the PostgreSQL branch of openMetadata is testable
+// without a live database; production always uses meta.OpenPostgres.
+var openPostgres = meta.OpenPostgres
+
 // openMetadata returns the structured store, its vector view and a closer.
 // It is a seam so the fail-closed "not a SQLExecutor" path stays testable.
 var openMetadata = func(ctx context.Context, cfg *config.Config) (meta.MetaStore, meta.VectorStore, func() error, error) {
@@ -34,7 +38,7 @@ var openMetadata = func(ctx context.Context, cfg *config.Config) (meta.MetaStore
 	var closer func() error
 	if cfg.Postgres.DSN != "" {
 		lifetime, _ := time.ParseDuration(cfg.Postgres.ConnMaxLifetime)
-		pg, err := meta.OpenPostgres(ctx, meta.Options{
+		pg, err := openPostgres(ctx, meta.Options{
 			DSN: cfg.Postgres.DSN, MaxOpenConns: cfg.Postgres.MaxOpenConns,
 			MaxIdleConns: cfg.Postgres.MaxIdleConns, ConnMaxLifetime: lifetime,
 			LogLevel: cfg.Postgres.LogLevel,
@@ -230,14 +234,9 @@ func (s *KnowledgeService) assembleGraph(ctx context.Context, cfg *config.Config
 		return fmt.Errorf("service: metadata store does not implement GraphIndex")
 	}
 	projector := &graph.Projector{Bodies: s.Store.Bundle, Meta: s.Store.Meta, Index: idx}
-	searcher := &graph.Searcher{
-		Meta: s.Store.Meta, Index: idx, Projector: projector, Bodies: s.Store.Bundle,
-	}
-	s.GraphProjector = projector
-	s.GraphWriter = &graph.Writer{
-		Meta: s.Store.Meta, Store: storeDocuments{s.Store}, Projector: projector, Searcher: searcher,
-	}
-	s.Graph = searcher
+	// A remote engine owns a copy we cannot write to, so the local writer and
+	// projector are deliberately left unassembled: accepting a write that the
+	// reader would never see is silent divergence, not a feature.
 	if strings.EqualFold(cfg.Graph.Backend, "remote") {
 		remote, err := graph.NewRemote(graph.RemoteConfig{
 			Endpoint:     cfg.Graph.RemoteURL,
@@ -251,6 +250,14 @@ func (s *KnowledgeService) assembleGraph(ctx context.Context, cfg *config.Config
 		s.Graph = remote
 		return nil
 	}
+	searcher := &graph.Searcher{
+		Meta: s.Store.Meta, Index: idx, Projector: projector, Bodies: s.Store.Bundle,
+	}
+	s.GraphProjector = projector
+	s.GraphWriter = &graph.Writer{
+		Meta: s.Store.Meta, Store: storeDocuments{s.Store}, Projector: projector, Searcher: searcher,
+	}
+	s.Graph = searcher
 	// Heal an empty index on first boot. A non-empty index is left alone: reads
 	// repair individual rows lazily, which keeps startup independent of bundle
 	// size.
