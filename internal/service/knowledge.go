@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"agentmem/internal/bridges"
 	"agentmem/internal/compute"
 	"agentmem/internal/config"
+	"agentmem/internal/graph"
 	"agentmem/internal/meta"
 	"agentmem/internal/netsafe"
 	"agentmem/internal/okf"
@@ -77,7 +79,13 @@ type KnowledgeService struct {
 	Decision router.Decisioner
 	Evidence *router.Evidence
 	Compute  *compute.Service
-	closer   func() error
+	// Graph is the read surface (built-in searcher or the optional remote
+	// engine); the writer and projector are only assembled for the built-in
+	// backend because Git remains the authority for every write.
+	Graph          graph.Query
+	GraphWriter    *graph.Writer
+	GraphProjector *graph.Projector
+	closer         func() error
 }
 
 // Assemble wires configuration to implementations. With no DSN it uses the
@@ -194,18 +202,110 @@ func Assemble(ctx context.Context, cfg *config.Config) (*KnowledgeService, error
 	}
 	computeSvc := compute.NewService(bundle, runtimes, m,
 		time.Duration(computeCfg.TimeoutMS)*time.Millisecond, computeCfg.MaxRows)
-	return &KnowledgeService{
+	svc := &KnowledgeService{
 		Config: cfg, Store: s, Registry: registry,
 		Write:    router.NewWriteRouter(s, registry, decisioner),
 		Read:     router.NewReadRouter(s, registry, decisioner),
 		Migrate:  router.NewMigrator(s, registry),
 		Decision: decisioner, Evidence: router.NewEvidence(m),
 		Compute: computeSvc, closer: closer,
+	}
+	if err := svc.assembleGraph(ctx, cfg); err != nil {
+		_ = registry.Close(context.Background())
+		_ = closer()
+		return nil, err
+	}
+	return svc, nil
+}
+
+// assembleGraph wires the graph read/write surfaces. The index port is
+// mandatory when the feature is on: silently disabling the graph would make an
+// enabled feature look empty rather than broken.
+func (s *KnowledgeService) assembleGraph(ctx context.Context, cfg *config.Config) error {
+	if !cfg.Graph.Enabled {
+		return nil
+	}
+	idx, ok := s.Store.Meta.(meta.GraphIndex)
+	if !ok {
+		return fmt.Errorf("service: metadata store does not implement GraphIndex")
+	}
+	projector := &graph.Projector{Bodies: s.Store.Bundle, Meta: s.Store.Meta, Index: idx}
+	searcher := &graph.Searcher{
+		Meta: s.Store.Meta, Index: idx, Projector: projector, Bodies: s.Store.Bundle,
+	}
+	s.GraphProjector = projector
+	s.GraphWriter = &graph.Writer{
+		Meta: s.Store.Meta, Store: storeDocuments{s.Store}, Projector: projector, Searcher: searcher,
+	}
+	s.Graph = searcher
+	if strings.EqualFold(cfg.Graph.Backend, "remote") {
+		remote, err := graph.NewRemote(graph.RemoteConfig{
+			Endpoint:     cfg.Graph.RemoteURL,
+			Token:        os.Getenv(cfg.Graph.RemoteTokenEnv),
+			Timeout:      time.Duration(cfg.Graph.RemoteTimeoutMS) * time.Millisecond,
+			AllowedHosts: cfg.Egress.AllowedHosts,
+		})
+		if err != nil {
+			return fmt.Errorf("service: graph backend: %w", err)
+		}
+		s.Graph = remote
+		return nil
+	}
+	// Heal an empty index on first boot. A non-empty index is left alone: reads
+	// repair individual rows lazily, which keeps startup independent of bundle
+	// size.
+	if stats, err := idx.GraphStats(ctx, "system"); err == nil && stats.Nodes == 0 {
+		if report, err := projector.Rebuild(ctx); err != nil {
+			slog.Warn("graph index bootstrap skipped", "error_type", fmt.Sprintf("%T", err))
+		} else {
+			slog.Info("graph index bootstrapped", "nodes", report.Nodes, "edges", report.Edges)
+		}
+	}
+	return nil
+}
+
+// storeDocuments adapts store.OKFStore to the graph package's narrow ports so
+// graph never imports the store (which would invert the layering).
+type storeDocuments struct{ s *store.OKFStore }
+
+func (d storeDocuments) Get(ctx context.Context, subject, id string) (*okf.Document, error) {
+	return d.s.Get(ctx, subject, id)
+}
+
+func (d storeDocuments) PutAs(ctx context.Context, subject, id string, doc *okf.Document) (graph.WriteResult, error) {
+	r, err := d.s.PutAs(ctx, subject, id, doc)
+	if err != nil {
+		return graph.WriteResult{}, err
+	}
+	return graph.WriteResult{
+		ConceptID: r.ConceptID, ContentHash: r.ContentHash,
+		CommitSHA: r.CommitSHA, Unchanged: r.Unchanged,
 	}, nil
 }
 
 func (s *KnowledgeService) Put(ctx context.Context, subject, id string, d *okf.Document) (router.WriteResult, error) {
-	return s.Write.Put(ctx, subject, id, d)
+	res, err := s.Write.Put(ctx, subject, id, d)
+	if err != nil {
+		return res, err
+	}
+	// The canonical body is already committed, so a projection failure is a
+	// warning (repaired by reindex), never a failed write.
+	s.projectGraph(ctx, res.ConceptID)
+	return res, nil
+}
+
+func (s *KnowledgeService) projectGraph(ctx context.Context, id string) {
+	if s.GraphProjector == nil || strings.TrimSpace(id) == "" {
+		return
+	}
+	_, _, warnings, err := s.GraphProjector.Sync(ctx, id)
+	if err != nil {
+		slog.Warn("graph projection failed", "concept_id", id, "error_type", fmt.Sprintf("%T", err))
+		return
+	}
+	for _, w := range warnings {
+		slog.Warn("graph projection warning", "concept_id", id, "warning", w)
+	}
 }
 
 func (s *KnowledgeService) Query(ctx context.Context, subject, text string, topK int) (router.QueryResult, error) {
@@ -251,6 +351,16 @@ func (s *KnowledgeService) Health(ctx context.Context) map[string]string {
 	}
 	if s.Compute != nil {
 		out["compute_runtimes"] = strings.Join(s.Compute.Runtimes.Names(), ",")
+	}
+	if s.Config != nil {
+		switch {
+		case !s.Config.Graph.Enabled:
+			out["graph"] = "disabled"
+		case s.Graph == nil:
+			out["graph"] = "unavailable"
+		default:
+			out["graph"] = s.Config.Graph.Backend
+		}
 	}
 	for name, err := range s.Registry.HealthAll(ctx) {
 		if err != nil {

@@ -134,6 +134,20 @@
 - [x] sidecar 契约测试：`internal/compute/sidecar_contract_test.go` 表驱动覆盖四个出向 runtime 的 `runtime` / `body_kind` / 参数透传、digest 正确与不符、未知字段拒绝、`postgres` 不得声明为 sidecar；`scripts/e2e.sh` 新增 `C33`–`C35`（bigquery / dbt / looker 经示例 sidecar 真实执行）与 `H40`（控制台关闭后的对外表现）。
 - [x] 文档同步：`.env.example`、`AGENTS.md`、`docs/security.md`、`docs/compute-sidecar.md`、`docs/e2e.md`、`README.md`、`README_cn.md` 记录开关、定时门禁与 sidecar 示例；`releasenotes*` 属历史发布记录，不改写。
 
+## 阶段 16 · 知识图谱与本体（graph）
+
+目标：概念既是文档也是节点，关系在 frontmatter 声明，服务端只保留可重建的邻接索引，并把图读写、类型化校验、融合检索与可回答性暴露到 HTTP / CLI / MCP / 控制台。
+
+- [x] OKF 契约：`internal/okf/graph.go` 解析与写出 `graph`（节点 + 边）与 `graph_schema`，`Marshal` 保持键序与未知键 round-trip；预算（64 边 / 32 属性键 / 256 字节值 / 1024 字节证据 / 128 字节类型名）在 `SetGraph` 处拒绝；`okf` 侧不 import `meta`，声明类型以 `okf.GraphEdge` / `okf.GraphSchema` 自带。
+- [x] 端口与投影：`internal/meta/graph.go` 定义 `GraphIndex`（Upsert/Delete/Get/Neighbors/ShortestPath/Search/Stats/Stale/Prune），签名不含 `*gorm.DB`；`004_graph.sql` 幂等建 `graph_nodes` / `graph_edges` 与索引；`postgres_graph.go` 用递归 CTE 做邻居与最短路径（深度、行数在 SQL 侧封顶），`fake_graph.go` 与之同语义同排序，`file_fake.go` 快照纳入图行，CLI 多进程可见。
+- [x] 图核心：`internal/graph` 拆成 `graph.go`（视图与端口）、`decl.go`（派生边 + 本体校验：已声明关系类型连错节点类型 `422`，未知类型/未知节点/断链只告警）、`index.go`（`Sync` / `EnsureFresh` / `Rebuild` + `PruneMissing`，按 `content_hash` 跳过未变更文档）、`query.go`（节点/邻居/路径/检索，ACL 先过滤再计数）、`answer.go`（分词、覆盖率 0.6/0.15/0.15/0.1 加权、三档结论、七类缺口、上限 50）、`fusion.go`（RRF + id 兜底排序）、`writer.go`（写入后同步投影，失败只告警不回滚正文）、`remote.go`（HTTP 只读引擎：netsafe 主机白名单、令牌取自环境变量名、超时与 5xx 红化、禁止静默降级）。
+- [x] 配置与权限：`AGENTMEM_GRAPH_ENABLED/BACKEND/REMOTE_URL/REMOTE_TOKEN_ENV/REMOTE_TIMEOUT_MS/MAX_DEPTH/MAX_NODES/MAX_EDGES/COVERAGE_MIN/RRF_K` 进入 `config.go`、`dotenv.go` 白名单与 `Default()`，非法值/枚举/联动（remote 缺 URL、缺令牌、主机未放行）启动即失败；`auth.PermGraphWrite` 与 `knownPermissions` 同步；`service.KnowledgeService` 装配 `Graph*` 用例方法，写后刷新 schema 缓存并同步索引。
+- [x] HTTP 与 MCP：`/v1/graph`（`node` / `neighbors` / `path` / `search` / `schema` / `answerability` / `retrieve` / `index` / `edges`）与 `POST /mcp` 共 12 条新 method+path，全部进 `routePermissions`；`depth`/`limit` 双端夹紧，私有与不存在统一 `404`，`/mcp` 仅 5 个只读工具、通知 `202`、超限 `413`；`AGENTMEM_GRAPH_ENABLED=false` 时统一 JSON `404`。
+- [x] CLI：`graph stats|node|neighbors|path|search|answerable|retrieve|put|edge|reindex`，`root.go` 分发与 usage 同步；写命令需要显式 `--subject`（与 `put` 一致），读命令沿用同一 ACL。
+- [x] 控制台：`?view=graph` 第三视图（索引新鲜度徽标、检索与类型过滤、粘性详情、出/入边表格、深度与方向有界的邻域、原生 `<progress>` 覆盖率与缺口清单、需二次确认的节点写入）；`api-graph.js` 收敛请求构造（令牌只走 `Authorization`），9 个新文案键覆盖 13 语言，端点表扩到 21 条并补 `202`/`413` 状态说明；表格改为查询容器（<560px 逐格注入列名并堆叠，表头粘住），行链接支持上下键移动焦点，动效在 `prefers-reduced-motion` 下禁用；`make web-audit` 0 命中。
+- [x] 文档：新增 `docs/graph.md`（声明契约、校验语义、投影与陈旧判定、表结构、API/CLI/MCP、RRF 与覆盖率、外部引擎、控制台、与 omniGraph / auto-ontology 的差异与非目标），同步 `architecture.md`（分层与图数据流、21 条路由）、`storage.md`（两张新表与 fake 语义）、`security.md`（12 条路由权限、出向白名单、生产 fail-closed、两张威胁表）、`requirements.md`（第 10 节）、中英 README、发布说明与 `.env.example`。
+- [x] 验收：`go test ./...`（离线）、`go vet`、`go build`、`make check-boundaries`、`make web-audit`、`cd web && bun test`（75 用例 / 9 文件）、`cd web && bun run build`、`make e2e`（159 用例，含 C36–C42 CLI 图用例与 H40–H56 HTTP/MCP 图用例）全绿。
+
 ## 验收
 
 ```bash

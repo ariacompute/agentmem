@@ -68,8 +68,9 @@ agentmem 只回答 Agent 的一个问题：*这份知识的哪一份副本才算
 - 🧭 **规则先于 System One** —— 概率选择永远不能覆盖确定性的权威判断；只有真正模糊的任务才交给模型。
 - 🔒 **失败关闭而非失败放行** —— 路由超时或报错一律回落到主干正文，且不存在关闭该行为的开关。
 - 🧪 **离线测试是硬约束** —— `go test ./...` 无需 Postgres、网络或凭据即可通过，每个外部依赖都有 fake。
-- ✅ **用户视角验收** —— `make e2e` 离线驱动真实二进制与 HTTP API，覆盖 10 条 CLI 命令、9 条路由、鉴权、配置故障关闭与 Web 控制台。
+- ✅ **用户视角验收** —— `make e2e` 离线驱动真实二进制与 HTTP API，覆盖 11 条 CLI 命令、21 条路由、图读写、鉴权、配置故障关闭与 Web 控制台。
 - 🧩 **显式引擎注册表** —— 插件由 `plugin.yaml` 声明，`sdk_boundary` 由机器校验；刻意不使用 Go `.so` 动态插件。
+- 🕸️ **图靠声明而非推断** —— 概念既是文档也是节点：类型化关系与本体写在 frontmatter，PostgreSQL 只存可丢弃的邻接索引，未知类型与断链只告警不拒绝；读路径用 RRF 融合文本与邻域排序，并在证据不足时给出覆盖率缺口而不是硬答。
 - 🪶 **零依赖控制台** —— `web/` 是原生 ES module，单色、13 语言、无运行时框架、无 CDN 资源。
 
 <div align="right">
@@ -271,6 +272,18 @@ go run ./cmd/agentmem validate --env .env
 | GET | `/v1/concepts` | `knowledge:read` | 权威概念列表 |
 | POST | `/v1/computations` | `compute:run` | 执行并验证受批准计算 |
 | GET | `/v1/computations?concept_id=&limit=` | `audit:read` | 计算 verdict 审计 |
+| GET | `/v1/graph` | `knowledge:read` | 图规模、按类型计数与陈旧数量 |
+| GET | `/v1/graph/node?id=` | `knowledge:read` | 节点详情：血缘、属性、关系与告警 |
+| PUT | `/v1/graph/node` | `graph:write` | 新建或更新节点声明 |
+| GET | `/v1/graph/neighbors?from=&depth=&direction=` | `knowledge:read` | 有界邻域展开 |
+| GET | `/v1/graph/path?from=&to=&max_depth=` | `knowledge:read` | 最短可读路径 |
+| GET | `/v1/graph/search?q=&node_types=` | `knowledge:read` | 按关键词检索节点 |
+| GET | `/v1/graph/schema` | `knowledge:read` | 合并后的类型化本体 |
+| POST | `/v1/graph/answerability` | `knowledge:read` | 覆盖率、结论与缺口 |
+| POST | `/v1/graph/retrieve` | `knowledge:read` | 文本与图邻域的 RRF 融合检索 |
+| POST | `/v1/graph/index` | `migrate:run` | 从 Git 重建投影 |
+| POST | `/v1/graph/edges` | `graph:write` | 追加声明关系 |
+| POST | `/mcp` | `knowledge:read` | 只读 MCP JSON-RPC 传输 |
 
 除 `GET /healthz` 外每条路由都需要上表中的权限，同一矩阵在 [身份认证与访问控制](#-身份认证与访问控制) 处复述。`401` / `403` / `429` 与控制台里的错误码表一致；路径存在但方法不支持返回 `405`。`POST /v1/computations` 验证通过返回 `200`；attestation 失败或 runtime 未实现返回 `422`；契约/参数非法返回 `400`；执行器故障返回 `502`。失败响应一律不携带 `display_value`，错误体也不会回显 SQL、DSN 或驱动信息。
 
@@ -303,6 +316,9 @@ AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 位十六进制>","subject":"console
 | `POST /v1/migrate` | `migrate:run` |
 | `GET /v1/decisions`、`GET /v1/computations` | `audit:read` |
 | `POST /v1/computations` | `compute:run` |
+| `GET /v1/graph*`、`POST /v1/graph/answerability`、`POST /v1/graph/retrieve`、`POST /mcp` | `knowledge:read` |
+| `PUT /v1/graph/node`、`POST /v1/graph/edges` | `graph:write` |
+| `POST /v1/graph/index` | `migrate:run` |
 
 令牌缺失或未知返回 `401`（带 `WWW-Authenticate: Bearer`）；令牌缺少权限返回 `403`；超过 `AGENTMEM_RATE_RPS` 返回 `429`。私有文档仅 owner 可读（`acl` 表显式授权优先），匿名写入一律拒绝，因 ACL 被拒的读取与文档不存在同样返回 `404`，无法探测私有文档是否存在。
 
@@ -393,15 +409,16 @@ go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
 
 ## 🌐 Web 控制台
 
-`web/` 是零运行时依赖的原生 ES module 控制台，包含两个视图：**状态**（健康状态 + 最近路由决策）与 **API 文档**（全部 9 个 HTTP method + path 组合、请求/响应样例、通用约定与错误码）。
+`web/` 是零运行时依赖的原生 ES module 控制台，包含三个视图：**状态**（健康状态 + 最近路由决策）、**API 文档**（全部 21 个 HTTP method + path 组合、请求/响应样例、通用约定与错误码）与 **图谱**（索引新鲜度、节点检索、血缘、邻域探索与可回答性）。
 
 - **由二进制托管**：Vite 直接打包输出到 `internal/webui/dist`，`//go:embed` 把该目录编进 `agentmem`，`serve` 用 `GET /` 返回页面、`/assets/*` 返回带哈希的产物。不再需要反向代理的 document root 或第二个进程，也不依赖运行时 JS。
-- **可关闭**：`AGENTMEM_CONSOLE_ENABLED=false` 在配置层关掉控制台，`GET /` 与 `/assets/*` 返回 JSON `404`，9 条 API 路由、权限矩阵、限流与 `GET /healthz` 均不变。只提供 API 的部署建议显式关闭，不必公开文档面。
-- **文档页可直接试调用**：展开任意端点即出现内联工作区——可编辑查询参数与 JSON 请求体，一键发出真实的同源请求，随后展示状态码、耗时、响应头子集与美化后的响应体。写操作（`POST /v1/knowledge`、`POST /v1/migrate`、`POST /v1/computations`）必须先显式确认。
+- **可关闭**：`AGENTMEM_CONSOLE_ENABLED=false` 在配置层关掉控制台，`GET /` 与 `/assets/*` 返回 JSON `404`，21 条 API 路由、权限矩阵、限流与 `GET /healthz` 均不变。只提供 API 的部署建议显式关闭，不必公开文档面。
+- **文档页可直接试调用**：展开任意端点即出现内联工作区——可编辑查询参数与 JSON 请求体，一键发出真实的同源请求，随后展示状态码、耗时、响应头子集与美化后的响应体。写操作（`POST /v1/knowledge`、`POST /v1/migrate`、`POST /v1/computations`、`PUT /v1/graph/node`、`POST /v1/graph/index`、`POST /v1/graph/edges`）必须先显式确认。
+- **图谱视图**：`?view=graph` 是第三个视图——索引新鲜度徽标（`fresh` / `stale` / `rebuilding`）、按关键词与节点类型过滤的结果列表、粘性详情面板（来源与血缘、属性、受批准计算摘要、出边/入边表格）、深度与方向有界的邻域探索，以及用原生 `<progress>` 表达覆盖率并并列缺口清单的可回答性面板。表格是查询容器：窄于 560px 时逐格注入列名并堆叠，滚动时表头始终粘住。
 - **凭据只留在当前标签页**：Bearer 令牌仅存于 `sessionStorage`，只作为 `Authorization` 头发送，绝不进入 URL、草稿或日志；关闭标签页即失效。
 - 13 种语言，与 agenthub 一致：`en`、`zh`、`zh-TW`、`es`、`fr`、`de`、`it`、`ru`、`ja`、`ko`、`pt`、`ar`、`hi`。优先级为 `?lang=` > 本地存储 > 浏览器语言 > 英文；缺失键回退英文，阿拉伯语自动切换 RTL。
 - light / dark 双主题共用一套纯黑白灰灰阶。主题在首屏绘制前解析，未选择时跟随系统，仅显式切换才写入 `agentmem.theme`。
-- `?view=docs` 可直接打开 API 文档视图。
+- `?view=docs` 可直接打开 API 文档视图，`?view=graph` 直接打开图谱视图。
 - 方法、路径、字段名与 JSON 样例在所有语言下逐字呈现，仅说明文字翻译；端点数据与 `internal/handlers/http.go` 保持一致。
 - 控制台页面与 `GET /healthz` 一样公开，但页面内发起的 API 调用仍需令牌。页面 CSP 由服务端在启动时用内嵌首页现算（`script-src 'self'` 加内联主题脚本的 SHA-256），因此摘要不会漂移；JSON 响应仍保持 `default-src 'none'`。`web/index.html` 里的 meta 保留为纯静态托管时的兜底，`web/tests/security.test.mjs` 继续校验它。
 - Web 渲染质量使用 [impeccable][impeccable-link] 检查，单色不变式保持不变；`.notice` 的侧边强调边框作为已知「AI 痕迹」被刻意避免。
@@ -505,6 +522,7 @@ make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
 | [引擎插件](./docs/plugins.md) | 四个引擎作为 Go 包，声明式 `sdk_boundary` |
 | [受批准计算](./docs/computations.md) | 契约、参数绑定、attester 链路、verdict 审计 |
 | [路由](./docs/routing.md) | 规则优先决策、System One、双程对账 |
+| [知识图谱](./docs/graph.md) | frontmatter 声明、类型化本体、投影同步、RRF 与可回答性 |
 | [端到端验收](./docs/e2e.md) | 用户视角离线黑盒套件、用例矩阵与排错 |
 
 <div align="right">

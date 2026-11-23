@@ -21,6 +21,8 @@ type FakeStore struct {
 	fingerprint  map[string]string
 	acl          map[string]ACLEntry
 	vectors      map[string]Vector
+	graphNodes   map[string]GraphNodeRecord
+	graphEdges   map[string]GraphEdgeRecord // from + "\x00" + to + "\x00" + type
 	onClose      func() error
 }
 
@@ -35,6 +37,8 @@ func NewFakeStore() *FakeStore {
 		vectors:      map[string]Vector{},
 		computations: []ComputationRecord{},
 		runKeys:      map[string]bool{},
+		graphNodes:   map[string]GraphNodeRecord{},
+		graphEdges:   map[string]GraphEdgeRecord{},
 	}
 }
 
@@ -307,15 +311,17 @@ func (f *FakeStore) Close() error {
 
 // Snapshot is the serialisable state of the in-memory store.
 type Snapshot struct {
-	Concepts     map[string]ConceptMeta `json:"concepts"`
-	Projections  map[string]Projection  `json:"projections"`
-	Decisions    []DecisionRecord       `json:"decisions"`
-	Computations []ComputationRecord    `json:"computations"`
-	NextID       uint                   `json:"next_id"`
-	Cursors      map[string]Cursor      `json:"cursors"`
-	Fingerprints map[string]string      `json:"fingerprints"`
-	ACL          map[string]ACLEntry    `json:"acl"`
-	Vectors      map[string]Vector      `json:"vectors"`
+	Concepts     map[string]ConceptMeta     `json:"concepts"`
+	Projections  map[string]Projection      `json:"projections"`
+	Decisions    []DecisionRecord           `json:"decisions"`
+	Computations []ComputationRecord        `json:"computations"`
+	NextID       uint                       `json:"next_id"`
+	Cursors      map[string]Cursor          `json:"cursors"`
+	Fingerprints map[string]string          `json:"fingerprints"`
+	ACL          map[string]ACLEntry        `json:"acl"`
+	Vectors      map[string]Vector          `json:"vectors"`
+	GraphNodes   map[string]GraphNodeRecord `json:"graph_nodes"`
+	GraphEdges   map[string]GraphEdgeRecord `json:"graph_edges"`
 }
 
 // Export returns a deep-enough copy of the current state.
@@ -332,6 +338,8 @@ func (f *FakeStore) Export() Snapshot {
 		Fingerprints: make(map[string]string, len(f.fingerprint)),
 		ACL:          make(map[string]ACLEntry, len(f.acl)),
 		Vectors:      make(map[string]Vector, len(f.vectors)),
+		GraphNodes:   make(map[string]GraphNodeRecord, len(f.graphNodes)),
+		GraphEdges:   make(map[string]GraphEdgeRecord, len(f.graphEdges)),
 	}
 	for k, v := range f.concepts {
 		s.Concepts[k] = v
@@ -350,6 +358,12 @@ func (f *FakeStore) Export() Snapshot {
 	}
 	for k, v := range f.vectors {
 		s.Vectors[k] = append(Vector(nil), v...)
+	}
+	for k, v := range f.graphNodes {
+		s.GraphNodes[k] = v
+	}
+	for k, v := range f.graphEdges {
+		s.GraphEdges[k] = v
 	}
 	return s
 }
@@ -394,5 +408,13 @@ func (f *FakeStore) Import(s Snapshot) {
 	f.vectors = s.Vectors
 	if f.vectors == nil {
 		f.vectors = map[string]Vector{}
+	}
+	f.graphNodes = s.GraphNodes
+	if f.graphNodes == nil {
+		f.graphNodes = map[string]GraphNodeRecord{}
+	}
+	f.graphEdges = s.GraphEdges
+	if f.graphEdges == nil {
+		f.graphEdges = map[string]GraphEdgeRecord{}
 	}
 }

@@ -28,15 +28,32 @@ and a rule-first smart router.
   mismatch, unknown reply fields rejected, `postgres` never proxied to a
   sidecar), and black-box cases `C33`–`C35` run `bigquery`, `dbt` and `looker`
   end to end.
+- **Declared knowledge graph**: a concept is both a document and a node. The
+  `graph` frontmatter block declares node type/label/properties and typed
+  relations; an `ontology-schema` document declares the allowed node and edge
+  types with `from`/`to` constraints. Only a declared relation type whose
+  endpoint types do not match is rejected (`422`); unknown types, unknown node
+  types and dangling targets warn, matching OKF conformance. PostgreSQL keeps a
+  discardable `graph_nodes`/`graph_edges` adjacency index that is rebuilt from
+  Git, pruned of vanished bodies, and repaired per document when
+  `content_hash` drifts. Reads add node detail with lineage, bounded
+  neighbourhoods and shortest paths in one recursive CTE, RRF fusion of the
+  text and graph rankers, and an answerability verdict (0.6/0.15/0.15/0.1
+  weighted coverage, seven gap classes) that reports gaps instead of answering
+  from thin evidence. An optional HTTP graph engine can serve the read path;
+  writes always stay in OKF+Git.
 - **Smart routing**: deterministic `R1`–`R7` rules first, AFM-D System One
   fallback with 5000 ms timeout, 256-entry cache, low-score protection and
   fail-closed behaviour. Dual-path reads/writes plus resumable migration.
-- **Interfaces**: JSON HTTP API (including `/v1/computations`), ten CLI
-  commands (including `compute` / `computations`) and pure-function ranking
-  and routing evaluation.
+- **Interfaces**: JSON HTTP API (including `/v1/computations`, the
+  `/v1/graph*` family and a read-only `/mcp` JSON-RPC transport), eleven CLI
+  commands (including `compute`, `computations` and `graph`) and pure-function
+  ranking and routing evaluation.
 - **Web console, compiled in**: a dependency-free ES module page with a status
-  view and an in-app HTTP API reference: 9 method+path combinations,
-  request/response JSON samples, conventions and error/status codes. Vite
+  view, an in-app HTTP API reference (21 method+path combinations) and a graph
+  view (index freshness, node search, sticky lineage and edge tables, bounded
+  neighbourhood walk, answerability meter), with request/response JSON samples,
+  conventions and error/status codes. Vite
   writes straight into `internal/webui/dist` and `//go:embed` compiles it into
   the binary, so `serve` answers `GET /` and `/assets/*` on the same listener as
   the API — no reverse proxy, document root or second process. The page CSP is

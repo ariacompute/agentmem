@@ -18,7 +18,7 @@ page and its assets, which is the supported pure-API posture.
 auth / safepath / netsafe / okf / meta / config (L0, zero internal deps)
   -> vcs / adapter / bridges
   -> plugins (engine packages + manifest)
-  -> router / eval / compute
+  -> router / eval / compute / graph
   -> service
   -> handlers / cli
   -> cmd/agentmem
@@ -43,6 +43,11 @@ upward import: `internal/auth` (consumed by `handlers` / `cli`),
 - **Git is the only authority for bodies.** PostgreSQL stores metadata only,
   linked by `content_hash` + `commit_sha`. Conflicts resolve OKF-first and are
   surfaced, never hidden.
+- **The graph is a projection.** Nodes and typed edges are declared in the
+  `graph` / `graph_schema` frontmatter; `graph_nodes` / `graph_edges` are
+  discardable and rebuilt from Git. Only a declared edge type with mismatched
+  endpoint types is rejected (`422`) — unknown types and dangling targets warn.
+  Graph reads never bypass `CheckACL`, and `/mcp` exposes no write tool.
 - **Config is `.env` only.** `config.Load` reads `.env` (`--env` /
   `AGENTMEM_ENV_FILE` override the path), then layers process env on top;
   a missing file falls back to `Default()`. Docker Compose consumes the same

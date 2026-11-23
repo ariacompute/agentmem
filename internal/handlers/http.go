@@ -147,6 +147,16 @@ func NewHandler(svc *service.KnowledgeService, opts Options) http.Handler {
 			methodNotAllowed(w)
 		}
 	})
+	mux.HandleFunc("/v1/graph", func(w http.ResponseWriter, r *http.Request) {
+		graphRoute(w, r, svc)
+	})
+	mux.HandleFunc("/v1/graph/", func(w http.ResponseWriter, r *http.Request) {
+		graphRoute(w, r, svc)
+	})
+	// MCP is a read-only JSON-RPC transport over the same graph reads.
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		mcpRoute(w, r, svc)
+	})
 	// Unregistered /v1 paths answer JSON, never HTML: the console catch-all
 	// below must not turn an API client's typo into a page.
 	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {

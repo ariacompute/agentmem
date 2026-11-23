@@ -8,8 +8,9 @@
 | 不存什么 | 服务运行状态 | 知识正文 |
 | 权威 | 正文唯一权威 | 结构化状态权威 |
 | 关联键 | `content_hash`、`commit_sha` | 同左（外加 `concept_id`） |
+| 图 | `graph` / `graph_schema` 声明 | `graph_nodes` / `graph_edges` 邻接索引（可丢弃） |
 
-库内不复制正文，因此不存在「两份正文谁对」的问题。外部 RAG 是**可重建投影**，永不作为权威。
+库内不复制正文，因此不存在「两份正文谁对」的问题。外部 RAG 与图邻接索引都是**可重建投影**，永不作为权威。
 
 ## OKF bundle
 
@@ -44,6 +45,8 @@ data/bundle/
 | `acl` | `(subject, concept_id)` PK, `allow` | 显式授权 |
 | `engine_fingerprints` | `adapter` PK, `fingerprint` | embedding 身份 |
 | `computation_runs` | `job_id` + `verdict` UNIQUE, `contract_hash` (idx), `params_digest`, `reasons` JSONB | Attested Computation verdict 审计（不存 SQL、参数值、结果值） |
+| `graph_nodes` | `concept_id` PK, `node_type` (idx), `content_hash` (idx), `visibility`, `owner`, `properties` JSONB | 图节点投影（可丢弃、可重建） |
+| `graph_edges` | `(from_id, to_id, edge_type)` PK, `to_id` (idx), `edge_type` (idx), `origin`, `evidence` | 有类型的邻接索引（含派生边来源标注） |
 | `concept_vectors`（可选） | `embedding vector(1536)` | pgvector 投影 |
 
 ## 迁移
@@ -51,6 +54,7 @@ data/bundle/
 - `internal/meta/migrations/001_init.sql`：基础设施表，幂等 `IF NOT EXISTS`。
 - `internal/meta/migrations/002_pgvector.sql`：`CREATE EXTENSION IF NOT EXISTS vector` + HNSW 索引，**尽力而为**：扩展不可用只告警，不阻断元数据层启动。
 - `internal/meta/migrations/003_computations.sql`：`computation_runs` 表与索引，`(job_id, verdict)` 唯一键实现幂等审计。
+- `internal/meta/migrations/004_graph.sql`：`graph_nodes` / `graph_edges` 与四组索引，全 `IF NOT EXISTS`；图是投影，重建不需要额外状态表（差异见 [graph.md](graph.md)）。
 - `PostgresStore.Migrate` 先建 `schema_migrations`，再按文件名顺序在事务内 `pg_advisory_xact_lock` + 检查 + 执行 + 登记。SQL 文件按 `;` 拆分逐条执行（兼容 pgx 扩展协议）；新增 `NNN_*.sql` 会被 embed glob 自动拾取。
 - `AutoMigrate` 不作为 schema 来源。
 
@@ -82,4 +86,4 @@ data/bundle/
 
 ## 离线路径
 
-`AGENTMEM_PG_DSN` 为空时注入 `meta.FakeStore`（同时实现 `MetaStore`、`VectorStore` 与 `SQLExecutor`），`go test ./...` 无需数据库。CLI 每条命令是独立进程，因此 `service.Assemble` 使用 `NewFileFakeStore` 把 fake 的状态序列化到 `data/meta.fake.json`（原子写，进程退出时保存），保证 ACL、投影状态、决策审计与计算 verdict 跨进程可见。该快照位于 OKF bundle 的上级目录，不会被 `Bundle.List()` 扫描，也不会被 `vcs.Commit` 提交。设置 `AGENTMEM_TEST_PG_DSN` 可运行 `TestPostgresIntegration` 验证真实 GORM 后端；CI 的 `postgres-integration` 作业每日定时（也可手动派发）在临时 `pgvector/pgvector:pg16` service container 上跑它，因此「fake 无法证明」的迁移、`computation_runs` 与向量 `Scanner/Valuer` 每天都在真实数据库上被验证一次。
+`AGENTMEM_PG_DSN` 为空时注入 `meta.FakeStore`（同时实现 `MetaStore`、`VectorStore`、`SQLExecutor` 与 `GraphIndex`），`go test ./...` 无需数据库。图索引的 fake 与 PG 语义一致（同样的深度/行数上限、同样的确定性排序），因此图相关测试不因后端不同而漂移。CLI 每条命令是独立进程，因此 `service.Assemble` 使用 `NewFileFakeStore` 把 fake 的状态序列化到 `data/meta.fake.json`（原子写，进程退出时保存），保证 ACL、投影状态、决策审计与计算 verdict 跨进程可见。该快照位于 OKF bundle 的上级目录，不会被 `Bundle.List()` 扫描，也不会被 `vcs.Commit` 提交。设置 `AGENTMEM_TEST_PG_DSN` 可运行 `TestPostgresIntegration` 验证真实 GORM 后端；CI 的 `postgres-integration` 作业每日定时（也可手动派发）在临时 `pgvector/pgvector:pg16` service container 上跑它，因此「fake 无法证明」的迁移、`computation_runs` 与向量 `Scanner/Valuer` 每天都在真实数据库上被验证一次。

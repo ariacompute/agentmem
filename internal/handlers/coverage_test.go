@@ -26,6 +26,17 @@ func TestAllRoutesRejectUnsupportedMethods(t *testing.T) {
 		{http.MethodPost, "/v1/decisions"},
 		{http.MethodPost, "/v1/concepts"},
 		{http.MethodDelete, "/v1/computations"},
+		{http.MethodPost, "/v1/graph"},
+		{http.MethodPost, "/v1/graph/node"},
+		{http.MethodPost, "/v1/graph/neighbors"},
+		{http.MethodPost, "/v1/graph/path"},
+		{http.MethodPost, "/v1/graph/search"},
+		{http.MethodPost, "/v1/graph/schema"},
+		{http.MethodGet, "/v1/graph/answerability"},
+		{http.MethodGet, "/v1/graph/retrieve"},
+		{http.MethodGet, "/v1/graph/index"},
+		{http.MethodGet, "/v1/graph/edges"},
+		{http.MethodGet, "/mcp"},
 	}
 	for _, tc := range cases {
 		resp, err := http.DefaultClient.Do(mustReq(t, tc.method, srv.URL+tc.path, nil, ""))

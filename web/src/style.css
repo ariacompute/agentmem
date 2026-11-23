@@ -38,6 +38,8 @@
   --radius: 14px;
   --radius-sm: 10px;
   --topbar-h: 62px;
+  /* Smallest hit area the console allows on a pointer or touch target. */
+  --touch-min: 44px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --sans: 'Noto Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
@@ -1036,4 +1038,323 @@ h1 {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* Graph view — same monochrome system, no hue, container-driven tables. */
+.graph-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-block: 12px;
+}
+
+.graph-bar .detail-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-inline-size: 160px;
+  flex: 1 1 200px;
+}
+
+.graph-bar .input {
+  inline-size: 100%;
+}
+
+/* Index status: the badge leads, the counters follow on the same baseline. */
+.graph-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-block-start: 4px;
+}
+
+.graph-meta .kv-grid {
+  flex: 1 1 320px;
+  margin-block-start: 0;
+}
+
+/* Pending work, announced by role="status". Never the only feedback channel. */
+.status-line {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-start: 10px;
+}
+
+/* A chip doubling as a toggle: pressed state is a fill, not a hue. */
+button.chip {
+  min-block-size: 32px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.chip.active {
+  background: var(--accent-soft);
+  border-color: var(--stroke-3);
+  color: var(--text-1);
+}
+
+.chip.muted {
+  border-style: dashed;
+  color: var(--text-3);
+}
+
+/* A warning badge is distinguished by a solid stroke, never by a thick side
+ * accent: the console keeps every edge the same weight. */
+.chip.warn {
+  border-color: var(--stroke-3);
+  background: var(--bg-elevated);
+  color: var(--text-1);
+}
+
+/* List and detail share a row once there is room for both. */
+.graph-split {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 1280px) {
+  .graph-split {
+    grid-template-columns: 380px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .graph-split .detail-card {
+    position: sticky;
+    inset-block-start: calc(var(--topbar-h) + 16px);
+    max-block-size: calc(100vh - var(--topbar-h) - 32px);
+    overflow: auto;
+  }
+}
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-block-start: 8px;
+}
+
+.detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-block-end: 8px;
+}
+
+.detail-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.sub-block {
+  margin-block-start: 16px;
+}
+
+.sub-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-block-end: 6px;
+}
+
+.table-wrap {
+  max-inline-size: 100%;
+  max-block-size: min(460px, 70vh);
+  overflow: auto;
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--radius-sm);
+  container-type: inline-size;
+}
+
+.table-wrap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.data-table {
+  inline-size: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.data-table caption {
+  padding: 8px 10px;
+  text-align: start;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.data-table thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+  background: var(--bg-elevated);
+}
+
+.data-table th,
+.data-table td {
+  padding: 8px 10px;
+  text-align: start;
+  border-block-start: 1px solid var(--stroke-1);
+  white-space: nowrap;
+}
+
+.data-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.03em;
+}
+
+.data-table tbody tr:hover {
+  background: var(--bg-overlay);
+}
+
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 32px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--text-1);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  color: var(--text-2);
+}
+
+.link-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.warn-text {
+  color: var(--text-2);
+  border-inline-start: 2px solid var(--stroke-3);
+  padding-inline-start: 8px;
+  margin-block: 4px;
+}
+
+.meter {
+  /* A native <progress> carries role="progressbar" and its own value semantics;
+   * only the paint is replaced, so no ARIA mirror has to be maintained by hand. */
+  appearance: none;
+  -webkit-appearance: none;
+  inline-size: 100%;
+  block-size: 8px;
+  margin-block: 12px;
+  border: 1px solid var(--stroke-2);
+  border-radius: 999px;
+  overflow: hidden;
+  /* An empty track is a recessed surface, not a decoration. */
+  background: var(--bg-overlay);
+  color: var(--accent);
+  accent-color: var(--accent);
+}
+
+.meter::-webkit-progress-bar {
+  background: transparent;
+}
+
+.meter::-webkit-progress-value {
+  background: var(--accent);
+}
+
+.meter::-moz-progress-bar {
+  background: var(--accent);
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.seg {
+  min-block-size: var(--touch-min);
+  padding-inline: 12px;
+  background: transparent;
+  border: 0;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.seg + .seg {
+  border-inline-start: 1px solid var(--stroke-1);
+}
+
+.seg.active {
+  background: var(--accent-soft);
+  color: var(--text-1);
+}
+
+@container (width < 560px) {
+  .data-table,
+  .data-table thead,
+  .data-table tbody,
+  .data-table tr,
+  .data-table th,
+  .data-table td {
+    display: block;
+  }
+
+  /* MANDATORY: the column headers leave layout and the accessibility tree;
+   * each cell below carries its own label instead. */
+  .data-table thead {
+    display: none;
+  }
+
+  .data-table tr {
+    border-block-start: 1px solid var(--stroke-2);
+    padding-block: 6px;
+  }
+
+  .data-table td {
+    border: 0;
+    white-space: normal;
+    display: grid;
+    grid-template-columns: minmax(88px, 34%) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .data-table td::before {
+    content: attr(data-label);
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.03em;
+  }
+}
+
+/* Search hits are marked with weight and an underline, never with a hue. */
+.data-table mark.hit {
+  background: none;
+  color: var(--text-1);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
 }

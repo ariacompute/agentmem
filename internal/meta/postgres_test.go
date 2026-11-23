@@ -198,8 +198,8 @@ func TestSplitStatements(t *testing.T) {
 
 func TestMigrationFilesSorted(t *testing.T) {
 	files, err := migrationFiles()
-	if err != nil || len(files) != 3 || files[0] != "migrations/001_init.sql" ||
-		files[2] != "migrations/003_computations.sql" {
+	if err != nil || len(files) != 4 || files[0] != "migrations/001_init.sql" ||
+		files[2] != "migrations/003_computations.sql" || files[3] != "migrations/004_graph.sql" {
 		t.Fatalf("files = %v (%v)", files, err)
 	}
 }
@@ -223,5 +223,34 @@ func TestPostgresIntegration(t *testing.T) {
 	got, err := s.GetConcept(ctx, "integration/c")
 	if err != nil || got.ContentHash != "h" {
 		t.Fatalf("postgres get = %+v (%v)", got, err)
+	}
+
+	// The recursive walk and the visibility-scoped stats are only proven against
+	// a real planner here; the offline sqlmock suite asserts their SQL shape.
+	node := GraphNodeRecord{ConceptID: "integration/c", NodeType: "concept", Label: "C", Visibility: "public", ContentHash: "h"}
+	if err := s.UpsertGraphNode(ctx, node, nil); err != nil {
+		t.Fatal(err)
+	}
+	leaf := GraphNodeRecord{ConceptID: "integration/d", NodeType: "concept", Label: "D", Visibility: "public", ContentHash: "h"}
+	if err := s.UpsertGraphNode(ctx, leaf, []GraphEdgeRecord{{FromID: "integration/c", ToID: "integration/d", EdgeType: "related_to"}}); err != nil {
+		t.Fatal(err)
+	}
+	walk, err := s.GraphNeighbors(ctx, GraphWalk{Sources: []string{"integration/c"}, Depth: 1, Direction: "both"})
+	if err != nil || len(walk.Nodes) != 2 || len(walk.Edges) != 1 {
+		t.Fatalf("postgres walk = %+v (%v)", walk, err)
+	}
+	path, err := s.GraphShortestPath(ctx, GraphPath{From: "integration/c", To: "integration/d", MaxDepth: 2})
+	if err != nil || !path.Found || len(path.Nodes) != 2 {
+		t.Fatalf("postgres path = %+v (%v)", path, err)
+	}
+	stats, err := s.GraphStats(ctx, "system")
+	if err != nil || stats.Nodes < 2 || stats.Edges < 1 {
+		t.Fatalf("postgres stats = %+v (%v)", stats, err)
+	}
+	if _, err := s.GraphShortestPath(ctx, GraphPath{From: "integration/c", To: "integration/missing", MaxDepth: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteGraphNode(ctx, "integration/d"); err != nil {
+		t.Fatal(err)
 	}
 }

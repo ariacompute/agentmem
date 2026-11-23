@@ -35,7 +35,7 @@ export const headerLines = [
   'Content-Type: application/json; charset=utf-8',
   'request body limit: 4 MiB (4194304 bytes)',
   'authorization: Bearer <access-token>   ·   CORS headers: none   ·   pagination: none',
-  'scopes: knowledge:read · knowledge:write · migrate:run · audit:read · compute:run',
+  'scopes: knowledge:read · knowledge:write · migrate:run · audit:read · compute:run · graph:write',
   'rate limit: 20 req/s per client, burst 40   ·   Origin allow-list enforced',
 ]
 
@@ -61,10 +61,11 @@ export const endpointGroups = [
   { id: 'knowledge', groupKey: 'groupKnowledge' },
   { id: 'routing', groupKey: 'groupRouting' },
   { id: 'computation', groupKey: 'groupComputation' },
+  { id: 'graph', groupKey: 'groupGraph' },
 ]
 
 /**
- * The 9 method+path combinations served by NewHandler.
+ * The 21 method+path combinations served by NewHandler.
  * `request` is a JSON body for POST routes and a request line for GET routes.
  * `response` is always a JSON sample. All values are placeholders.
  */
@@ -282,6 +283,208 @@ export const endpoints = [
   }
 ]`,
   },
+  {
+    group: 'graph',
+    method: 'GET',
+    path: '/v1/graph',
+    descKey: 'epGraphStats',
+    statuses: ['200', '401', '403', '405', '429', '500'],
+    request: 'GET /v1/graph',
+    response: `{
+  "nodes": 12,
+  "edges": 18,
+  "node_types": { "metric": 4, "table": 3, "concept": 5 },
+  "edge_types": { "derived_from": 6, "computed_from": 12 },
+  "stale": 0
+}`,
+  },
+  {
+    group: 'graph',
+    method: 'GET',
+    path: '/v1/graph/node',
+    descKey: 'epGraphRead',
+    statuses: ['200', '400', '401', '403', '404', '405', '429', '500'],
+    request: 'GET /v1/graph/node?id=metrics/example',
+    response: `{
+  "concept_id": "metrics/example",
+  "node_type": "metric",
+  "label": "Example",
+  "trust": "unverified",
+  "stale": false,
+  "visibility": "private",
+  "sources": [],
+  "out": [],
+  "in": [],
+  "warnings": []
+}`,
+  },
+  {
+    group: 'graph',
+    method: 'PUT',
+    path: '/v1/graph/node',
+    descKey: 'epGraphWrite',
+    statuses: ['200', '400', '401', '403', '405', '422', '429', '500'],
+    request: `{
+  "concept_id": "metrics/example",
+  "node_type": "metric",
+  "label": "Example",
+  "edges": [{ "to": "tables/example", "type": "computed_from" }],
+  "replace_edges": true
+}`,
+    response: `{
+  "concept_id": "metrics/example",
+  "content_hash": "sha256:placeholder",
+  "commit_sha": "0abcdef",
+  "unchanged": false,
+  "warnings": ["dangling_edge: computed_from -> tables/example"]
+}`,
+  },
+  {
+    group: 'graph',
+    method: 'GET',
+    path: '/v1/graph/neighbors',
+    descKey: 'epGraphRead',
+    statuses: ['200', '400', '401', '403', '404', '405', '429', '500'],
+    request: 'GET /v1/graph/neighbors?from=metrics/example&depth=1&direction=both',
+    response: `{
+  "root": "metrics/example",
+  "nodes": [],
+  "edges": [],
+  "depths": {},
+  "truncated": false
+}`,
+  },
+  {
+    group: 'graph',
+    method: 'GET',
+    path: '/v1/graph/path',
+    descKey: 'epGraphRead',
+    statuses: ['200', '400', '401', '403', '404', '405', '429', '500'],
+    request: 'GET /v1/graph/path?from=metrics/example&to=tables/example',
+    response: `{
+  "from": "metrics/example",
+  "to": "tables/example",
+  "found": false,
+  "hops": 0,
+  "nodes": [],
+  "edges": []
+}`,
+  },
+  {
+    group: 'graph',
+    method: 'GET',
+    path: '/v1/graph/search',
+    descKey: 'epGraphRead',
+    statuses: ['200', '400', '401', '403', '405', '429', '500'],
+    request: 'GET /v1/graph/search?q=example&limit=20',
+    response: `[
+  {
+    "concept_id": "metrics/example",
+    "node_type": "metric",
+    "label": "Example",
+    "trust": "unverified",
+    "stale": false
+  }
+]`,
+  },
+  {
+    group: 'graph',
+    method: 'GET',
+    path: '/v1/graph/schema',
+    descKey: 'epGraphRead',
+    statuses: ['200', '401', '403', '405', '429', '500'],
+    request: 'GET /v1/graph/schema',
+    response: `{
+  "node_types": { "metric": { "Description": "" } },
+  "edge_types": { "derived_from": { "From": ["metric"], "To": ["metric"] } },
+  "warnings": []
+}`,
+  },
+  {
+    group: 'graph',
+    method: 'POST',
+    path: '/v1/graph/answerability',
+    descKey: 'epGraphAnswer',
+    statuses: ['200', '400', '401', '403', '405', '429', '500'],
+    request: `{
+  "question": "what is the example metric"
+}`,
+    response: `{
+  "question": "what is the example metric",
+  "verdict": "partial",
+  "coverage": 0.7,
+  "minimum": 0.6,
+  "matched": [],
+  "gaps": [{ "kind": "unverified", "concept_id": "metrics/example", "detail": "placeholder" }],
+  "terms": ["example", "metric"]
+}`,
+  },
+  {
+    group: 'graph',
+    method: 'POST',
+    path: '/v1/graph/retrieve',
+    descKey: 'epGraphAnswer',
+    statuses: ['200', '400', '401', '403', '405', '429', '500'],
+    request: `{
+  "query": "example metric",
+  "top_k": 5
+}`,
+    response: `{
+  "query": "example metric",
+  "hits": [{ "id": "metrics/example", "score": 0.032, "rank": 1, "sources": ["text", "graph"] }],
+  "nodes": [],
+  "warnings": []
+}`,
+  },
+  {
+    group: 'graph',
+    method: 'POST',
+    path: '/v1/graph/index',
+    descKey: 'epGraphIndex',
+    statuses: ['200', '401', '403', '405', '429', '500'],
+    request: `{}`,
+    response: `{
+  "nodes": 12,
+  "edges": 18,
+  "pruned": 0,
+  "warnings": []
+}`,
+  },
+  {
+    group: 'graph',
+    method: 'POST',
+    path: '/v1/graph/edges',
+    descKey: 'epGraphWrite',
+    statuses: ['200', '400', '401', '403', '405', '422', '429', '500'],
+    request: `{
+  "concept_id": "metrics/example",
+  "edges": [{ "to": "tables/example", "type": "computed_from" }]
+}`,
+    response: `{
+  "concept_id": "metrics/example",
+  "content_hash": "sha256:placeholder",
+  "commit_sha": "0abcdef",
+  "unchanged": false,
+  "warnings": []
+}`,
+  },
+  {
+    group: 'graph',
+    method: 'POST',
+    path: '/mcp',
+    descKey: 'epMCP',
+    statuses: ['200', '202', '401', '403', '405', '413', '429'],
+    request: `{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list"
+}`,
+    response: `{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": { "tools": [{ "name": "search_terms" }] }
+}`,
+  },
 ]
 
 /**
@@ -307,16 +510,37 @@ export const tryMeta = {
     write: false,
     query: { concept_id: 'computations/example', limit: '20' },
   },
+  'GET /v1/graph': { write: false, query: {} },
+  'GET /v1/graph/node': { write: false, query: { id: 'metrics/example' } },
+  'PUT /v1/graph/node': { write: true, query: {} },
+  'GET /v1/graph/neighbors': {
+    write: false,
+    query: { from: 'metrics/example', depth: '1', direction: 'both', limit: '20' },
+  },
+  'GET /v1/graph/path': {
+    write: false,
+    query: { from: 'metrics/example', to: 'tables/example', max_depth: '3' },
+  },
+  'GET /v1/graph/search': { write: false, query: { q: 'example', limit: '20' } },
+  'GET /v1/graph/schema': { write: false, query: {} },
+  'POST /v1/graph/answerability': { write: false, query: {} },
+  'POST /v1/graph/retrieve': { write: false, query: {} },
+  'POST /v1/graph/index': { write: true, query: {} },
+  'POST /v1/graph/edges': { write: true, query: {} },
+  'POST /mcp': { write: false, query: {} },
 }
 
 /** Status rows for the errors section. `codes` is a wire-level hint. */
 export const statusGroups = [
   { status: '200', descKey: 'status200', codes: 'ok' },
+  // JSON-RPC notifications have no id and therefore no result body.
+  { status: '202', descKey: 'status202', codes: 'accepted / notification' },
   { status: '400', descKey: 'status400', codes: 'invalid JSON / required / boundary' },
   { status: '401', descKey: 'status401', codes: 'missing / unknown credentials' },
   { status: '403', descKey: 'status403', codes: 'missing scope / origin' },
   { status: '404', descKey: 'status404', codes: 'not found / refused' },
   { status: '405', descKey: 'status405', codes: 'method not allowed' },
+  { status: '413', descKey: 'status413', codes: 'body too large' },
   { status: '422', descKey: 'status422', codes: 'unsupported / attestation' },
   { status: '429', descKey: 'status429', codes: 'client rate limit' },
   { status: '500', descKey: 'status500', codes: 'store / router' },

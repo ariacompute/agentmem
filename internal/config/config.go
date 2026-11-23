@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -28,6 +29,7 @@ type Config struct {
 	Postgres  PostgresConfig  `json:"postgres" yaml:"postgres"`
 	Router    RouterConfig    `json:"router" yaml:"router"`
 	Compute   ComputeConfig   `json:"compute" yaml:"compute"`
+	Graph     GraphConfig     `json:"graph" yaml:"graph"`
 	Adapters  []AdapterConfig `json:"adapters" yaml:"adapters"`
 	ACL       ACLConfig       `json:"acl" yaml:"acl"`
 	Auth      AuthConfig      `json:"auth" yaml:"auth"`
@@ -66,6 +68,33 @@ type ComputeConfig struct {
 }
 
 func DefaultCompute() ComputeConfig { return ComputeConfig{TimeoutMS: 5000, MaxRows: 100} }
+
+// GraphConfig controls the knowledge graph. Enabled defaults to true so the
+// projection follows every write; Backend selects the read implementation
+// ("builtin" uses the PostgreSQL/offline index, "remote" queries an external
+// graph engine). RemoteURL must appear in AGENTMEM_EGRESS_ALLOWED_HOSTS and
+// RemoteTokenEnv names an environment variable, never the token itself.
+type GraphConfig struct {
+	Enabled         bool    `json:"enabled" yaml:"enabled"`
+	Backend         string  `json:"backend" yaml:"backend"`
+	RemoteURL       string  `json:"remote_url" yaml:"remote_url"`
+	RemoteTokenEnv  string  `json:"remote_token_env" yaml:"remote_token_env"`
+	RemoteTimeoutMS int     `json:"remote_timeout_ms" yaml:"remote_timeout_ms"`
+	MaxDepth        int     `json:"max_depth" yaml:"max_depth"`
+	MaxNodes        int     `json:"max_nodes" yaml:"max_nodes"`
+	MaxEdges        int     `json:"max_edges" yaml:"max_edges"`
+	CoverageMin     float64 `json:"coverage_min" yaml:"coverage_min"`
+	RRFK            int     `json:"rrf_k" yaml:"rrf_k"`
+}
+
+// DefaultGraph is the offline-testable default: no external dependency.
+func DefaultGraph() GraphConfig {
+	return GraphConfig{
+		Enabled: true, Backend: "builtin", RemoteTimeoutMS: 5000,
+		MaxDepth: 3, MaxNodes: 100000, MaxEdges: 500000,
+		CoverageMin: 0.6, RRFK: 60,
+	}
+}
 
 // knownComputeRuntimes mirrors compute's non-postgres runtime names. config is
 // an L0 package and must not import compute, so the values are duplicated here
@@ -161,6 +190,7 @@ type RateLimitConfig struct {
 var knownPermissions = map[string]bool{
 	"health:read": true, "knowledge:read": true, "knowledge:write": true,
 	"migrate:run": true, "audit:read": true, "compute:run": true,
+	"graph:write": true,
 }
 
 // Default returns an offline, fully testable configuration.
@@ -182,6 +212,7 @@ func Default() *Config {
 			ConflictPolicy: "okf_wins",
 		},
 		Compute: DefaultCompute(),
+		Graph:   DefaultGraph(),
 		Adapters: []AdapterConfig{
 			{Name: "okf", Kind: "okf", Enabled: true},
 			{Name: "memory", Kind: "memory", Enabled: true},
@@ -232,6 +263,9 @@ func (c *Config) Validate() error {
 		return errors.New("config: compute.timeout_ms must be 0..120000 and compute.max_rows 0..10000")
 	}
 	if err := c.validateComputeSidecars(); err != nil {
+		return err
+	}
+	if err := c.validateGraph(); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -348,6 +382,56 @@ func (c *Config) validateComputeSidecars() error {
 	return nil
 }
 
+func (c *Config) validateGraph() error {
+	g := c.Graph
+	if !g.Enabled {
+		// A disabled feature must not force a remote endpoint or token, but the
+		// bounds are still checked so a typo surfaces before it is switched on.
+		return validateGraphBounds(g)
+	}
+	switch g.Backend {
+	case "builtin":
+	case "remote":
+		if strings.TrimSpace(g.RemoteURL) == "" {
+			return errors.New("config: graph.backend remote requires AGENTMEM_GRAPH_REMOTE_URL")
+		}
+		if !tokenEnvRe.MatchString(strings.TrimSpace(g.RemoteTokenEnv)) {
+			return errors.New("config: graph.remote_token_env must name an environment variable")
+		}
+		if c.Server.Mode == "production" && strings.TrimSpace(os.Getenv(g.RemoteTokenEnv)) == "" {
+			return fmt.Errorf("config: graph.remote_token_env %q is not set in the process environment", g.RemoteTokenEnv)
+		}
+	default:
+		return fmt.Errorf("%w: graph.backend %q (use builtin or remote)", ErrUnsupported, g.Backend)
+	}
+	return validateGraphBounds(g)
+}
+
+func validateGraphBounds(g GraphConfig) error {
+	if g.MaxDepth < 1 || g.MaxDepth > 8 {
+		return errors.New("config: graph.max_depth must be 1..8")
+	}
+	if g.MaxNodes < 1 || g.MaxNodes > 1000000 {
+		return errors.New("config: graph.max_nodes must be 1..1000000")
+	}
+	if g.MaxEdges < 1 || g.MaxEdges > 5000000 {
+		return errors.New("config: graph.max_edges must be 1..5000000")
+	}
+	if g.CoverageMin < 0 || g.CoverageMin > 1 {
+		return errors.New("config: graph.coverage_min must be 0..1")
+	}
+	if g.RRFK < 1 || g.RRFK > 1000 {
+		return errors.New("config: graph.rrf_k must be 1..1000")
+	}
+	if g.RemoteTimeoutMS < 0 || g.RemoteTimeoutMS > 120000 {
+		return errors.New("config: graph.remote_timeout_ms must be 0..120000")
+	}
+	return nil
+}
+
+// tokenEnvRe pins the shape of an environment variable name.
+var tokenEnvRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 func (c *Config) validateEgress() error {
 	for _, h := range c.Egress.AllowedHosts {
 		if strings.TrimSpace(h) == "" || strings.ContainsAny(h, "/: ") {
@@ -366,6 +450,10 @@ func (c *Config) validateEgress() error {
 		if strings.EqualFold(strings.TrimSpace(s.Bridge), "http") && strings.TrimSpace(s.Endpoint) != "" {
 			needsAllowlist = true
 		}
+	}
+	if c.Graph.Enabled && strings.EqualFold(strings.TrimSpace(c.Graph.Backend), "remote") &&
+		strings.TrimSpace(c.Graph.RemoteURL) != "" {
+		needsAllowlist = true
 	}
 	if needsAllowlist && len(c.Egress.AllowedHosts) == 0 {
 		return errors.New("config: outbound endpoints require AGENTMEM_EGRESS_ALLOWED_HOSTS")

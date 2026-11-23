@@ -33,6 +33,7 @@ function fakeStorage(initial = {}) {
 }
 
 const POST_KNOWLEDGE = endpoints.find((entry) => entry.method === 'POST' && entry.path === '/v1/knowledge')
+const PUT_GRAPH_NODE = endpoints.find((entry) => entry.method === 'PUT' && entry.path === '/v1/graph/node')
 const GET_DECISIONS = endpoints.find((entry) => entry.path === '/v1/decisions')
 
 describe('try-it request metadata', () => {
@@ -44,10 +45,19 @@ describe('try-it request metadata', () => {
     }
   })
 
-  it('marks exactly the three state-changing routes as writes', () => {
+  it('marks exactly the six state-changing routes as writes', () => {
     const writes = ROUTE_KEYS.filter((key) => tryMeta[key].write)
-    assert.deepEqual(writes, ['POST /v1/knowledge', 'POST /v1/migrate', 'POST /v1/computations'])
+    assert.deepEqual(writes, [
+      'POST /v1/knowledge',
+      'POST /v1/migrate',
+      'POST /v1/computations',
+      'PUT /v1/graph/node',
+      'POST /v1/graph/index',
+      'POST /v1/graph/edges',
+    ])
     assert.equal(isWrite(tryMeta['POST /v1/query']), false, 'a routed read is not a write')
+    assert.equal(isWrite(tryMeta['GET /v1/graph']), false, 'a graph read is not a write')
+    assert.equal(isWrite(tryMeta['POST /v1/graph/answerability']), false, 'a probe is not a write')
   })
 
   it('requires a confirmation before a write is sent', () => {
@@ -76,12 +86,17 @@ describe('try-it request building', () => {
     )
   })
 
-  it('sends JSON for a POST route and no body for a GET route', () => {
+  it('sends JSON for a body route and no body for a GET route', () => {
     const post = buildRequest(POST_KNOWLEDGE, { body: '{"a":1}' }, '')
     assert.equal(post.init.method, 'POST')
     assert.equal(post.init.headers['Content-Type'], 'application/json')
     assert.equal(post.init.body, '{"a":1}')
     assert.equal(post.url, '/v1/knowledge')
+
+    const put = buildRequest(PUT_GRAPH_NODE, {}, '')
+    assert.equal(put.init.method, 'PUT')
+    assert.equal(put.init.headers['Content-Type'], 'application/json')
+    assert.doesNotThrow(() => JSON.parse(put.init.body))
 
     const get = buildRequest(GET_DECISIONS, { query: { limit: '5' } }, '')
     assert.equal(get.init.method, 'GET')

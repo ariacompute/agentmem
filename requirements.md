@@ -8,12 +8,13 @@
 - Git 为正文唯一权威：`go-git/v5` 纯 Go 后端，每次写入生成 `content_hash` 与 `commit_sha`，支持 Log / Show / Diff / 回放；批量文件合并为单次提交；原子写（临时文件 + rename）。
 - 路径安全：拒绝 `..`、绝对路径、反斜杠、保留名 `index` / `log`。
 - ACL 扩展字段 `visibility` / `owner` 写入 frontmatter 作为可移植副本。
+- 图声明写在 frontmatter：`graph.node`（类型 / 标签 / 属性）与 `graph.edges[]`（目标 / 关系类型 / 证据）；`type: ontology-schema` 的文档用 `graph_schema` 声明允许的节点类型与关系类型首尾约束。未知键、未知类型、断链一律不拒绝，只有「已声明关系类型的首尾类型不匹配」是硬拒绝（`422`）。预算：单文档 ≤ 64 条边、属性 ≤ 32 键且单值 ≤ 256 字节、`evidence` ≤ 1024 字节、类型名 ≤ 128 字节、本体每侧 ≤ 256 个类型。
 
 ## 2. PostgreSQL + GORM 存储服务端结构化数据
 
 - 依赖 `gorm.io/gorm` + `gorm.io/driver/postgres` + `pgx/v5`，版本与 `agenthub/go.mod` 一致。
 - 库内只存：概念元数据、RAG 投影状态、`content_hash` 索引、embedding `Fingerprint`、路由决策审计、Attested Computation verdict、迁移游标/断点、ACL、引擎指纹与配置版本。**不存知识正文、SQL 文本、参数值或结果值**。
-- 版本化迁移 `migrations/*.sql` 由 `db.Exec` 在事务内按序应用（advisory lock + `schema_migrations`）；`003_computations.sql` 建 `computation_runs`；`AutoMigrate` 不作为 schema 来源；pgvector 迁移为尽力而为。
+- 版本化迁移 `migrations/*.sql` 由 `db.Exec` 在事务内按序应用（advisory lock + `schema_migrations`）；`003_computations.sql` 建 `computation_runs`，`004_graph.sql` 建 `graph_nodes` / `graph_edges`；`AutoMigrate` 不作为 schema 来源；pgvector 迁移为尽力而为。
 - GORM 仅出现在 `internal/meta`：`MetaStore` 端口签名不含 `*gorm.DB`，上层包不 import gorm；CRUD 使用模型、`clause.OnConflict` upsert 与事务；日志默认 `Warn` 且不打印 SQL 参数。
 - `pgvector` 的 `vector` 类型用自定义 `Scanner/Valuer` + 原生参数化 SQL，经 `VectorStore` 窄端口暴露。
 - 生产 `AGENTMEM_PG_DSN` 必填；dev/测试注入文件持久化 fake（`data/meta.fake.json`），保证 CLI 多进程共享 ACL、投影与审计状态。
@@ -53,8 +54,8 @@
 
 ## 7. 交付与验收
 
-- CLI：`serve` / `put` / `query` / `migrate` / `decisions` / `concepts` / `compute` / `computations` / `validate` / `eval`；命令用 `--env` 指定配置文件。
-- HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`；同一 listener 另提供控制台静态路由 `GET /`（含 `/index.html`）与 `GET /assets/*`，匿名可读白名单只含 `GET /healthz` 与控制台（详见第 8 节）。
+- CLI：`serve` / `put` / `query` / `migrate` / `decisions` / `concepts` / `compute` / `computations` / `validate` / `eval` / `graph`（`stats` / `node` / `neighbors` / `path` / `search` / `answerable` / `retrieve` / `put` / `edge` / `reindex`）；命令用 `--env` 指定配置文件。
+- HTTP API：`/healthz`、`/v1/knowledge`、`/v1/query`、`/v1/migrate`、`/v1/decisions`、`/v1/concepts`、`/v1/computations`、`/v1/graph`（`node` / `neighbors` / `path` / `search` / `schema` / `answerability` / `retrieve` / `index` / `edges`）与只读 MCP `/mcp`；同一 listener 另提供控制台静态路由 `GET /`（含 `/index.html`）与 `GET /assets/*`，匿名可读白名单只含 `GET /healthz` 与控制台（详见第 8 节）。
 - 评测：Recall@k / Precision@k / nDCG / MRR / MAP / HitRate@k 纯函数；显式区分覆盖率 Recall 与二值 HitRate。
 - 文档、CI、Docker、compose；`web/` 零运行时依赖原生 ES module 控制台（详见第 8 节）。
 - 验收线：`go test ./...`、`go vet ./...`、`go build ./cmd/agentmem`、`make check-boundaries`、`make check-trust-store`、`make web-audit`（impeccable 版本由 `web/package.json` 精确固定）、`make e2e`、`cd web && bun test`、`cd web && bun run build` 全绿，离线无外部服务（`make web-audit` 源码级渲染检查 0 反模式；`make e2e` 以真实二进制驱动 CLI 与 HTTP 服务）。上述门禁全部在 CI 中执行；真实 Postgres 另由 `postgres-integration` 作业每日定时（保留手动派发）在临时 pgvector service container 上验证，不参与离线验收线。
@@ -62,21 +63,21 @@
 ## 8. Web 控制台
 
 - 零运行时依赖的原生 ES module 单页（HTML + JS + 独立 `web/src/style.css`），不引入框架、路由、CDN 或外部资源；Vite 6 仅作打包与开发代理，产物直接输出到 `internal/webui/dist`，由 `//go:embed all:dist` 编入二进制。`serve` 在**同一 listener** 上应答 `GET /`（含 `/index.html`）与 `/assets/*`，首页 `no-cache`、带内容哈希的资产 `immutable`；该产物目录已入库，因此 `go build` / `go test ./...` 无需 Bun 与网络，产物仍可由任意静态服务器直接托管。
-- 控制台开关 `AGENTMEM_CONSOLE_ENABLED`（默认 `true`）：关闭后不装配控制台，`GET /`、`/assets/*` 与未知静态路径统一返回 JSON `404`，服务退化为纯 API 部署；既有 9 条 API 路由、鉴权顺序与错误体不变，关闭无需重新编译二进制。
+- 控制台开关 `AGENTMEM_CONSOLE_ENABLED`（默认 `true`）：关闭后不装配控制台，`GET /`、`/assets/*` 与未知静态路径统一返回 JSON `404`，服务退化为纯 API 部署；既有 21 条 API 路由、鉴权顺序与错误体不变，关闭无需重新编译二进制。
 - 交互式 try-it 工作台：文档视图的每个端点可展开为请求面板，查询参数与 JSON 正文可编辑，`Ctrl/Cmd+Enter` 发送同源真实请求，返回状态码、耗时、响应头与美化正文，写入类请求需二次确认。令牌只存 `sessionStorage`，只经 `Authorization` 头传输，不进 URL、草稿、日志或 `localStorage`；响应一律以 `textContent` + `createElement` 渲染，`web/src/` 不含 `innerHTML` / `outerHTML` / `insertAdjacentHTML` / `document.write`。
-- 两个视图：状态（`/healthz` 健康字段 + `/v1/decisions?limit=20` 最近决策，含刷新、加载与错误提示）与 API 文档；`?view=docs` 可直达文档视图。
+- 三个视图：状态（`/healthz` 健康字段 + `/v1/decisions?limit=20` 最近决策，含刷新、加载与错误提示）、API 文档与图谱；`?view=docs` / `?view=graph` 可直达对应视图。图谱视图含索引新鲜度徽标、节点检索与类型过滤、粘性详情面板（血缘 / 属性 / 计算摘要 / 出边入边表格）、深度与方向有界的邻域探索、覆盖率进度与缺口清单，以及需二次确认的节点写入；表格为容器查询对象，窄于 560px 时逐格注入列名并堆叠，表头滚动时粘住，行链接支持上下方向键移动焦点。
 - 13 种语言与 agenthub 一致：`en / zh / zh-TW / es / fr / de / it / ru / ja / ko / pt / ar / hi`。优先级 `?lang=` > localStorage(`agentmem.lang`) > 浏览器语言 > 英文；英文浅合并兜底，阿拉伯语 RTL 镜像 `<html lang|dir>`；界面文案与文档正文在 13 语言下均有各自译文。
 - light / dark 双主题共用纯黑白灰灰阶，不含任何色相；`index.html` 首屏脚本写 `data-theme`，未选择时跟随系统，仅显式切换持久化到 `agentmem.theme`；状态差异由亮度、描边、字重、形状与克制动效表达。
-- API 文档覆盖 `internal/handlers/http.go` 的 9 个 method+path 组合，含章节索引、分组端点表、可展开的请求/响应 JSON 样例，以及 Base URL、Content-Type、4 MiB 上限、`{"error":...}` 错误体、401/403/405/422/429/502 状态码、Bearer 令牌与权限范围、`limit` 边界、无 CORS 响应头与无分页等通用约定；请求样例不出现 `subject` 字段（主体由服务端从令牌推导），出站 sidecar 线协议不属于对外 API。方法、路径、字段名、状态码与 JSON 样例在所有语言下逐字呈现。
+- API 文档覆盖 `internal/handlers/http.go` 的 21 个 method+path 组合，含章节索引、分组端点表、可展开的请求/响应 JSON 样例，以及 Base URL、Content-Type、4 MiB 上限、`{"error":...}` 错误体、202/401/403/405/413/422/429/502 状态码、Bearer 令牌与权限范围、`limit` 边界、无 CORS 响应头与无分页等通用约定；请求样例不出现 `subject` 字段（主体由服务端从令牌推导），出站 sidecar 线协议不属于对外 API。方法、路径、字段名、状态码与 JSON 样例在所有语言下逐字呈现。
 - 页面级 CSP 为 `default-src 'none'`，仅允许同源脚本/样式与同源 `connect-src`，唯一的内联首屏主题脚本以 SHA-256 摘要白名单放行。由二进制托管时，`serve` 启动期从内嵌 `index.html` 现算该摘要并组装响应头（Go 头与页面永不失配）；`web/index.html` 的 `Content-Security-Policy` meta 保留为纯静态托管时的兜底，`web/tests/security.test.mjs` 校验哈希与脚本文本一致、无外链资源与内联事件处理器。
-- Node 内置 `node:test` 套件（零新增依赖）：语言目录、译文完整性与英文兜底、端点表与后端路由一致性、try-it 的 URL/头部构造与写入确认、单色守卫、主题解析/持久化、DOM 冒烟（两视图切换、示例展开、RTL、主题切换）；CI 的 web job 执行 `bun test`、`bun run build`，并用 `git diff --exit-code -- internal/webui/dist` 阻止陈旧产物发布。
+- Node 内置 `node:test` 套件（零新增依赖）：语言目录、译文完整性与英文兜底、端点表与后端路由一致性、try-it 的 URL/头部构造与写入确认、图请求构造（URL/头部/载荷/覆盖率与新鲜度派生）、单色守卫、主题解析/持久化、DOM 冒烟（三视图切换、示例展开、图谱结果与节点详情、RTL、主题切换）；CI 的 web job 执行 `bun test`、`bun run build`，并用 `git diff --exit-code -- internal/webui/dist` 阻止陈旧产物发布。
 - 页面不输出日志、不记录 API 响应正文；示例仅用占位值，不含正文、PII 或凭据。
 - Web 渲染质量采用 [pbakaus/impeccable](https://github.com/pbakaus/impeccable) 检查与优化：`make web-audit` 对 `web/` 做源码级 `impeccable detect`（无需浏览器），完整元素级规则（对比度、过小字号、间距）需运行中站点加本地 Chrome/Edge（`cd web && bun run dev` 后 `bun run audit:live`）。保持单色不变式，刻意避免 `.notice` 侧边强调边框等已知「AI 痕迹」；共享配置 `web/.impeccable/config.json`（关闭遥测），临时缓存被 `.gitignore` 排除。
 
 ## 9. 安全基线
 
 - 身份：`Authorization: Bearer <token>`；令牌以 SHA-256 摘要配置（`AGENTMEM_AUTH_TOKENS`），比较为常量时间，原始令牌不进入配置文件、日志或错误。主体与权限由服务端推导，请求体/查询串中的 `subject` 一律忽略。
-- 授权：`knowledge:read` / `knowledge:write` / `migrate:run` / `audit:read` / `compute:run` / `health:read` 六个权限映射到 9 条路由（`GET /healthz` 公开）；缺令牌 `401`、缺权限或来源不允许 `403`、超限 `429`、私有文档无权限与不存在统一 `404`。
+- 授权：`knowledge:read` / `knowledge:write` / `migrate:run` / `audit:read` / `compute:run` / `graph:write` / `health:read` 七个权限映射到 21 条路由（`GET /healthz` 公开；图读复用 `knowledge:read`，图写单列 `graph:write`，重建投影用 `migrate:run`，`/mcp` 只有只读工具）；缺令牌 `401`、缺权限或来源不允许 `403`、超限 `429`、私有文档无权限与不存在统一 `404`。
 - 隔离：`private` 文档仅 owner 可读（`acl` 表显式授权优先），匿名写入拒绝，覆盖 CLI 路径；写入不得把 `owner` 指定为他人。
 - 出向：`AGENTMEM_EGRESS_ALLOWED_HOSTS` 主机白名单（裸名匹配自身、`*.x` 仅匹配子域），私网/回环/链路本地 IP 字面量须逐字点名，重定向逐跳复检且禁止 TLS 降级。
 - 资源：请求体 4 MiB、文档 8 MiB、frontmatter 1 MiB、YAML 节点/深度/别名与 bundle 条目数、资源 1 MiB 均有上限；`top_k` ≤ 100，`limit` 1–1000；服务端读头/读/写/空闲超时与 1 MiB 头上限，退出时优雅关闭。
@@ -85,8 +86,21 @@
 - 可观测：日志只记录分类与错误类型，不记录正文、PII、凭据、DSN 或 SQL 参数；认证失败日志节流。
 - 明确不在本轮范围：分布式限流、OIDC/SSO、mTLS、令牌热轮换与集中吊销、基础镜像与 actions 的完整 digest/SHA 钉住（见 `SECURITY.md` 的后续项清单）。
 
-## 10. 非目标
+## 10. 知识图谱与本体
 
-完整管理台（写入 / RBAC 管理界面、多租户运维面板）；Go 二进制内直接链接四个 Python 引擎的原生 SDK（由 sidecar 承担 `sdk_boundary`）；自动 commit/push 源码仓库；跨组织知识同步协议；前端框架/组件库与 CDN 资源。
+- 概念文档即图节点：`graph.node` 声明节点类型、标签与扁平属性，`type` 作为默认节点类型；`graph.edges[]` 声明出边（目标概念 id、关系类型、可选证据与属性）。派生边由 `sources[].resource`（`sourced_from`）、`resource`（`references`）与正文概念链接（`links_to`）产生，并用 `origin` 标注来源，读方永远能区分断言与推导。
+- 类型化本体：`type: ontology-schema` 的文档用 `graph_schema.node_types` / `graph_schema.edge_types` 声明合法类型与首尾约束，多个本体文档合并（冲突记告警）。已声明关系类型连错节点类型返回 `422`；未知关系类型、未知节点类型、目标缺失只告警，与 OKF 宽松 conformance 一致。
+- 投影：写入走 `store.PutAs`（Git 提交 + `content_hash` + `commit_sha`）后再同步 `graph_nodes` / `graph_edges`；同步失败不回滚正文。读路径比对索引与元数据的 `content_hash` 做单文档惰性重建；`POST /v1/graph/index` 全量重建并按 hash 跳过未变更文档，最后清理 Git 中已消失的节点。索引可随时删库重建，不是权威。
+- 查询：节点详情（血缘、属性、计算摘要、出边/入边、告警）、有界邻域（递归 CTE，深度由 `AGENTMEM_GRAPH_MAX_DEPTH` 夹紧、行数由 `MAX_NODES` / `MAX_EDGES` 与 `limit ≤ 200` 封顶）、最短路径、关键词检索、合并后的本体。所有读路径先 ACL 过滤再计数，私有节点与不存在统一 `404`。
+- 检索融合：`POST /v1/graph/retrieve` 把文本命中与图邻域命中按 RRF（`AGENTMEM_GRAPH_RRF_K`，默认 60）融合，同分按 id 排序，结果确定可复现。
+- 可回答性：分词后解析到节点，覆盖率 = `0.6×词覆盖 + 0.15×已认证 + 0.15×有来源 + 0.1×未过期`；三档结论 `answerable` / `partial` / `insufficient`（阈值 `AGENTMEM_GRAPH_COVERAGE_MIN`，默认 0.6；命中集合全未认证或无来源时最多 `partial`）；缺口分类 `missing_term` / `dangling_edge` / `stale` / `unverified` / `no_source` / `unknown_edge_type` / `empty_index`，最多 50 条。证据不足时只给缺口，不生成答案，全程无 LLM 与 embedding。
+- 权限：读接口 `knowledge:read`，写接口新增 `graph:write`，重建用 `migrate:run`。`/mcp` 是只读 JSON-RPC（`initialize` / `ping` / `tools/list` / `tools/call`：`search_terms` / `get_node` / `neighbors` / `path` / `check_answerable`），通知返回 `202`、超限返回 `413`、无写工具。
+- 外部图引擎（可选）：`AGENTMEM_GRAPH_BACKEND=builtin|remote`。`remote` 只把只读查询转发给外部 HTTP 图引擎，写入仍落 OKF+Git 并维护本地索引；URL 主机必须在 `AGENTMEM_EGRESS_ALLOWED_HOSTS` 内，凭据只以环境变量名（`AGENTMEM_GRAPH_REMOTE_TOKEN_ENV`）引用并在启动时读取，超时与错误只回固定分类；配置不完整时启动失败，不静默降级。
+- 关闭开关：`AGENTMEM_GRAPH_ENABLED=false` 时 `/v1/graph*` 与 `/mcp` 返回 JSON `404`，其余路由、鉴权顺序与错误体不变。
+- 验收：图能力全部离线可测（fake 与 PG 语义一致：同样的深度/行数上限与确定性排序）；e2e 覆盖图写入、检索、邻居、可回答性与重建；详见 [docs/graph.md](./docs/graph.md)。
+
+## 11. 非目标
+
+完整管理台（写入 / RBAC 管理界面、多租户运维面板）；LLM 自动建模（profiling、外键推断、列 embedding）、图算法服务端计算（社区发现、PageRank）、三元组级细粒度授权与图数据库后端；Go 二进制内直接链接四个 Python 引擎的原生 SDK（由 sidecar 承担 `sdk_boundary`）；自动 commit/push 源码仓库；跨组织知识同步协议；前端框架/组件库与 CDN 资源。
 
 自 v0.2.0 起，"二进制内嵌控制台"与"交互式 try-it 工作台"属于已实现范围（见第 8 节），不再列为非目标；`bigquery` / `dbt` / `python` / `looker` 经声明式 sidecar 真实执行（见第 5 节），也不再是非目标。

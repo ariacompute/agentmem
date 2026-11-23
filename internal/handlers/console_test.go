@@ -128,7 +128,7 @@ func TestConsoleDoesNotSwallowAPIRoutes(t *testing.T) {
 	srv := newTestServerWithOptions(t, withConsole(t, openOptions()))
 	defer srv.Close()
 
-	for _, target := range []string{"/v1/unknown", "/v1/knowledge/extra", "/nope"} {
+	for _, target := range []string{"/v1/unknown", "/v1/knowledge/extra", "/v1/graph/unknown", "/nope"} {
 		resp, body := doJSON(t, http.MethodGet, srv.URL+target, nil, "")
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("GET %s = %d", target, resp.StatusCode)
@@ -145,7 +145,7 @@ func TestConsoleDoesNotSwallowAPIRoutes(t *testing.T) {
 		}
 	}
 
-	// The health check and the nine API routes are untouched.
+	// The health check and the registered API routes are untouched.
 	health, _ := doJSON(t, http.MethodGet, srv.URL+"/healthz", nil, "")
 	if health.StatusCode != http.StatusOK {
 		t.Fatalf("GET /healthz = %d", health.StatusCode)

@@ -68,8 +68,9 @@ The design draws on [HKUDS/DeepTutor][deeptutor-link] (pluggable retrievers, ver
 - 🧭 **Rules run before System One** — A probabilistic choice can never override a deterministic authoritative decision. Ambiguity reaches the model; everything else short-circuits.
 - 🔒 **Fail closed, not fail open** — Routing timeouts and errors land on the canonical body. There is no switch to disable that fallback.
 - 🧪 **Offline tests are a hard constraint** — `go test ./...` passes without Postgres, network or credentials. Every external dependency has a fake.
-- ✅ **User-perspective acceptance** — `make e2e` drives the real binary and HTTP API offline: 10 CLI commands, 9 routes, auth, config fail-closed rules and the web console.
+- ✅ **User-perspective acceptance** — `make e2e` drives the real binary and HTTP API offline: 11 CLI commands, 21 routes, graph reads and writes, auth, config fail-closed rules and the web console.
 - 🧩 **Explicit engine registry** — Plugins are declared in `plugin.yaml` with a machine-checked `sdk_boundary`. Go `.so` plugins are deliberately avoided.
+- 🕸️ **The graph is declared, not inferred** — A concept is both a document and a node; typed relations and the ontology live in frontmatter, PostgreSQL keeps only a discardable adjacency index, and unknown types or dangling targets warn instead of rejecting. Reads fuse text and neighbourhood rankers with RRF and report coverage gaps rather than answering from thin evidence.
 - 🪶 **Zero-dependency console** — `web/` is plain ES modules, monochrome, 13 locales, no runtime framework and no CDN asset.
 
 <div align="right">
@@ -271,6 +272,18 @@ Logs: `docker compose logs -f agentmem`. Stop: `docker compose down` (add `-v` t
 | GET | `/v1/concepts` | `knowledge:read` | Canonical concept ids |
 | POST | `/v1/computations` | `compute:run` | Execute and attest a sanctioned computation |
 | GET | `/v1/computations?concept_id=&limit=` | `audit:read` | Attested Computation verdict audit |
+| GET | `/v1/graph` | `knowledge:read` | Graph size, per-type counts and staleness |
+| GET | `/v1/graph/node?id=` | `knowledge:read` | Node detail: lineage, properties, edges, warnings |
+| PUT | `/v1/graph/node` | `graph:write` | Create or update a node declaration |
+| GET | `/v1/graph/neighbors?from=&depth=&direction=` | `knowledge:read` | Bounded neighbourhood expansion |
+| GET | `/v1/graph/path?from=&to=&max_depth=` | `knowledge:read` | Shortest readable path |
+| GET | `/v1/graph/search?q=&node_types=` | `knowledge:read` | Keyword lookup over nodes |
+| GET | `/v1/graph/schema` | `knowledge:read` | Merged typed ontology |
+| POST | `/v1/graph/answerability` | `knowledge:read` | Coverage, verdict and gaps |
+| POST | `/v1/graph/retrieve` | `knowledge:read` | RRF fusion of text and graph rankers |
+| POST | `/v1/graph/index` | `migrate:run` | Rebuild the projection from Git |
+| POST | `/v1/graph/edges` | `graph:write` | Append a declared relation |
+| POST | `/mcp` | `knowledge:read` | Read-only MCP JSON-RPC transport |
 
 Every route except `GET /healthz` requires the scope above; the same matrix is reproduced in [Authentication and access control](#-authentication-and-access-control). `401` / `403` / `429` match the error table in the console; a registered path with an unsupported method answers `405`. `POST /v1/computations` returns `200` for a verified value, `422` for an attestation failure or an unsupported runtime, `400` for an invalid contract or parameters, and `502` for an executor failure. Failed responses never carry `display_value`, and error bodies never echo SQL, DSNs or driver text.
 
@@ -303,6 +316,9 @@ AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 hex>","subject":"console","scopes":[
 | `POST /v1/migrate` | `migrate:run` |
 | `GET /v1/decisions`, `GET /v1/computations` | `audit:read` |
 | `POST /v1/computations` | `compute:run` |
+| `GET /v1/graph*`, `POST /v1/graph/answerability`, `POST /v1/graph/retrieve`, `POST /mcp` | `knowledge:read` |
+| `PUT /v1/graph/node`, `POST /v1/graph/edges` | `graph:write` |
+| `POST /v1/graph/index` | `migrate:run` |
 
 Missing or unknown credentials answer `401` with `WWW-Authenticate: Bearer`; a valid token without the required scope answers `403`; exceeding `AGENTMEM_RATE_RPS` answers `429`. Private documents are readable only by their owner (an explicit `acl` grant wins), anonymous writes are refused, and a read denied by ACL is indistinguishable from a missing document (`404`) so existence cannot be probed.
 
@@ -393,15 +409,16 @@ Reports Recall@k, Precision@k, nDCG@k, MRR, MAP and HitRate@k as pure functions 
 
 ## 🌐 Web console
 
-`web/` is a dependency-free ES module console with two views: **Status** (health + recent routing decisions) and **API docs** (all 9 HTTP method + path combinations, request/response samples, conventions and error codes).
+`web/` is a dependency-free ES module console with three views: **Status** (health + recent routing decisions), **API docs** (all 21 HTTP method + path combinations, request/response samples, conventions and error codes) and **Graph** (index freshness, node search, lineage, neighbourhood walk and answerability).
 
 - **Served by the binary.** Vite bundles `web/` straight into `internal/webui/dist`, `//go:embed` compiles that directory into `agentmem`, and `serve` answers `GET /` with the page and `/assets/*` with the hashed bundles. No reverse-proxy document root, no second process, no runtime JS dependency.
-- **Optional.** `AGENTMEM_CONSOLE_ENABLED=false` disables it at configuration time: `GET /` and `/assets/*` answer JSON `404`, and the nine API routes, the permission matrix, rate limiting and `GET /healthz` are unchanged. Use it when the service only ever needs an API surface.
-- **Try it in place.** Every endpoint row expands into a workbench: editable query parameters and JSON body, one click to send a real same-origin request, then status code, duration, response headers and a pretty-printed body. Write routes (`POST /v1/knowledge`, `POST /v1/migrate`, `POST /v1/computations`) require an explicit confirmation first.
+- **Optional.** `AGENTMEM_CONSOLE_ENABLED=false` disables it at configuration time: `GET /` and `/assets/*` answer JSON `404`, and the 21 API routes, the permission matrix, rate limiting and `GET /healthz` are unchanged. Use it when the service only ever needs an API surface.
+- **Try it in place.** Every endpoint row expands into a workbench: editable query parameters and JSON body, one click to send a real same-origin request, then status code, duration, response headers and a pretty-printed body. Write routes (`POST /v1/knowledge`, `POST /v1/migrate`, `POST /v1/computations`, `PUT /v1/graph/node`, `POST /v1/graph/index`, `POST /v1/graph/edges`) require an explicit confirmation first.
+- **Graph view.** `?view=graph` adds the third view: index freshness (`fresh` / `stale` / `rebuilding`), a keyword and type filter over declared nodes, a sticky detail panel with lineage, properties, Attested Computation summary and in/out edge tables, a depth- and direction-bounded neighbourhood walk, and an answerability panel that renders coverage with a native `<progress>` next to the explicit gap list. Tables are query containers: below 560px each cell is relabelled and stacked, and every column header stays sticky while scrolling.
 - **Credentials stay in the tab.** The bearer token is kept in `sessionStorage` only, sent as an `Authorization` header, never appended to a URL, a saved draft or a log line; closing the tab drops it.
 - 13 languages, matching agenthub: `en`, `zh`, `zh-TW`, `es`, `fr`, `de`, `it`, `ru`, `ja`, `ko`, `pt`, `ar`, `hi`. Resolution order is `?lang=` > local storage > browser language > English; English is the fallback for a missing key. Arabic flips the layout to RTL.
 - Light and dark themes share one monochrome grey scale. The theme is resolved before the first paint, follows the OS until the visitor picks one, and only an explicit choice is stored in `agentmem.theme`.
-- `?view=docs` opens the API documentation directly.
+- `?view=docs` opens the API documentation directly; `?view=graph` opens the graph view.
 - Methods, paths, field names and JSON samples render verbatim in every locale; only prose is translated. Endpoint data mirrors `internal/handlers/http.go`.
 - The console is a public page (like `GET /healthz`); the API calls it makes still need a token. Its CSP is a response header assembled at startup from the embedded page (`script-src 'self'` plus the inline theme script's SHA-256), so the digest cannot drift, while API answers keep `default-src 'none'`. The meta tag in `web/index.html` remains the static-hosting fallback and `web/tests/security.test.mjs` still recomputes it.
 - Web rendering is checked with [impeccable][impeccable-link]; the monochrome invariant is kept and the `.notice` side-accent border (a known slop tell) is intentionally avoided.
@@ -505,6 +522,7 @@ All detailed docs live under [`docs/`](./docs) and are written in Chinese:
 | [Engine plugins](./docs/plugins.md) | Four engines as Go packages, declarative `sdk_boundary` |
 | [Attested Computation](./docs/computations.md) | Contract, parameter binding, attester chain, verdict audit |
 | [Routing](./docs/routing.md) | Rule-first decision, System One, dual-path reconciliation |
+| [Knowledge graph](./docs/graph.md) | Frontmatter declarations, typed ontology, projection sync, RRF and answerability |
 | [E2E acceptance](./docs/e2e.md) | User-perspective offline black-box suite, case matrix and troubleshooting |
 
 <div align="right">

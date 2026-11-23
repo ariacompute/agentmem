@@ -26,6 +26,7 @@ const (
 	PermMigrateRun     Permission = "migrate:run"
 	PermAuditRead      Permission = "audit:read"
 	PermComputeRun     Permission = "compute:run"
+	PermGraphWrite     Permission = "graph:write"
 )
 
 var allPermissions = map[Permission]struct{}{
@@ -35,6 +36,7 @@ var allPermissions = map[Permission]struct{}{
 	PermMigrateRun:     {},
 	PermAuditRead:      {},
 	PermComputeRun:     {},
+	PermGraphWrite:     {},
 }
 
 // ParsePermission rejects unknown capabilities instead of silently granting

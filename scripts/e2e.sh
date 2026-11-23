@@ -953,6 +953,77 @@ a_cli_err 'flag provided but not defined'
 end_case
 
 # ===========================================================================
+begin_case C36 "graph put declares a node and commits it"
+run_cli graph put "${ENVARG[@]}" --subject system --id e2e/cli-graph --node-type metric --label "CLI graph"
+a_rc 0
+a_cli_json_eq concept_id e2e/cli-graph
+a_cli_json_has content_hash
+a_cli_json_has commit_sha
+end_case
+
+begin_case C37 "graph put creates the edge target under the same owner"
+run_cli graph put "${ENVARG[@]}" --subject system --id e2e/cli-target --node-type table --label "CLI target"
+a_rc 0
+a_cli_json_eq concept_id e2e/cli-target
+a_cli_json_eq unchanged false
+end_case
+
+begin_case C38 "graph edge appends a declared relation between readable nodes"
+run_cli graph edge "${ENVARG[@]}" --subject system --id e2e/cli-graph --to e2e/cli-target --type computed_from --evidence 'sources[0]'
+a_rc 0
+a_cli_json_eq concept_id e2e/cli-graph
+a_cli_json_eq unchanged false
+end_case
+
+begin_case C39 "graph node and neighbors read the declaration back"
+run_cli graph node "${ENVARG[@]}" --subject system --id e2e/cli-graph
+a_rc 0
+a_cli_json_eq concept_id e2e/cli-graph
+a_cli_json_eq node_type metric
+a_cli_json_eq out.0.to_id e2e/cli-target
+a_cli_json_eq out.0.edge_type computed_from
+a_cli_json_eq out.0.origin declared
+a_cli_json_eq out.0.evidence 'sources[0]'
+run_cli graph neighbors "${ENVARG[@]}" --subject system --from e2e/cli-graph --depth 1 --direction out
+a_rc 0
+a_cli_json_eq root e2e/cli-graph
+a_cli_json_len_min nodes 1
+end_case
+
+begin_case C40 "graph answerable reports coverage and reindex rebuilds the projection"
+run_cli graph answerable "${ENVARG[@]}" --subject system --q "cli graph"
+a_rc 0
+a_cli_json_has coverage
+a_cli_json_has verdict
+run_cli graph reindex
+a_rc 0
+a_cli_json_has nodes
+a_cli_json_has edges
+a_cli_json_has pruned
+end_case
+
+begin_case C41 "graph search and path are deterministic reads"
+run_cli graph search "${ENVARG[@]}" --subject system --q cli
+a_rc 0
+a_cli_json_len_min "" 1
+a_cli_json_has 0.concept_id
+run_cli graph path "${ENVARG[@]}" --subject system --from e2e/cli-graph --to e2e/cli-target
+a_rc 0
+a_cli_json_eq from e2e/cli-graph
+a_cli_json_eq to e2e/cli-target
+a_cli_json_eq found true
+a_cli_json_eq hops 1
+end_case
+
+begin_case C42 "graph edge to a missing target stays permissive and is reported on read"
+run_cli graph edge "${ENVARG[@]}" --subject system --id e2e/cli-graph --to e2e/cli-missing --type derived_from
+a_rc 0
+a_cli_json_eq concept_id e2e/cli-graph
+run_cli graph node "${ENVARG[@]}" --subject system --id e2e/cli-graph
+a_rc 0
+a_cli_json_len_min warnings 1
+end_case
+
 section "3. All HTTP API routes (auth-disabled profile)"
 # ===========================================================================
 if start_server base "$BASE_ENV" "$PORT_BASE"; then
@@ -1179,6 +1250,134 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_eq error 'not found'
   a_header Content-Type application/json
   end_case
+  begin_case H40 "graph node write commits a declaration with content hash and commit sha"
+  http_req PUT /v1/graph/node '{"concept_id":"e2e/graph-a","node_type":"metric","label":"Graph A","replace_edges":true,"edges":[{"to":"e2e/graph-b","type":"derived_from","evidence":"e2e"}]}'
+  a_status 200
+  a_json_eq concept_id e2e/graph-a
+  a_json_has content_hash
+  a_json_has commit_sha
+  a_json_eq unchanged false
+  end_case
+
+  begin_case H41 "creating the target closes the dangling edge"
+  http_req PUT /v1/graph/node '{"concept_id":"e2e/graph-b","node_type":"table","label":"Graph B"}'
+  a_status 200
+  a_json_eq concept_id e2e/graph-b
+  a_json_eq unchanged false
+  end_case
+
+  begin_case H42 "node detail lists the declared out edge with its origin"
+  http_req GET '/v1/graph/node?id=e2e%2Fgraph-a' ''
+  a_status 200
+  a_json_eq concept_id e2e/graph-a
+  a_json_eq node_type metric
+  a_json_eq label 'Graph A'
+  a_json_eq out.0.to_id e2e/graph-b
+  a_json_eq out.0.edge_type derived_from
+  a_json_eq out.0.origin declared
+  a_json_eq out.0.evidence e2e
+  end_case
+
+  begin_case H43 "neighbors expands only the requested direction"
+  http_req GET '/v1/graph/neighbors?from=e2e%2Fgraph-a&depth=1&direction=out' ''
+  a_status 200
+  a_json_eq root e2e/graph-a
+  a_json_len_min nodes 1
+  a_json_eq truncated false
+  a_json_eq depths.e2e/graph-a 0
+  a_json_eq depths.e2e/graph-b 1
+  end_case
+
+  begin_case H44 "shortest path finds the declared hop"
+  http_req GET '/v1/graph/path?from=e2e%2Fgraph-a&to=e2e%2Fgraph-b&max_depth=3' ''
+  a_status 200
+  a_json_eq from e2e/graph-a
+  a_json_eq to e2e/graph-b
+  a_json_eq found true
+  a_json_eq hops 1
+  end_case
+
+  begin_case H45 "graph search returns the declared nodes"
+  http_req GET '/v1/graph/search?q=graph&limit=10' ''
+  a_status 200
+  a_json_len_min "" 1
+  a_json_has 0.concept_id
+  end_case
+
+  begin_case H46 "graph schema answers even with no ontology document"
+  http_req GET /v1/graph/schema ''
+  a_status 200
+  a_json_has node_types
+  a_json_has edge_types
+  end_case
+
+  begin_case H47 "graph stats count the projection"
+  http_req GET /v1/graph ''
+  a_status 200
+  a_json_has nodes
+  a_json_has edges
+  a_json_has stale
+  a_json_has node_types
+  end_case
+
+  begin_case H48 "answerability returns a verdict, coverage and gaps"
+  http_req POST /v1/graph/answerability '{"question":"graph b"}'
+  a_status 200
+  a_json_eq question 'graph b'
+  a_json_has verdict
+  a_json_has coverage
+  a_json_has gaps
+  end_case
+
+  begin_case H49 "retrieve fuses the text and graph rankers"
+  http_req POST /v1/graph/retrieve '{"query":"graph","top_k":5}'
+  a_status 200
+  a_json_eq query graph
+  a_json_has hits
+  a_json_has nodes
+  end_case
+
+  begin_case H50 "reindex rebuilds the projection from the bundle"
+  http_req POST /v1/graph/index '{}'
+  a_status 200
+  a_json_has nodes
+  a_json_has edges
+  a_json_has pruned
+  end_case
+
+  begin_case H51 "MCP initialize answers a read-only server identity"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+  a_status 200
+  a_json_eq jsonrpc 2.0
+  a_json_eq result.serverInfo.name agentmem
+  end_case
+
+  begin_case H52 "MCP tools/list exposes only the five read tools"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+  a_status 200
+  a_json_eq result.tools.0.name search_terms
+  a_json_len_min result.tools 5
+  a_body_hasnt 'graph_put'
+  end_case
+
+  begin_case H53 "MCP notification without an id answers 202 with no body"
+  http_req POST /mcp '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+  a_status 202
+  eq "$(head -c 64 "$BODY")" '' 'notification body'
+  end_case
+
+  hc H54 "graph node read requires an id" GET /v1/graph/node '' 400
+  a_json_eq error 'id is required'
+  end_case
+
+  hc H55 "graph depth is clamped to the configured range" GET '/v1/graph/neighbors?from=e2e%2Fgraph-a&depth=99' '' 400
+  a_json_eq error 'numeric parameter is out of range'
+  end_case
+
+  hc H56 "unknown graph node and a private one share one 404" GET '/v1/graph/node?id=e2e%2Fmissing' '' 404
+  a_json_eq error 'node not found or access denied'
+  end_case
+
 else
   fail_case H00 "HTTP case group" "service failed to start: $(head -c 200 "$WORK/serve-base.log" | tr '\n' ' ')"
 fi
@@ -1399,9 +1598,9 @@ else
 fi
 end_case
 
-begin_case W03 "API docs mirror 9 method+path entries"
+begin_case W03 "API docs mirror 21 method+path entries"
 web_routes="$(grep -c "    method: '" "$REPO/web/src/lib/api-content.js")"
-eq "$web_routes" 9 'endpoint count'
+eq "$web_routes" 21 'endpoint count'
 end_case
 
 begin_case W04 "all 13 language directories present"
@@ -1409,7 +1608,7 @@ web_langs="$(cat "$REPO/web/src/lib/languages.js")"
 has "$web_langs" 'zh-TW' 'Traditional Chinese'
 has "$web_langs" 'hi' 'Hindi'
 web_tests="$(ls "$REPO"/web/tests/*.test.mjs 2>/dev/null | wc -l)"
-eq "$web_tests" 8 'offline test file count'
+eq "$web_tests" 9 'offline test file count'
 end_case
 
 begin_case W06 "docs page provides interactive try-it"

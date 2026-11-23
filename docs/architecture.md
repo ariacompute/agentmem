@@ -35,7 +35,7 @@ flowchart TB
   CMP --> PG
 ```
 
-包依赖单向：`auth` / `safepath` / `netsafe` / `webui` 与 `okf` / `meta` / `config`（L0，零内部依赖）→ `vcs` / `adapter` / `bridges` → `plugins`（清单 + 引擎包）→ `router` / `eval` / `compute` → `service` → `handlers` / `cli` → `cmd/agentmem`。端口定义在消费方，实现注入。`gorm` 只在 `internal/meta` 内出现；`compute.SQLExecutor` 定义在 `meta`，其 GORM 实现留在 `internal/meta/postgres_exec.go`，避免下层反向 import。
+包依赖单向：`auth` / `safepath` / `netsafe` / `webui` 与 `okf` / `meta` / `config`（L0，零内部依赖）→ `vcs` / `adapter` / `bridges` → `plugins`（清单 + 引擎包）→ `router` / `eval` / `compute` / `graph` → `service` → `handlers` / `cli` → `cmd/agentmem`。端口定义在消费方，实现注入。`gorm` 只在 `internal/meta` 内出现；`compute.SQLExecutor` 与 `meta.GraphIndex` 都定义在 `meta`（消费方分别是 `compute` 与 `graph`），其 GORM 实现留在 `internal/meta`，避免下层反向 import。`internal/graph` 只依赖 `okf` / `meta` / `netsafe` 三个叶子与半叶子包，不 import `router`（RRF 融合在包内自带，避免同级耦合）。
 
 四个叶子包只依赖标准库，因此不产生向上的依赖：
 
@@ -46,7 +46,7 @@ flowchart TB
 | `internal/netsafe` | `bridges` / `router` | 出向端点 scheme/host 白名单校验与逐跳重定向复检 |
 | `internal/webui` | `handlers` / `cli` | `//go:embed` 内嵌的控制台产物、只读静态服务、页面级 CSP（启动时对首页内联脚本现算摘要） |
 
-控制台与 API 共用同一个监听端口：`handlers.NewHandler` 注册 9 条 API 路由与 `/v1/` 的 JSON 404 兜底后，把 `/` 交给 `webui.Handler`（`GET`/`HEAD` 只读，其余方法 405）。`handlers.Console` 端口定义在消费方，`webui` 因此不需要认识 `handlers`。页面与资源是匿名可读的公开前缀，其余路径仍走鉴权与权限矩阵。
+控制台与 API 共用同一个监听端口：`handlers.NewHandler` 注册 21 条 API 路由（9 条知识/路由/计算 + 11 条 `/v1/graph*` + `POST /mcp`）与 `/v1/` 的 JSON 404 兜底后，把 `/` 交给 `webui.Handler`（`GET`/`HEAD` 只读，其余方法 405）。`handlers.Console` 端口定义在消费方，`webui` 因此不需要认识 `handlers`。页面与资源是匿名可读的公开前缀，其余路径仍走鉴权与权限矩阵。
 
 `config` 包不引入第三方 dotenv 依赖：`.env` 由标准库解析。加载顺序为 `Default()` → `.env`（`--env` / `AGENTMEM_ENV_FILE` 指定路径）→ 进程环境变量 → `Validate()`。封闭的 `AGENTMEM_*` 键白名单（同时覆盖进程环境中出现的未知 `AGENTMEM_*` 键）让未知键、非法数值、非法 `AGENTMEM_ADAPTERS` JSON 全部 fail closed；`POSTGRES_*` 等非前缀键留给 Docker Compose。`.env` 不进镜像，Compose 用 `env_file` 与 `${...}` 插值读取同一文件。
 
@@ -81,6 +81,12 @@ flowchart TB
 2. 选中的通道在 `context.WithTimeout` 下**并发**执行，总延迟取 max 而非 sum；错误按通道记录，不静默吞掉。
 3. `mergeHits` 按 ConceptID 去重，canonical 通道优先；同一概念在外部通道出现不同摘要时记录 `Conflict`，不覆盖。
 4. 结果经 `MetaStore.CheckACL` 过滤后返回，保留 `Source` 与 `Citation`。
+
+## 图数据流
+
+写入：`PUT /v1/graph/node`（或 CLI `graph put`）→ `okf.Document.SetGraph`（预算校验）→ `graph.ValidateDecl` 按本体判定（已声明类型连错 → `422`，其余只记告警）→ `store.PutAs`（Git 提交 + `concepts_meta`）→ `graph.Sync` 写邻接索引。索引同步失败只记告警，不回滚正文，由重建或读路径惰性修复。
+
+读取：`meta.GraphIndex` 取行 → 比对 `graph_nodes.content_hash` 与 `concepts_meta.content_hash`，不一致就按单文档重建该节点 → `CheckACL` 过滤 → 视图。邻居与最短路径走 PG 递归 CTE，一次查询完成、无 N+1，深度与行数在 SQL 侧封顶。详见 [graph.md](graph.md)。
 
 ## 迁移数据流
 

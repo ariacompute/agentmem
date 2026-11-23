@@ -92,7 +92,8 @@ export function buildRequest(ep, draft = {}, token = '') {
     cache: 'no-store',
     redirect: 'error',
   }
-  if (method === 'POST') {
+  // POST and PUT both carry a JSON body; GET and DELETE do not.
+  if (method === 'POST' || method === 'PUT') {
     headers['Content-Type'] = 'application/json'
     init.body = typeof draft.body === 'string' ? draft.body : ep.request || ''
   }

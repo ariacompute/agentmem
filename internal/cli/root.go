@@ -41,6 +41,7 @@ Commands:
   computations  Show the Attested Computation verdict audit
   validate    Validate configuration
   eval        Run ranking/routing evaluation on a JSONL dataset
+  graph       Query or write the knowledge graph (run "graph help")
 `
 
 // Run dispatches one CLI invocation. It is separated from main for testing.
@@ -73,6 +74,8 @@ func Run(args []string, out io.Writer) error {
 		return cmdValidate(args[1:], out)
 	case "eval":
 		return cmdEval(args[1:], out)
+	case "graph":
+		return cmdGraph(args[1:], out)
 	default:
 		return fmt.Errorf("agentmem: unknown command %q\n%s", args[0], usage)
 	}

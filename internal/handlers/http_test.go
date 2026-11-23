@@ -321,7 +321,7 @@ func securedOptions(t *testing.T) (Options, map[string]string) {
 			}},
 			{TokenSHA256: auth.Digest(adminToken), Subject: "ops", Scopes: []auth.Permission{
 				auth.PermHealthRead, auth.PermKnowledgeRead, auth.PermKnowledgeWrite,
-				auth.PermMigrateRun, auth.PermAuditRead, auth.PermComputeRun,
+				auth.PermMigrateRun, auth.PermAuditRead, auth.PermComputeRun, auth.PermGraphWrite,
 			}},
 		}, true),
 		RateRPS:   100000,
@@ -381,6 +381,12 @@ func TestHTTPPermissionMatrix(t *testing.T) {
 		{"migrate denied", http.MethodPost, "/v1/migrate", `{"direction":"canonical_to_rag","target":"memory"}`, "reader", http.StatusForbidden},
 		{"audit denied", http.MethodGet, "/v1/decisions", "", "reader", http.StatusForbidden},
 		{"compute denied", http.MethodPost, "/v1/computations", `{"concept_id":"computations/revenue"}`, "reader", http.StatusForbidden},
+		{"graph read allowed", http.MethodGet, "/v1/graph", "", "reader", http.StatusOK},
+		{"graph write denied", http.MethodPut, "/v1/graph/node", `{"concept_id":"metrics/x","node_type":"metric"}`, "reader", http.StatusForbidden},
+		{"graph write allowed", http.MethodPut, "/v1/graph/node", `{"concept_id":"metrics/x","node_type":"metric"}`, "admin", http.StatusOK},
+		{"graph edges denied", http.MethodPost, "/v1/graph/edges", `{"concept_id":"metrics/x","edges":[{"to":"metrics/y","type":"related"}]}`, "reader", http.StatusForbidden},
+		{"graph reindex denied", http.MethodPost, "/v1/graph/index", `{}`, "reader", http.StatusForbidden},
+		{"mcp read allowed", http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, "reader", http.StatusOK},
 		{"write allowed", http.MethodPost, "/v1/knowledge", `{"concept_id":"x","document":{"type":"Concept"}}`, "admin", http.StatusOK},
 	}
 	for _, tc := range cases {

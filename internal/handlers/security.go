@@ -43,9 +43,10 @@ type Options struct {
 }
 
 // routePermissions is the single, auditable permission matrix. It mirrors the
-// 9 method+path combinations registered in NewHandler. Anything not listed
-// here is handled by the router's own 405 logic. The console paths are not
-// listed: they are public reads, resolved by Console.Public instead.
+// 21 method+path combinations registered in NewHandler. Anything not listed
+// here is handled by the router's own 405 logic, so an unsupported method on a
+// known path never widens access. The console paths are not listed: they are
+// public reads, resolved by Console.Public instead.
 func routePermissions(r *http.Request) (auth.Permission, bool) {
 	switch r.Method + " " + r.URL.Path {
 	case "POST /v1/knowledge":
@@ -58,6 +59,16 @@ func routePermissions(r *http.Request) (auth.Permission, bool) {
 		return auth.PermAuditRead, true
 	case "POST /v1/computations":
 		return auth.PermComputeRun, true
+	case "GET /v1/graph", "GET /v1/graph/node", "GET /v1/graph/neighbors",
+		"GET /v1/graph/path", "GET /v1/graph/search", "GET /v1/graph/schema",
+		"POST /v1/graph/answerability", "POST /v1/graph/retrieve", "POST /mcp":
+		return auth.PermKnowledgeRead, true
+	case "PUT /v1/graph/node", "POST /v1/graph/edges":
+		return auth.PermGraphWrite, true
+	case "POST /v1/graph/index":
+		// Reindexing rebuilds a projection, not knowledge: it needs the migrate
+		// scope rather than the graph write scope.
+		return auth.PermMigrateRun, true
 	}
 	return "", false
 }

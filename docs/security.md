@@ -38,8 +38,14 @@ CLI **没有** Bearer 通道，主体由 `--subject` 自声明，令牌、权限
 | `GET /v1/decisions` | `audit:read` |
 | `GET /v1/computations` | `audit:read` |
 | `POST /v1/computations` | `compute:run` |
+| `GET /v1/graph`、`GET /v1/graph/node`、`GET /v1/graph/neighbors`、`GET /v1/graph/path`、`GET /v1/graph/search`、`GET /v1/graph/schema` | `knowledge:read` |
+| `POST /v1/graph/answerability`、`POST /v1/graph/retrieve`、`POST /mcp` | `knowledge:read` |
+| `PUT /v1/graph/node`、`POST /v1/graph/edges` | `graph:write` |
+| `POST /v1/graph/index` | `migrate:run`（重建投影，不改知识） |
 
 `health:read` 作为权限常量保留，供只读探针令牌使用；`/healthz` 本身始终公开，以便负载均衡器在鉴权配置错误时仍能判定进程存活。
+
+图读取复用 `knowledge:read`：能读正文就能读正文声明的边。写入口单列 `graph:write`，因此「只读的检索 Agent」无法通过图接口改写知识。图重建归 `migrate:run`，因为它只重建投影、不产生新知识；`/mcp` 只暴露只读工具，没有任何写工具。`AGENTMEM_GRAPH_ENABLED=false` 时 `/v1/graph*` 与 `/mcp` 一律 JSON `404`，且该判断发生在鉴权之后，不改变未授权请求先得到 `401` 的顺序。
 
 失败口径：
 
@@ -83,6 +89,7 @@ AGENTMEM_AUTH_TOKENS='[
 - 非空出向端点（System One、非 `cli` 适配器或 `bridge: http` 的计算 sidecar）而未配置任何主机时，`config.Load` 直接失败；装配期用 `netsafe.ValidateEndpoint` 再校验一次，运行期每次调用前复核。
 - 计算 sidecar 的出向调用统一走 `bridges.PostJSON`：请求体 1 MiB、响应体 4 MiB、仅传输错误与 `5xx` 重试 1 次，错误只保留类型，不带 URL 或主机。协议见 `docs/compute-sidecar.md`。
 - `cli` 适配器的 `endpoint` 是可执行程序名，不是 URL，因此不参与主机白名单；它受第 6 节的命令规则约束。
+- 可选外部图引擎（`AGENTMEM_GRAPH_BACKEND=remote`）复用同一套出向约束：`AGENTMEM_GRAPH_REMOTE_URL` 的主机必须命中白名单，凭据只以环境变量名（`AGENTMEM_GRAPH_REMOTE_TOKEN_ENV`）引用并在启动时读取，超时后返回固定错误类别；缺 URL、缺令牌或主机未放行时**启动失败**，不静默退回内建实现。
 
 ## 5. 限流、超时与来源校验
 
@@ -133,7 +140,7 @@ AGENTMEM_AUTH_TOKENS='[
 
 1. `AGENTMEM_AUTH_ENABLED=true` 且至少一枚令牌；
 2. `AGENTMEM_PG_DSN` / `AGENTMEM_VECTOR_DSN` 不得包含 `sslmode=disable`；
-3. 非空出向端点必须配置 `AGENTMEM_EGRESS_ALLOWED_HOSTS`；
+3. 非空出向端点必须配置 `AGENTMEM_EGRESS_ALLOWED_HOSTS`；`AGENTMEM_GRAPH_BACKEND=remote` 时 `AGENTMEM_GRAPH_REMOTE_TOKEN_ENV` 指向的环境变量在进程环境中必须已设置（只存变量名，不存令牌）；
 4. 其余校验（adapter kind 白名单、ACL 可见性枚举、限流取值范围、frontmatter 上限）与模式无关，始终生效。
 
 容器与交付面：镜像以非 root 用户运行且仅 `/app/data` 可写，运行时镜像随 Alpine 版本刷新 CA bundle；`docker-compose.yml` 把 `8080` 与 `5432` 绑定在 `127.0.0.1`，容器内仍监听 `0.0.0.0`（容器网络所需）。CI 默认仅 `contents: read`，`persist-credentials: false`；GitHub Release 资产上传用 `github.token`，镜像推送用仓库 secret `ARIACOMPUTE_TOKEN`（只授 `write:packages`，需定期轮换；见 `SECURITY.md` 的剩余风险）。
@@ -147,6 +154,8 @@ AGENTMEM_AUTH_TOKENS='[
 | 未授权读写 | 网络可达即可访问 | 已修复：Bearer + 权限矩阵；生产强制开启 |
 | 请求自报身份（越权读私有文档） | `subject` 来自请求体/查询串 | 已修复：主体仅由中间件注入 |
 | 私有文档存在性泄露 | 404 与 403 可区分 | 已修复：统一 404 文案 |
+| 图接口绕过 ACL | 邻居/路径/检索可能返回未授权节点 | 已修复：读路径先 `CheckACL` 过滤再计数与返回；私有节点与不存在统一 404 |
+| 外部 Agent 经 MCP 改知识 | 工具清单可扩展 | 已修复：`/mcp` 只有 5 个只读工具，写入需 `graph:write` 令牌走 REST/CLI |
 | 令牌泄露 | 摘要写在版本化 `.env` | 缓解：只存摘要；`.env` 被 gitignore；建议按环境注入 `AGENTMEM_AUTH_TOKENS` |
 | 内部错误/DSN 泄露 | 直接回显 `err.Error()` | 已修复：分类文案 + 类型日志 |
 | SSRF（System One / HTTP 桥接） | 任意 URL | 已修复：装配期白名单 + 逐跳复检 + 私网字面量默认拒绝 |

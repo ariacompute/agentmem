@@ -15,7 +15,7 @@ import {
   statusGroups,
 } from '../src/lib/api-content.js'
 
-/** Mirrors internal/handlers/http.go NewHandler. */
+/** Mirrors internal/handlers/http.go NewHandler and routePermissions. */
 const EXPECTED_ROUTES = [
   'GET /healthz',
   'POST /v1/knowledge',
@@ -26,19 +26,31 @@ const EXPECTED_ROUTES = [
   'GET /v1/concepts',
   'POST /v1/computations',
   'GET /v1/computations',
+  'GET /v1/graph',
+  'GET /v1/graph/node',
+  'PUT /v1/graph/node',
+  'GET /v1/graph/neighbors',
+  'GET /v1/graph/path',
+  'GET /v1/graph/search',
+  'GET /v1/graph/schema',
+  'POST /v1/graph/answerability',
+  'POST /v1/graph/retrieve',
+  'POST /v1/graph/index',
+  'POST /v1/graph/edges',
+  'POST /mcp',
 ]
 
 describe('api-content endpoints', () => {
-  it('lists exactly the 9 method+path combinations of the server', () => {
+  it('lists exactly the 21 method+path combinations of the server', () => {
     assert.deepEqual(ROUTE_KEYS, EXPECTED_ROUTES)
-    assert.equal(endpoints.length, 9)
-    assert.equal(new Set(ROUTE_KEYS).size, 9)
+    assert.equal(endpoints.length, 21)
+    assert.equal(new Set(ROUTE_KEYS).size, 21)
   })
 
   it('never documents the outbound sidecar wire protocol', () => {
     for (const path of endpoints.map((entry) => entry.path)) {
       assert.equal(path === '/put' || path === '/query' || path === '/delete', false)
-      assert.ok(path === '/healthz' || path.startsWith('/v1/'))
+      assert.ok(path === '/healthz' || path === '/mcp' || path.startsWith('/v1/'))
     }
   })
 
@@ -82,10 +94,11 @@ describe('api-content endpoints', () => {
   it('renders valid JSON samples with placeholder values only', () => {
     for (const entry of endpoints) {
       assert.doesNotThrow(() => JSON.parse(entry.response), `${entry.method} ${entry.path} response`)
-      if (entry.method === 'POST') {
-        assert.doesNotThrow(() => JSON.parse(entry.request), `${entry.method} ${entry.path} request`)
-      } else {
+      if (entry.method === 'GET') {
         assert.ok(entry.request.startsWith('GET '), `${entry.path} request line`)
+      } else {
+        // POST and PUT both carry a JSON body.
+        assert.doesNotThrow(() => JSON.parse(entry.request), `${entry.method} ${entry.path} request`)
       }
       assert.ok(entry.statuses.every((status) => /^\d{3}$/.test(status)))
       assert.ok(!/password|token|secret|dsn/i.test(entry.request + entry.response))
@@ -111,6 +124,7 @@ describe('api-content authentication', () => {
     assert.doesNotMatch(conventions, /authorization: none/i)
     assert.match(conventions, /knowledge:read/)
     assert.match(conventions, /compute:run/)
+    assert.match(conventions, /graph:write/)
     assert.match(conventions, /rate limit/i)
   })
 
@@ -137,7 +151,20 @@ describe('api-content authentication', () => {
 
   it('uses only statuses explained in the error table', () => {
     const explained = new Set(statusGroups.map((group) => group.status))
-    assert.deepEqual([...explained], ['200', '400', '401', '403', '404', '405', '422', '429', '500', '502'])
+    assert.deepEqual([...explained], [
+      '200',
+      '202',
+      '400',
+      '401',
+      '403',
+      '404',
+      '405',
+      '413',
+      '422',
+      '429',
+      '500',
+      '502',
+    ])
     for (const entry of endpoints) {
       for (const status of entry.statuses) {
         assert.ok(explained.has(status), `${entry.method} ${entry.path} answers undocumented ${status}`)

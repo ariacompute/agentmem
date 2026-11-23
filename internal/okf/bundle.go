@@ -225,9 +225,16 @@ func (b *Bundle) Links(id string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ConceptLinks(id, d.Body), nil
+}
+
+// ConceptLinks resolves markdown links in one body to concept ids. It is
+// exported separately so callers that already hold a parsed document (the graph
+// projection) do not have to read the file twice.
+func ConceptLinks(id, body string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, m := range linkRe.FindAllStringSubmatch(d.Body, -1) {
+	for _, m := range linkRe.FindAllStringSubmatch(body, -1) {
 		target := strings.TrimSpace(strings.SplitN(m[1], " ", 2)[0])
 		if target == "" || strings.Contains(target, "://") {
 			continue
@@ -242,14 +249,14 @@ func (b *Bundle) Links(id string) ([]string, error) {
 			target = filepath.ToSlash(filepath.Join(filepath.Dir(cleanID(id)), target))
 		}
 		clean, err := ValidateConceptID(target)
-		if err != nil || seen[clean] {
+		if err != nil || seen[clean] || clean == cleanID(id) {
 			continue
 		}
 		seen[clean] = true
 		out = append(out, clean)
 	}
 	sort.Strings(out)
-	return out, nil
+	return out
 }
 
 // RebuildIndex regenerates index.md for one directory (progressive disclosure).

@@ -8,6 +8,7 @@ import { isRTL, isValidLang, matchLang } from './languages.js'
 import { shellCopy } from './copy/shell-copy.js'
 import { apiCopy } from './copy/api-copy.js'
 import { tryCopy } from './copy/try-copy.js'
+import { graphCopy } from './copy/graph-copy.js'
 
 export const STORAGE_KEY = 'agentmem.lang'
 
@@ -15,6 +16,7 @@ const COPIES = {
   shell: shellCopy,
   api: apiCopy,
   tryit: tryCopy,
+  graph: graphCopy,
 }
 
 /** Shallow merge with English fallback. Exported for copy-fallback tests. */

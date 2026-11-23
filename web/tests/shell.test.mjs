@@ -170,12 +170,76 @@ globalThis.window = {
   scrollY: 0,
 }
 
+const GRAPH_NODE = {
+  concept_id: 'metrics/gross_margin',
+  node_type: 'metric',
+  label: 'Gross Margin',
+  trust: 'unverified',
+  stale: false,
+  visibility: 'private',
+  content_hash: 'sha256:placeholder',
+  commit_sha: '0abcdef',
+  sources: [],
+  out: [
+    {
+      from_id: 'metrics/gross_margin',
+      to_id: 'tables/fact_sales',
+      edge_type: 'computed_from',
+      origin: 'declared',
+    },
+  ],
+  in: [],
+  warnings: [],
+}
+
+function graphPayload(path) {
+  if (path === '/v1/graph') {
+    return { nodes: 1, edges: 1, node_types: { metric: 1 }, edge_types: { computed_from: 1 }, stale: 0 }
+  }
+  if (path === '/v1/graph/schema') {
+    return {
+      node_types: { metric: {} },
+      edge_types: { computed_from: { From: ['metric'], To: ['table'] } },
+      warnings: [],
+    }
+  }
+  if (path === '/v1/graph/search') return [GRAPH_NODE]
+  if (path === '/v1/graph/node') return GRAPH_NODE
+  if (path === '/v1/graph/neighbors') {
+    return {
+      root: 'metrics/gross_margin',
+      nodes: [GRAPH_NODE],
+      edges: [],
+      depths: { 'metrics/gross_margin': 1 },
+      truncated: false,
+    }
+  }
+  if (path === '/v1/graph/answerability') {
+    return {
+      question: 'gross margin',
+      verdict: 'partial',
+      coverage: 0.5,
+      minimum: 0.6,
+      matched: [],
+      gaps: [{ kind: 'stale', concept_id: 'metrics/gross_margin', detail: 'stale body' }],
+      terms: ['gross', 'margin'],
+    }
+  }
+  return { nodes: 1, edges: 1, pruned: 0, warnings: [] }
+}
+
 globalThis.fetch = async (url) => {
-  if (String(url).includes('/healthz')) {
+  const target = String(url)
+  const path = target.split('?')[0]
+  if (path === '/healthz') {
     return { ok: true, json: async () => ({ status: 'ok', postgres: 'fake (offline)' }) }
+  }
+  if (path.startsWith('/v1/graph')) {
+    return { ok: true, status: 200, json: async () => graphPayload(path) }
   }
   return {
     ok: true,
+    status: 200,
     json: async () => [
       { concept_id: 'concepts/example', rule_id: 'R1', source: 'rule', targets: ['okf'], confidence: 1 },
     ],
@@ -206,7 +270,7 @@ describe('console shell', () => {
     assert.ok(ids.get('sec-errors'), 'errors section is missing')
     assert.equal(
       descendants(app).filter((node) => node._classes.has('endpoint-row')).length,
-      9,
+      21,
     )
 
     const row = descendants(app).find((node) => node._classes.has('endpoint-row'))
@@ -214,6 +278,44 @@ describe('console shell', () => {
     assert.ok(
       descendants(app).some((node) => node._classes.has('endpoint-detail')),
       'request/response sample did not expand',
+    )
+  })
+
+  it('renders the graph view with index status, results and node detail', async () => {
+    const graphTab = findByText(app, 'tab', 'Graph')
+    assert.ok(graphTab, 'graph tab is missing')
+    graphTab.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.ok(findByText(app, 'card-title', 'Query and index'), 'the query card is missing')
+    assert.ok(
+      descendants(app).some((node) => node.tagName === 'H1' && node.textContent === 'Knowledge graph'),
+      'the page title did not follow the view',
+    )
+    assert.ok(
+      descendants(app).some((node) => node._classes.has('chip') && node.textContent === 'fresh'),
+      'index freshness is missing',
+    )
+    assert.ok(
+      descendants(app).some((node) => node._classes.has('status-line')),
+      'the live status line is missing',
+    )
+    assert.ok(
+      descendants(app).filter((node) => node._classes.has('data-table')).length >= 1,
+      'no data table rendered',
+    )
+
+    const link = descendants(app).find(
+      (node) => node._classes.has('link-btn') && node.textContent === 'metrics/gross_margin',
+    )
+    assert.ok(link, 'the search result is missing')
+    link.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.ok(
+      descendants(app).some(
+        (node) => node._classes.has('link-btn') && node.textContent === 'tables/fact_sales',
+      ),
+      'the edge target did not render',
     )
   })
 

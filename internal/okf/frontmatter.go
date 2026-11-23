@@ -470,6 +470,19 @@ func (d *Document) extraString(k string) string {
 }
 
 func (d *Document) setExtraScalar(k, v string) {
+	d.setExtraNode(k, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v})
+}
+
+// extraNode exposes the raw extension node so structured extensions (graph
+// declarations) keep unknown sub-keys verbatim across a round-trip.
+func (d *Document) extraNode(k string) *yaml.Node {
+	if d.extra == nil {
+		return nil
+	}
+	return d.extra[k]
+}
+
+func (d *Document) setExtraNode(k string, n *yaml.Node) {
 	if d.extra == nil {
 		d.extra = map[string]*yaml.Node{}
 	}
@@ -483,5 +496,18 @@ func (d *Document) setExtraScalar(k, v string) {
 	if !found {
 		d.order = append(d.order, k)
 	}
-	d.extra[k] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v}
+	d.extra[k] = n
+}
+
+func (d *Document) clearExtra(k string) {
+	if d.extra == nil {
+		return
+	}
+	delete(d.extra, k)
+	for i, x := range d.order {
+		if x == k {
+			d.order = append(d.order[:i], d.order[i+1:]...)
+			break
+		}
+	}
 }
