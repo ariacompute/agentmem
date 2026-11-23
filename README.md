@@ -68,7 +68,7 @@ The design draws on [HKUDS/DeepTutor][deeptutor-link] (pluggable retrievers, ver
 - 🧭 **Rules run before System One** — A probabilistic choice can never override a deterministic authoritative decision. Ambiguity reaches the model; everything else short-circuits.
 - 🔒 **Fail closed, not fail open** — Routing timeouts and errors land on the canonical body. There is no switch to disable that fallback.
 - 🧪 **Offline tests are a hard constraint** — `go test ./...` passes without Postgres, network or credentials. Every external dependency has a fake.
-- ✅ **User-perspective acceptance** — `make e2e` drives the real binary and HTTP API offline: 11 CLI commands, 21 routes, graph reads and writes, auth, config fail-closed rules and the web console.
+- ✅ **User-perspective acceptance** — `make e2e` drives the real binary and HTTP API offline: 11 CLI commands, 21 routes, graph reads and writes, the typed ontology, the remote read-only engine, auth, config fail-closed rules and the web console.
 - 🧩 **Explicit engine registry** — Plugins are declared in `plugin.yaml` with a machine-checked `sdk_boundary`. Go `.so` plugins are deliberately avoided.
 - 🕸️ **The graph is declared, not inferred** — A concept is both a document and a node; typed relations and the ontology live in frontmatter, PostgreSQL keeps only a discardable adjacency index, and unknown types or dangling targets warn instead of rejecting. Reads fuse text and neighbourhood rankers with RRF and report coverage gaps rather than answering from thin evidence.
 - 🪶 **Zero-dependency console** — `web/` is plain ES modules, monochrome, 13 locales, no runtime framework and no CDN asset.

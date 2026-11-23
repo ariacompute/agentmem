@@ -13,7 +13,8 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 
 ## 依赖与离线保证
 
-- 必需：`go`、`curl`、`python3`（含标准库 `json`）、`sed`/`grep`/`awk`/`sha256sum`。
+- 必需：`go`、`curl`、`python3`（含标准库 `json`）、`sed`/`grep`/`awk`/`sha256sum`、
+  `timeout`（启动故障关闭用例用它证明进程没有进入监听）。
   不依赖 `jq`、不新增 Go/前端依赖。
 - 可选：`bun`（`web/tests` 的离线 `node:test` 套件）、`openssl`（`make check-trust-store`）。
   缺失时对应项记 `SKIP` 并给出原因，**不静默通过**；必需工具缺失则退出码 2。
@@ -42,9 +43,11 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 | 组 | 编号 | 覆盖范围 |
 |---|---|---|
 | 构建 | `G01` | 离线编译真实二进制 |
-| 配置 | `F01`–`F19` | `validate` 正向（基准配置、`.env.example`、缺失文件回退、完整 production、egress 白名单）；故障关闭（未知文件键、未知进程环境键、非法 mode/数值/布尔/ADAPTERS/scope、重复键、畸形行、production 缺 DSN/缺鉴权/`sslmode=disable`、出向端点缺白名单、未实现冲突策略） |
-| CLI | `C01`–`C35` | `help`/无参数/未知命令；`put` `query` `migrate`（含 `--dry-run`）`decisions` `concepts` `compute`（含重复 `--param`）`computations` `validate` `eval` 的正常链路；缺参、匿名写入、owner 不匹配、非法 visibility、非法参数、不支持 runtime、坏 JSONL、缺失数据集、`eval --env` 与未知 flag 等异常路径；计算面 sidecar（`C29`–`C32`）：CLI 通道、本地 HTTP 回环通道、sidecar 失败不展示数值且不回显正文、未配置 sidecar 仍 fail-closed；`C33`–`C35` 用 `examples/compute-sidecars` 的参考实现（`SIDECAR_OFFLINE=1`）端到端跑通 `bigquery` / `dbt` / `looker` 三个 runtime |
-| HTTP | `H01`–`H40` | 9 条 method+path 全部端到端（写→读→查询→迁移→决策审计→计算→计算审计→概念列表→健康检查）；405、Content-Type、未知字段、trailing data、畸形 JSON、4 MiB 上限、`top_k`/`limit`/必填字段边界；计算 400/422 且不展示 `display_value`；错误脱敏、安全响应头、JSON 404；二进制托管控制台（`H31` 首页 200 + 页面 CSP、`H36` 哈希资源可长期缓存、`H37`/`H38` 未注册 API 与静态路径仍是 JSON 404、`H39` 写方法 405）；`H40` 关闭 `AGENTMEM_CONSOLE_ENABLED` 后首页与资产为 JSON 404、`/healthz` 与 API 不变 |
+| 配置 | `F01`–`F26` | `validate` 正向（基准配置、`.env.example`、缺失文件回退、完整 production、egress 白名单、禁用图不需要远程端点）；故障关闭（未知文件键、未知进程环境键、非法 mode/数值/布尔/ADAPTERS/scope、重复键、畸形行、production 缺 DSN/缺鉴权/`sslmode=disable`、出向端点缺白名单、未实现冲突策略、`graph` 后端缺 URL、令牌变量名非法、未知后端、深度/边预算越界；禁用图仍校验边界） |
+| CLI | `C01`–`C42` | `help`/无参数/未知命令；`put` `query` `migrate`（含 `--dry-run`）`decisions` `concepts` `compute`（含重复 `--param`）`computations` `validate` `eval` 的正常链路；缺参、匿名写入、owner 不匹配、非法 visibility、非法参数、不支持 runtime、坏 JSONL、缺失数据集、`eval --env` 与未知 flag 等异常路径；计算面 sidecar（`C29`–`C32`）：CLI 通道、本地 HTTP 回环通道、sidecar 失败不展示数值且不回显正文、未配置 sidecar 仍 fail-closed；`C33`–`C35` 用 `examples/compute-sidecars` 的参考实现（`SIDECAR_OFFLINE=1`）端到端跑通 `bigquery` / `dbt` / `looker` 三个 runtime；`C36`–`C42` 图写入、边追加、读回、重建与检索/路径 |
+| HTTP | `H01`–`H60` | 9 条 method+path 全部端到端（写→读→查询→迁移→决策审计→计算→计算审计→概念列表→健康检查）；405、Content-Type、未知字段、trailing data、畸形 JSON、4 MiB 上限、`top_k`/`limit`/必填字段边界；计算 400/422 且不展示 `display_value`；错误脱敏、安全响应头、JSON 404；二进制托管控制台（`H31` 首页 200 + 页面 CSP、`H36` 哈希资源可长期缓存、`H37`/`H38` 未注册 API 与静态路径仍是 JSON 404、`H39` 写方法 405）；`H40` 关闭 `AGENTMEM_CONSOLE_ENABLED` 后首页与资产为 JSON 404、`/healthz` 与 API 不变；`H40`–`H56` 图与 MCP 读路径；`H57`–`H59` MCP `tools/call`（检索、单节点、未知工具）；`H60` MCP 超限请求体 413 |
+| 本体 | `T01`–`T06` | 种子 `ontology-schema` 文档被读成类型化 schema（含 snake_case 边定义、无告警）；允许的关系被提交；`computed_from` 反向连接被 422 拒绝且不写正文、拒绝后 `out` 仍为空；`POST /v1/graph/edges` 的越界关系被拒绝且已有声明不变；CLI `graph edge` 报同一句类型错误；`AGENTMEM_GRAPH_ENABLED=false` 时 `/v1/graph`、`/v1/graph/node`、`/mcp` 统一 JSON 404 而 `/healthz`、`/v1/concepts` 正常 |
+| 远程引擎 | `E01`–`E09` | `AGENTMEM_GRAPH_BACKEND=remote` 指向本地回环桩：节点/ schema /统计读取被转发（读到的不是本地索引）；引擎侧只收到 bearer 与令牌派生的 `X-Agentmem-Subject`，主体不进查询串；写节点与重建被 422 拒绝且既不触达引擎也不落正文；无令牌、端点主机未进白名单时进程在监听前退出；`validate` 侧缺 URL / 令牌变量名非法的故障关闭 |
 | 安全 | `S01`–`S21` | 6 个 scope 的权限矩阵（正反向）、公开 `/healthz`、401 + `WWW-Authenticate`、未知令牌、`health:read` 不足、全 scope 令牌；请求体与查询串 `subject` 伪造；私有文档 ACL（owner 可读 / 他人统一 404）；`Origin: null`、跨站未授权/白名单放行；405 在鉴权之后；错误体不回显凭据；`S21` 开启鉴权时控制台仍公开可读 |
 | 限流 | `R01` | 独立低限额档位，突发请求触发 429 及固定错误体 |
 | 跨进程 | `X01`–`X05` | 服务停止后 CLI 仍能看到 HTTP 写入的概念、路由审计、计算留痕；快照合法；OKF 正文落盘 |
@@ -55,17 +58,24 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 
 ## 实现要点
 
-- 四个服务档位顺序启停：`base`（鉴权关闭、高限额）、`console-off`
-  （`AGENTMEM_CONSOLE_ENABLED=false`，纯 API 姿态）、`auth`（多 scoped 令牌）、
-  `rate`（低限额）。CLI 写入放在服务启动前，因为离线快照在进程启动时加载一次、
-  退出时写回，运行中并发写入会被覆盖。
+- 七个服务档位顺序启停：`base`（鉴权关闭、高限额）、`console-off`
+  （`AGENTMEM_CONSOLE_ENABLED=false`，纯 API 姿态）、`ontology`（种子本体文档）、
+  `graph-off`（`AGENTMEM_GRAPH_ENABLED=false`）、`remote`（远程只读引擎 + 本地回环桩，
+  多 scoped 令牌）、`auth`（多 scoped 令牌）、`rate`（低限额）。CLI 写入放在服务启动前，
+  因为离线快照在进程启动时加载一次、退出时写回，运行中并发写入会被覆盖；`T05` 例外，
+  它只读已存在的声明并在校验阶段失败，因此放在本体档位停止之后。
 - `GET /healthz` 同样经过限流器，就绪探测会消耗 token；`rate` 档位用 `burst=5`
   并在就绪后立即连发请求，保证 429 可稳定复现。
 - 断言基准取自实现本身（`internal/handlers`、`internal/config`、`internal/cli`），
   例如 401 为 `authentication required`、405 为 `method not allowed`、超 4 MiB 返回
-  `400 invalid JSON`（不是 413）。契约变更时需同步更新本脚本与
-  `web/src/lib/api-content.js`。
+  `400 invalid JSON`（不是 413）、类型化关系越界返回 `422 graph request rejected`。
+  契约变更时需同步更新本脚本与 `web/src/lib/api-content.js`。
 - 出站 sidecar 的 `/put`、`/query`、`/delete` 不是服务端路由，脚本不会误测它们。
+- 远程引擎桩（`engine_stub.py`）每次请求只往日志写方法、路径、id、是否带 bearer
+  （不写令牌值）、转发的 subject，以及 subject 是否出现在查询串；因此“身份只走头部”、
+  “写请求没有触达引擎”这两条不变量是被观测到的，而不是被假设的。
+- 全量（含门禁）为 185 条：`PASS=185 FAIL=0 SKIP=0`；`--no-gates` 时为 179 条并记一条
+  `SKIP G00`。
 
 ## 排错
 

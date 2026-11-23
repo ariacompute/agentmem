@@ -148,6 +148,17 @@
 - [x] 文档：新增 `docs/graph.md`（声明契约、校验语义、投影与陈旧判定、表结构、API/CLI/MCP、RRF 与覆盖率、外部引擎、控制台、与 omniGraph / auto-ontology 的差异与非目标），同步 `architecture.md`（分层与图数据流、21 条路由）、`storage.md`（两张新表与 fake 语义）、`security.md`（12 条路由权限、出向白名单、生产 fail-closed、两张威胁表）、`requirements.md`（第 10 节）、中英 README、发布说明与 `.env.example`。
 - [x] 验收：`go test ./...`（离线）、`go vet`、`go build`、`make check-boundaries`、`make web-audit`、`cd web && bun test`（75 用例 / 9 文件）、`cd web && bun run build`、`make e2e`（159 用例，含 C36–C42 CLI 图用例与 H40–H56 HTTP/MCP 图用例）全绿。
 
+## 阶段 17 · 黑盒验收补齐远程引擎、类型化本体与图开关
+
+目标：把 `docs/graph.md` 的契约放进用户视角黑盒验收，而不是只靠包内测试；同时修掉验收中发现的一处端点示例错误。
+
+- [x] 远程引擎（`E01`–`E09`）：本地 `python3` 回环桩实现 §10 的只读契约（node / schema / stats / search / neighbors / path / answerability）。读取确实被转发（stats 返回桩的 `7`，不是本地索引计数）；引擎日志只记方法、路径、id、`auth=ok|missing`、转发的 subject 与 `qsubject=yes|no`，从不记令牌值，因此“身份只走 `X-Agentmem-Subject`”是被观测到的。写节点与重建返回 `422 graph request rejected`，引擎日志既无 `PUT` 也无 `/v1/graph/index`，正文无 `content_hash`，本地 `GET /v1/knowledge` 仍 `404`。启动侧用 `timeout` 证明无令牌、主机未进白名单两种配置在监听前退出，stderr 保留 `graph backend` 类别。
+- [x] 类型化本体（`T01`–`T06`）：种子 `ontology-schema` 后 `GET /v1/graph/schema` 返回 snake_case 的 `from`/`to` 且无告警；`computed_from` 允许的 metric→table 提交成功并可读回；table→metric 被 `422` 拒绝、不写正文、拒绝后 `out` 仍为 `[]`；`POST /v1/graph/edges` 的越界追加被拒绝且既有声明不变；CLI `graph edge` 报同一句 `not allowed from node type`。
+- [x] 图开关与配置边界（`T06`、`F20`–`F26`）：`AGENTMEM_GRAPH_ENABLED=false` 时 `/v1/graph`、`/v1/graph/node`、`/mcp` 统一 JSON `404`，`/healthz`、`/v1/concepts` 不变；`validate` 覆盖 remote 缺 URL、令牌变量名非法、未知后端、深度/边预算越界，以及禁用图时不要求远程端点但仍校验边界。
+- [x] MCP（`H57`–`H60`）：`tools/call` 的 `search_terms` / `get_node` 返回 `content` + `structuredContent`，未知工具返回 `-32602` 且无 `result`，超 4 MiB 请求体返回 `413`。
+- [x] 文档修正：`docs/graph.md §10` 的 `AGENTMEM_GRAPH_REMOTE_URL` 示例去掉多余的 `/v1`（客户端自身补 `/v1/graph/*`），并写明端点只写基址；`docs/e2e.md` 同步依赖（`timeout`）、七个档位、用例矩阵与新计数；中英 README 的验收条目补上本体/远程引擎。
+- [x] 验收：`make e2e` 185 条全绿（`PASS=185 FAIL=0 SKIP=0`，新增 26 条：`F20`–`F26`、`T01`–`T06`、`E01`–`E09`、`H57`–`H60`）；`make e2e E2E_ARGS='--no-gates'` 为 179 条并记一条 `SKIP G00`。
+
 ## 验收
 
 ```bash

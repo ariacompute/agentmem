@@ -51,7 +51,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Environment preflight ---------------------------------------------------
-for tool in go curl python3 sed grep awk sha256sum; do
+for tool in go curl python3 sed grep awk sha256sum timeout; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "error: missing required tool $tool" >&2
     exit 2
@@ -142,6 +142,7 @@ PY
 cp "$REPO/examples/compute-sidecars/sidecar.py" "$SIDECAR_DIR/agentmem-example"
 chmod +x "$SIDECAR_DIR/agentmem-py" "$SIDECAR_DIR/agentmem-fail" "$SIDECAR_DIR/agentmem-example"
 SIDECAR_PID=""
+ENGINE_PID=""
 
 # --- Reporting framework ----------------------------------------------------
 PASS=0
@@ -377,7 +378,16 @@ stop_http_sidecar() {
   fi
 }
 
+stop_engine() {
+  if [[ -n "$ENGINE_PID" ]]; then
+    kill -TERM "$ENGINE_PID" 2>/dev/null || true
+    wait "$ENGINE_PID" 2>/dev/null || true
+    ENGINE_PID=""
+  fi
+}
+
 cleanup() {
+  stop_engine
   stop_http_sidecar
   stop_server
   if [[ "$KEEP" -eq 1 ]]; then
@@ -394,13 +404,14 @@ trap 'exit 143' TERM
 PORTS="$(python3 -c '
 import socket
 socks = []
-for _ in range(5):
+for _ in range(9):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
     socks.append(s)
 print(" ".join(str(s.getsockname()[1]) for s in socks))
 ')" || { echo "error: cannot allocate local ports" >&2; exit 2; }
-read -r PORT_BASE PORT_AUTH PORT_RATE PORT_SIDE PORT_CONSOLE <<< "$PORTS"
+read -r PORT_BASE PORT_AUTH PORT_RATE PORT_SIDE PORT_CONSOLE PORT_GRAPH_OFF \
+  PORT_ONTOLOGY PORT_REMOTE PORT_ENGINE <<< "$PORTS"
 
 BASE_ENV="$WORK/base.env"
 AUTH_ENV="$WORK/auth.env"
@@ -458,6 +469,13 @@ AUTH_JSON+='{"token_sha256":"'"$(digest "$TOK_HEALTH")"'","subject":"grace","sco
 AUTH_JSON+=']'
 
 PROD_JSON='[{"token_sha256":"'"$(digest "e2e-prod-$STAMP")"'","subject":"prod","scopes":["knowledge:read"]}]'
+
+# Remote-engine profile: reads need knowledge:read, rejected writes need
+# graph:write and the rejected rebuild needs migrate:run, so the scope check
+# cannot mask the backend-level rejection.
+TOK_ENGINE="e2e-engine-client-$STAMP"
+REMOTE_AUTH_JSON='[{"token_sha256":"'"$(digest "$TOK_ENGINE")"'","subject":"alice",'
+REMOTE_AUTH_JSON+='"scopes":["knowledge:read","graph:write","migrate:run"]}]'
 PROD_DSN='postgres://e2e:placeholder@db.example.test:5432/agentmem?sslmode=require'
 
 make_env "$BASE_ENV" "$PORT_BASE" 100000 1000000
@@ -488,6 +506,49 @@ make_env "$SIDECAR_MULTI_ENV" "$PORT_BASE" 100000 1000000 \
 # time, so GET / and /assets/* must answer JSON 404 while the API keeps working.
 CONSOLE_ENV="$WORK/console-off.env"
 make_env "$CONSOLE_ENV" "$PORT_CONSOLE" 100000 1000000 'AGENTMEM_CONSOLE_ENABLED=false'
+
+# Typed ontology profile: the schema document is seeded into the bundle copy, so
+# a mismatched declared relation must be rejected end to end.
+ONTOLOGY_ENV="$WORK/ontology.env"
+make_env "$ONTOLOGY_ENV" "$PORT_ONTOLOGY" 100000 1000000
+
+# Graph switched off: every graph surface must answer the same JSON 404 as an
+# unknown path while the rest of the API keeps working.
+GRAPH_OFF_ENV="$WORK/graph-off.env"
+make_env "$GRAPH_OFF_ENV" "$PORT_GRAPH_OFF" 100000 1000000 'AGENTMEM_GRAPH_ENABLED=false'
+
+# Remote graph engine: reads are proxied to a loopback stub, writes and rebuilds
+# are rejected because the engine owns a copy we cannot update.
+REMOTE_ENV="$WORK/remote.env"
+make_env "$REMOTE_ENV" "$PORT_REMOTE" 100000 1000000 \
+  'AGENTMEM_GRAPH_BACKEND=remote' \
+  "AGENTMEM_GRAPH_REMOTE_URL=http://127.0.0.1:$PORT_ENGINE" \
+  'AGENTMEM_GRAPH_REMOTE_TOKEN_ENV=GRAPH_ENGINE_TOKEN' \
+  'AGENTMEM_GRAPH_REMOTE_TIMEOUT_MS=5000' \
+  'AGENTMEM_EGRESS_ALLOWED_HOSTS=127.0.0.1' \
+  'AGENTMEM_AUTH_ENABLED=true' \
+  "AGENTMEM_AUTH_TOKENS='$REMOTE_AUTH_JSON'"
+
+# Same backend, but the endpoint host is outside the egress allowlist: startup
+# must fail instead of silently falling back to the builtin engine.
+REMOTE_BAD_HOST_ENV="$WORK/remote-bad-host.env"
+make_env "$REMOTE_BAD_HOST_ENV" "$PORT_REMOTE" 100000 1000000 \
+  'AGENTMEM_GRAPH_BACKEND=remote' \
+  "AGENTMEM_GRAPH_REMOTE_URL=http://127.0.0.1:$PORT_ENGINE" \
+  'AGENTMEM_GRAPH_REMOTE_TOKEN_ENV=GRAPH_ENGINE_TOKEN' \
+  'AGENTMEM_EGRESS_ALLOWED_HOSTS=graph.internal'
+
+# Allowlisted endpoint with an unset token variable: also a startup failure.
+REMOTE_NO_TOKEN_ENV="$WORK/remote-no-token.env"
+make_env "$REMOTE_NO_TOKEN_ENV" "$PORT_REMOTE" 100000 1000000 \
+  'AGENTMEM_GRAPH_BACKEND=remote' \
+  "AGENTMEM_GRAPH_REMOTE_URL=http://127.0.0.1:$PORT_ENGINE" \
+  'AGENTMEM_GRAPH_REMOTE_TOKEN_ENV=GRAPH_ENGINE_TOKEN' \
+  'AGENTMEM_EGRESS_ALLOWED_HOSTS=127.0.0.1'
+
+GRAPH_ENGINE_TOKEN="e2e-engine-$RANDOM$RANDOM$$"
+ENGINE_LOG="$WORK/engine.log"
+: > "$ENGINE_LOG"
 
 ENVARG=(--env "$BASE_ENV")
 PY_COMPUTE_ID='computations/revenue-python'
@@ -655,6 +716,56 @@ begin_case F19 "malformed KEY=VALUE line is rejected"
 run_cli validate --env "$WORK/bad-malformed.env"
 a_rc 1
 a_cli_err 'expected KEY=VALUE'
+end_case
+
+bad_env graph-no-url 'AGENTMEM_GRAPH_BACKEND=remote'
+begin_case F20 "remote graph backend without an endpoint is rejected"
+run_cli validate --env "$WORK/bad-graph-no-url.env"
+a_rc 1
+a_cli_err 'graph.backend remote requires AGENTMEM_GRAPH_REMOTE_URL'
+end_case
+
+bad_env graph-bad-token-env 'AGENTMEM_GRAPH_BACKEND=remote' \
+  'AGENTMEM_GRAPH_REMOTE_URL=http://127.0.0.1:1/v1' 'AGENTMEM_GRAPH_REMOTE_TOKEN_ENV=bad name'
+begin_case F21 "remote token variable must be a variable name, not a value"
+run_cli validate --env "$WORK/bad-graph-bad-token-env.env"
+a_rc 1
+a_cli_err 'graph.remote_token_env must name an environment variable'
+end_case
+
+bad_env graph-backend 'AGENTMEM_GRAPH_BACKEND=bogus'
+begin_case F22 "unknown graph backend is rejected"
+run_cli validate --env "$WORK/bad-graph-backend.env"
+a_rc 1
+a_cli_err 'graph.backend'
+end_case
+
+bad_env graph-depth 'AGENTMEM_GRAPH_MAX_DEPTH=9'
+begin_case F23 "out-of-range graph depth is rejected"
+run_cli validate --env "$WORK/bad-graph-depth.env"
+a_rc 1
+a_cli_err 'graph.max_depth must be 1..8'
+end_case
+
+bad_env graph-edges 'AGENTMEM_GRAPH_MAX_EDGES=0'
+begin_case F24 "out-of-range graph edge budget is rejected"
+run_cli validate --env "$WORK/bad-graph-edges.env"
+a_rc 1
+a_cli_err 'graph.max_edges must be 1..5000000'
+end_case
+
+bad_env graph-off-ok 'AGENTMEM_GRAPH_ENABLED=false' 'AGENTMEM_GRAPH_BACKEND=remote'
+begin_case F25 "a disabled graph needs no remote endpoint"
+run_cli validate --env "$WORK/bad-graph-off-ok.env"
+a_rc 0
+a_cli_json_eq status ok
+end_case
+
+bad_env graph-off-bounds 'AGENTMEM_GRAPH_ENABLED=false' 'AGENTMEM_GRAPH_MAX_DEPTH=9'
+begin_case F26 "a disabled graph still validates its bounds"
+run_cli validate --env "$WORK/bad-graph-off-bounds.env"
+a_rc 1
+a_cli_err 'graph.max_depth must be 1..8'
 end_case
 
 # ===========================================================================
@@ -1378,6 +1489,37 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_eq error 'node not found or access denied'
   end_case
 
+  begin_case H57 "MCP tools/call search_terms returns text plus structured content"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"search_terms","arguments":{"query":"graph","limit":5}}}'
+  a_status 200
+  a_json_eq result.isError false
+  a_json_eq result.content.0.type text
+  a_json_has result.structuredContent
+  a_json_has result.structuredContent.0.concept_id
+  end_case
+
+  begin_case H58 "MCP tools/call get_node reads one node through the same ACL"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get_node","arguments":{"concept_id":"e2e/graph-a"}}}'
+  a_status 200
+  a_json_eq result.isError false
+  a_json_eq result.structuredContent.concept_id e2e/graph-a
+  a_json_eq result.structuredContent.node_type metric
+  end_case
+
+  begin_case H59 "MCP tools/call rejects an unknown tool without touching knowledge"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"graph_put","arguments":{}}}'
+  a_status 200
+  a_json_eq error.code -32602
+  a_json_eq error.message 'unknown tool'
+  a_json_absent result
+  end_case
+
+  begin_case H60 "MCP oversized request body is rejected with 413"
+  http_req POST /mcp "@$WORK/big.json"
+  a_status 413
+  a_json_eq error 'request body is too large'
+  end_case
+
 else
   fail_case H00 "HTTP case group" "service failed to start: $(head -c 200 "$WORK/serve-base.log" | tr '\n' ' ')"
 fi
@@ -1406,6 +1548,292 @@ else
   fail_case H40 "API-only profile" "service failed to start: $(head -c 200 "$WORK/serve-console-off.log" | tr '\n' ' ')"
 fi
 stop_server
+
+# ===========================================================================
+section "3c. Typed ontology: declared relations are hard constraints"
+# ===========================================================================
+# The ontology is bundle content, so seeding the document is the supported way
+# to declare it; no product endpoint can invent one.
+cat > "$WORK/bundle/ontology.md" <<'MD'
+---
+type: ontology-schema
+graph_schema:
+  node_types:
+    metric: {}
+    table: {}
+  edge_types:
+    computed_from: { from: [metric], to: [table] }
+    derived_from:  { from: [metric], to: [metric] }
+---
+# Typed ontology
+
+Seeded by the e2e harness.
+MD
+
+if start_server ontology "$ONTOLOGY_ENV" "$PORT_ONTOLOGY"; then
+  begin_case T01 "a seeded ontology document is served as a typed schema"
+  http_req GET /v1/graph/schema ''
+  a_status 200
+  a_json_has node_types.metric
+  a_json_has node_types.table
+  a_json_eq edge_types.computed_from.from.0 metric
+  a_json_eq edge_types.computed_from.to.0 table
+  a_json_eq warnings null
+  end_case
+
+  begin_case T02 "a relation allowed by the ontology is committed"
+  http_req PUT /v1/graph/node '{"concept_id":"e2e/typed-metric","node_type":"metric","label":"Typed metric"}'
+  a_status 200
+  a_json_eq concept_id e2e/typed-metric
+  http_req PUT /v1/graph/node '{"concept_id":"e2e/typed-table","node_type":"table","label":"Typed table"}'
+  a_status 200
+  http_req PUT /v1/graph/node '{"concept_id":"e2e/typed-metric","replace_edges":true,"edges":[{"to":"e2e/typed-table","type":"computed_from"}]}'
+  a_status 200
+  a_json_eq unchanged false
+  http_req GET '/v1/graph/node?id=e2e%2Ftyped-metric' ''
+  a_status 200
+  a_json_eq out.0.to_id e2e/typed-table
+  a_json_eq out.0.edge_type computed_from
+  end_case
+
+  begin_case T03 "a relation that violates the ontology is rejected with 422"
+  http_req PUT /v1/graph/node '{"concept_id":"e2e/typed-table","replace_edges":true,"edges":[{"to":"e2e/typed-metric","type":"computed_from"}]}'
+  a_status 422
+  a_json_eq error 'graph request rejected'
+  a_json_absent content_hash
+  a_body_hasnt 'not allowed from node type'
+  http_req GET '/v1/graph/node?id=e2e%2Ftyped-table' ''
+  a_status 200
+  a_json_eq out '[]'
+  end_case
+
+  begin_case T04 "a rejected edge append leaves the stored declaration untouched"
+  http_req POST /v1/graph/edges '{"concept_id":"e2e/typed-table","edges":[{"to":"e2e/typed-metric","type":"derived_from"}]}'
+  a_status 422
+  a_json_eq error 'graph request rejected'
+  http_req GET '/v1/graph/node?id=e2e%2Ftyped-metric' ''
+  a_status 200
+  a_json_eq out.0.to_id e2e/typed-table
+  end_case
+else
+  fail_case T00 "typed ontology group" "service failed to start: $(head -c 200 "$WORK/serve-ontology.log" | tr '\n' ' ')"
+fi
+stop_server
+
+begin_case T05 "the CLI reports the same typed rejection"
+run_cli graph edge --env "$ONTOLOGY_ENV" --subject system --id e2e/typed-table --to e2e/typed-metric --type derived_from
+a_rc 1
+a_cli_err 'not allowed from node type'
+end_case
+
+# ===========================================================================
+section "3d. Graph switched off (AGENTMEM_GRAPH_ENABLED=false)"
+# ===========================================================================
+if start_server graph-off "$GRAPH_OFF_ENV" "$PORT_GRAPH_OFF"; then
+  begin_case T06 "graph surfaces answer JSON 404 while the rest of the API works"
+  http_req GET /v1/graph ''
+  a_status 404
+  a_json_eq error 'not found'
+  http_req GET '/v1/graph/node?id=e2e%2Ftyped-metric' ''
+  a_status 404
+  a_json_eq error 'not found'
+  http_req POST /mcp '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+  a_status 404
+  a_json_eq error 'not found'
+  http_req GET /healthz ''
+  a_status 200
+  a_json_eq status ok
+  http_req GET /v1/concepts ''
+  a_status 200
+  end_case
+else
+  fail_case T00 "graph-off profile" "service failed to start: $(head -c 200 "$WORK/serve-graph-off.log" | tr '\n' ' ')"
+fi
+stop_server
+
+# ===========================================================================
+section "3e. Remote read-only graph engine (AGENTMEM_GRAPH_BACKEND=remote)"
+# ===========================================================================
+cat > "$WORK/engine_stub.py" <<'PY'
+#!/usr/bin/env python3
+"""Loopback graph engine stub for the read-only contract in docs/graph.md §10.
+
+Every request is logged as one line so the harness can prove what crossed the
+boundary: method, path, id, whether a bearer was present (never its value), the
+forwarded subject and whether the subject leaked into the query string.
+"""
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
+
+LOG = sys.argv[2]
+
+
+class Handler(BaseHTTPRequestHandler):
+    def _record(self, method):
+        url = urlparse(self.path)
+        query = parse_qs(url.query)
+        auth = "ok" if (self.headers.get("Authorization") or "").startswith("Bearer ") else "missing"
+        subject = self.headers.get("X-Agentmem-Subject") or "-"
+        qsubject = "yes" if "subject" in query else "no"
+        ident = (query.get("id") or query.get("from") or ["-"])[0]
+        with open(LOG, "a", encoding="utf-8") as fh:
+            fh.write("%s %s id=%s auth=%s subject=%s qsubject=%s\n"
+                     % (method, url.path, ident, auth, subject, qsubject))
+
+    def _reply(self, payload, status=200):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        self._record("GET")
+        url = urlparse(self.path)
+        query = parse_qs(url.query)
+        if url.path == "/v1/graph/node":
+            self._reply({
+                "concept_id": (query.get("id") or [""])[0],
+                "node_type": "remote_node", "label": "Remote Node",
+                "out": [], "in": [], "warnings": [],
+            })
+        elif url.path == "/v1/graph/schema":
+            self._reply({
+                "node_types": {"remote_node": {"description": "Remote measure"}},
+                "edge_types": {"remote_link": {"from": ["remote_node"], "to": ["remote_node"]}},
+            })
+        elif url.path == "/v1/graph/stats":
+            self._reply({
+                "nodes": 7, "edges": 3, "stale": 0,
+                "node_types": {"remote_node": 7}, "edge_types": {"remote_link": 3},
+            })
+        elif url.path == "/v1/graph/search":
+            self._reply([{"concept_id": "e2e/remote", "node_type": "remote_node", "label": "Remote Node"}])
+        elif url.path == "/v1/graph/neighbors":
+            self._reply({
+                "root": (query.get("from") or [""])[0],
+                "nodes": [], "edges": [], "depths": {}, "truncated": False,
+            })
+        elif url.path == "/v1/graph/path":
+            self._reply({
+                "from": (query.get("from") or [""])[0], "to": (query.get("to") or [""])[0],
+                "found": False, "hops": 0, "nodes": [], "edges": [],
+            })
+        else:
+            self._reply({"error": "not found"}, 404)
+
+    def do_POST(self):
+        self._record("POST")
+        self._reply({"verdict": "insufficient", "coverage": 0.0, "matched": [], "gaps": []})
+
+    def log_message(self, *args):
+        pass
+
+
+HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+PY
+
+start_engine() {
+  python3 "$WORK/engine_stub.py" "$PORT_ENGINE" "$ENGINE_LOG" >"$WORK/engine-stub.log" 2>&1 &
+  ENGINE_PID=$!
+  local i code
+  for i in $(seq 1 100); do
+    code="$(curl -sS --max-time 1 -o /dev/null -w '%{http_code}' \
+      -H 'Authorization: Bearer probe' \
+      "http://127.0.0.1:$PORT_ENGINE/v1/graph/schema" 2>/dev/null || true)"
+    if [[ "$code" == "200" ]]; then return 0; fi
+    if ! kill -0 "$ENGINE_PID" 2>/dev/null; then ENGINE_PID=""; return 1; fi
+    sleep 0.1
+  done
+  stop_engine
+  return 1
+}
+
+# The token variable is unset here, so this proves the fail-closed check, not a
+# missing scope: the process must exit before it ever listens.
+begin_case E08 "remote backend without a token fails closed before listening"
+timeout 15 "$BIN" serve --env "$REMOTE_NO_TOKEN_ENV" >"$CLI_OUT" 2>"$CLI_ERR"
+CLI_RC=$?
+a_rc 1
+a_cli_err 'graph backend'
+a_cli_err 'remote token is empty'
+if grep -q 'agentmem listening' "$CLI_OUT"; then ck 1 'the server listened with an unusable engine config'; else ck 0 ''; fi
+end_case
+
+export GRAPH_ENGINE_TOKEN
+begin_case E09 "remote endpoint outside the egress allowlist fails closed"
+timeout 15 "$BIN" serve --env "$REMOTE_BAD_HOST_ENV" >"$CLI_OUT" 2>"$CLI_ERR"
+CLI_RC=$?
+a_rc 1
+a_cli_err 'graph backend'
+a_cli_err 'is not allowlisted'
+if grep -q 'agentmem listening' "$CLI_OUT"; then ck 1 'the server listened with an unallowlisted engine'; else ck 0 ''; fi
+end_case
+
+ENGINE_AUTH=("Authorization: Bearer $TOK_ENGINE")
+if start_engine; then
+  if start_server remote "$REMOTE_ENV" "$PORT_REMOTE"; then
+    hc E01 "a node read is proxied to the engine" GET '/v1/graph/node?id=e2e%2Fremote' '' 200 "${ENGINE_AUTH[@]}"
+    a_json_eq concept_id e2e/remote
+    a_json_eq node_type remote_node
+    a_json_eq label 'Remote Node'
+    end_case
+
+    begin_case E02 "the remote schema is decoded into the same snake_case shape"
+    http_req GET /v1/graph/schema '' "${ENGINE_AUTH[@]}"
+    a_status 200
+    a_json_has node_types.remote_node
+    a_json_eq edge_types.remote_link.from.0 remote_node
+    a_json_eq edge_types.remote_link.to.0 remote_node
+    end_case
+
+    begin_case E03 "stats are passthrough, not recomputed from the local index"
+    http_req GET /v1/graph '' "${ENGINE_AUTH[@]}"
+    a_status 200
+    a_json_eq nodes 7
+    a_json_eq edges 3
+    end_case
+
+    begin_case E04 "the engine sees the bearer and the token-derived subject only"
+    engine_log="$(cat "$ENGINE_LOG")"
+    has "$engine_log" 'auth=ok' 'bearer header'
+    has "$engine_log" 'subject=alice' 'forwarded subject'
+    has "$engine_log" 'qsubject=no' 'subject leaked into the query string'
+    hasnt "$engine_log" 'auth=missing' 'unauthenticated engine call'
+    end_case
+
+    hc E05 "a node write is rejected before it reaches the engine" PUT /v1/graph/node \
+      '{"concept_id":"e2e/remote-write","node_type":"metric","label":"Should not exist"}' 422 "${ENGINE_AUTH[@]}"
+    a_json_eq error 'graph request rejected'
+    a_json_absent content_hash
+    a_body_hasnt 'builtin'
+    end_case
+
+    hc E06 "a reindex is rejected for the same reason" POST /v1/graph/index '{}' 422 "${ENGINE_AUTH[@]}"
+    a_json_eq error 'graph request rejected'
+    end_case
+
+    begin_case E07 "rejected writes reach neither the engine nor the canonical store"
+    engine_log="$(cat "$ENGINE_LOG")"
+    hasnt "$engine_log" 'PUT ' 'engine received a write'
+    hasnt "$engine_log" '/v1/graph/index' 'engine received a reindex'
+    http_req GET '/v1/knowledge?id=e2e%2Fremote-write' '' "${ENGINE_AUTH[@]}"
+    a_status 404
+    a_json_eq error 'document not found or access denied'
+    end_case
+  else
+    fail_case E00 "remote engine group" "service failed to start: $(head -c 200 "$WORK/serve-remote.log" | tr '\n' ' ')"
+  fi
+  stop_server
+  stop_engine
+else
+  fail_case E00 "remote engine stub" "loopback engine stub failed to start: $(head -c 200 "$WORK/engine-stub.log" | tr '\n' ' ')"
+fi
+stop_server
+unset GRAPH_ENGINE_TOKEN
 
 # ===========================================================================
 section "4. Authentication, permission matrix, and identity security (auth-enabled profile)"

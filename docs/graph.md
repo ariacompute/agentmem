@@ -187,13 +187,13 @@ CLI 走本地可信路径（`AGENTMEM_AUTH_ENABLED=false` 时用 `AGENTMEM_ACL_D
 
 ```dotenv
 AGENTMEM_GRAPH_BACKEND=remote
-AGENTMEM_GRAPH_REMOTE_URL=https://graph.internal/v1
+AGENTMEM_GRAPH_REMOTE_URL=https://graph.internal
 AGENTMEM_GRAPH_REMOTE_TOKEN_ENV=GRAPH_ENGINE_TOKEN
 AGENTMEM_GRAPH_REMOTE_TIMEOUT_MS=5000
 AGENTMEM_EGRESS_ALLOWED_HOSTS=graph.internal
 ```
 
-- `builtin`（默认）用本仓库实现；`remote` 只把**只读查询**转发给外部引擎，此时写入与重建会被拒绝（`graph writes require the builtin backend`），因为外部引擎的副本无法随写入更新——静默分叉比拒绝更糟。
+- `builtin`（默认）用本仓库实现；`remote` 只把**只读查询**转发给外部引擎，此时写入与重建会被拒绝（`graph writes require the builtin backend`），因为外部引擎的副本无法随写入更新——静默分叉比拒绝更糟。端点只写基址，请求路径由客户端补 `/v1/graph/*`。
 - URL 主机必须在 `AGENTMEM_EGRESS_ALLOWED_HOSTS` 内；凭据只以**环境变量名**引用（`REMOTE_TOKEN_ENV`），启动时读取，不写入配置、不进日志、不出现在错误体里。
 - `remote` 缺 URL、缺令牌、主机未放行或 `production` 模式下配置不完整 → **启动失败**，而不是静默退回 `builtin`。
 - 外部响应超时、非 2xx 或结构不符 → 返回固定错误类别，不外泄响应正文。
