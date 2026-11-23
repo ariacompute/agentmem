@@ -69,7 +69,7 @@ The design draws on [HKUDS/DeepTutor][deeptutor-link] (pluggable retrievers, ver
 - 🧭 **Rules run before System One** — A probabilistic choice can never override a deterministic authoritative decision. Ambiguity reaches the model; everything else short-circuits.
 - 🔒 **Fail closed, not fail open** — Routing timeouts and errors land on the canonical body. There is no switch to disable that fallback.
 - 🧪 **Offline tests are a hard constraint** — `go test ./...` passes without Postgres, network or credentials. Every external dependency has a fake.
-- ✅ **User-perspective acceptance** — `make e2e` drives the real binary and HTTP API offline: 12 CLI commands, 23 routes, graph reads and writes, the typed ontology, MCP over HTTP and stdio, the remote read-only engine, auth, config fail-closed rules and the web console.
+- ✅ **User-perspective acceptance** — `make e2e` drives the real binary and HTTP API offline: 12 CLI commands, 23 routes, graph reads and writes, the typed ontology, MCP over HTTP and stdio (including JSON-RPC error codes and session bounds), the remote read-only engine, auth and the graph scope matrix, config fail-closed rules and the web console.
 - 🧩 **Explicit engine registry** — Plugins are declared in `plugin.yaml` with a machine-checked `sdk_boundary`. Go `.so` plugins are deliberately avoided.
 - 🕸️ **The graph is declared, not inferred** — A concept is both a document and a node; typed relations and the ontology live in frontmatter, PostgreSQL keeps only a discardable adjacency index, and unknown types or dangling targets warn instead of rejecting. Reads fuse text and neighbourhood rankers with RRF and report coverage gaps rather than answering from thin evidence.
 - 🪶 **Zero-dependency console** — `web/` is plain ES modules, monochrome, 13 locales, no runtime framework and no CDN asset.
@@ -533,7 +533,7 @@ make e2e E2E_ARGS='--no-gates'         # black-box cases only
 ./scripts/e2e.sh --filter '^H' --keep  # HTTP cases only; keep the temp workspace
 ```
 
-What it covers: all 12 CLI commands and all 23 HTTP routes end-to-end, plus the auth/scope matrix, ACL, rate limiting, config fail-closed rules, MCP over HTTP and stdio, Web console static checks, the bigquery/dbt/looker sidecar runtimes through the reference implementation, the API-only posture with the console switched off, and cross-process state. It finishes with the existing `go vet` / `go test` / `go build` / `make validate` / `make check-boundaries` / `make eval` / `make check-trust-store` gates, plus a case that proves the coverage gate rejects an under-covered profile.
+What it covers: all 12 CLI commands and all 23 HTTP routes end-to-end, plus the auth/scope matrix, ACL, rate limiting, config fail-closed rules, MCP over HTTP and stdio (JSON-RPC error codes, batching and session capacity), Web console static checks, the bigquery/dbt/looker sidecar runtimes through the reference implementation, the API-only posture with the console switched off, and cross-process state. It finishes with the existing `go vet` / `go test` / `go build` / `make validate` / `make check-boundaries` / `make eval` / `make check-trust-store` gates, plus a case that proves the coverage gate rejects an under-covered profile.
 
 Everything runs offline (`GOPROXY=off`, file-fake store, no Postgres/network/credentials). A missing optional `bun` or `openssl` is reported as `SKIP`, never silently passed. See [docs/e2e.md](./docs/e2e.md) for the full case matrix, exit codes and troubleshooting.
 

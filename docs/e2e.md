@@ -44,11 +44,11 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 |---|---|---|
 | 构建 | `G01` | 离线编译真实二进制 |
 | 配置 | `F01`–`F28` | `validate` 正向（基准配置、`.env.example`、缺失文件回退、完整 production、egress 白名单、禁用图不需要远程端点）；故障关闭（未知文件键、未知进程环境键、非法 mode/数值/布尔/ADAPTERS/scope、重复键、畸形行、production 缺 DSN/缺鉴权/`sslmode=disable`、出向端点缺白名单、未实现冲突策略、`graph` 后端缺 URL、令牌变量名非法、未知后端、深度/边预算越界；禁用图仍校验边界；`F27`/`F28` MCP 会话 TTL 与容量越界） |
-| CLI | `C01`–`C44` | `help`/无参数/未知命令；`put` `query` `migrate`（含 `--dry-run`）`decisions` `concepts` `compute`（含重复 `--param`）`computations` `validate` `eval` 的正常链路；缺参、匿名写入、owner 不匹配、非法 visibility、非法参数、不支持 runtime、坏 JSONL、缺失数据集、`eval --env` 与未知 flag 等异常路径；计算面 sidecar（`C29`–`C32`）：CLI 通道、本地 HTTP 回环通道、sidecar 失败不展示数值且不回显正文、未配置 sidecar 仍 fail-closed；`C33`–`C35` 用 `examples/compute-sidecars` 的参考实现（`SIDECAR_OFFLINE=1`）端到端跑通 `bigquery` / `dbt` / `looker` 三个 runtime；`C36`–`C42` 图写入、边追加、读回、重建与检索/路径；`C43`/`C44` `mcp` stdio 逐行应答与缺身份拒绝启动 |
-| HTTP | `H01`–`H67` | 9 条 method+path 全部端到端（写→读→查询→迁移→决策审计→计算→计算审计→概念列表→健康检查）；405、Content-Type、未知字段、trailing data、畸形 JSON、4 MiB 上限、`top_k`/`limit`/必填字段边界；计算 400/422 且不展示 `display_value`；错误脱敏、安全响应头、JSON 404；二进制托管控制台（`H31` 首页 200 + 页面 CSP、`H36` 哈希资源可长期缓存、`H37`/`H38` 未注册 API 与静态路径仍是 JSON 404、`H39` 写方法 405）；`H40` 关闭 `AGENTMEM_CONSOLE_ENABLED` 后首页与资产为 JSON 404、`/healthz` 与 API 不变；`H40`–`H56` 图与 MCP 读路径；`H57`–`H59` MCP `tools/call`（检索、单节点、未知工具）；`H60` MCP 超限请求体 413；`H61`–`H64` Streamable HTTP（版本头缺会话 404、会话签发/使用/DELETE、SSE 响应与事件流）；`H65`/`H66` `read_knowledge` 与 concepts/query/schema 只读工具；`H67` 关闭写开关时写工具按未知工具处理且不落盘 |
+| CLI | `C01`–`C46` | `help`/无参数/未知命令；`put` `query` `migrate`（含 `--dry-run`）`decisions` `concepts` `compute`（含重复 `--param`）`computations` `validate` `eval` 的正常链路；缺参、匿名写入、owner 不匹配、非法 visibility、非法参数、不支持 runtime、坏 JSONL、缺失数据集、`eval --env` 与未知 flag 等异常路径；计算面 sidecar（`C29`–`C32`）：CLI 通道、本地 HTTP 回环通道、sidecar 失败不展示数值且不回显正文、未配置 sidecar 仍 fail-closed；`C33`–`C35` 用 `examples/compute-sidecars` 的参考实现（`SIDECAR_OFFLINE=1`）端到端跑通 `bigquery` / `dbt` / `looker` 三个 runtime；`C36`–`C42` 图写入、边追加、读回、重建与检索/路径；`C43`/`C44` `mcp` stdio 逐行应答与缺身份拒绝启动；`C45`/`C46` stdio 通知不产生输出、未知方法 `-32601`、批处理单行应答 |
+| HTTP | `H01`–`H82` | 9 条 method+path 全部端到端（写→读→查询→迁移→决策审计→计算→计算审计→概念列表→健康检查）；405、Content-Type、未知字段、trailing data、畸形 JSON、4 MiB 上限、`top_k`/`limit`/必填字段边界；计算 400/422 且不展示 `display_value`；错误脱敏、安全响应头、JSON 404；二进制托管控制台（`H31` 首页 200 + 页面 CSP、`H36` 哈希资源可长期缓存、`H37`/`H38` 未注册 API 与静态路径仍是 JSON 404、`H39` 写方法 405）；`H68` 关闭 `AGENTMEM_CONSOLE_ENABLED` 后首页与资产为 JSON 404、`/healthz` 与 API 不变；`H40`–`H56` 图写入/读回与 MCP 读路径；`H57`–`H59` MCP `tools/call`（检索、单节点、未知工具）；`H60` MCP 超限请求体 413；`H61`–`H64` Streamable HTTP（版本头缺会话 404、会话签发/使用/DELETE、SSE 响应与事件流）；`H65`/`H66` `read_knowledge` 与 concepts/query/schema 只读工具；`H67` 关闭写开关时写工具按未知工具处理且不落盘；`H69`–`H77` MCP 协议错误面（畸形 JSON `-32700`、未知方法 `-32601`、非法请求 `-32600`、版本头拒绝、批处理顺序与 32 条上限、HTTP 方法 405、无会话 GET/DELETE、工具参数 `-32602`）；`H78`/`H79` 审计的 `concept_id` 过滤与空结果；`H80`/`H81` 图读取必填/越界参数、未知子路径/错误方法/非法方向；`H82` 会话容量上限（`AGENTMEM_MCP_MAX_SESSIONS=1`）拒绝新会话、保留活动会话、DELETE 后释放 |
 | 本体 | `T01`–`T06` | 种子 `ontology-schema` 文档被读成类型化 schema（含 snake_case 边定义、无告警）；允许的关系被提交；`computed_from` 反向连接被 422 拒绝且不写正文、拒绝后 `out` 仍为空；`POST /v1/graph/edges` 的越界关系被拒绝且已有声明不变；CLI `graph edge` 报同一句类型错误；`AGENTMEM_GRAPH_ENABLED=false` 时 `/v1/graph`、`/v1/graph/node`、`/mcp` 统一 JSON 404 而 `/healthz`、`/v1/concepts` 正常 |
 | 远程引擎 | `E01`–`E09` | `AGENTMEM_GRAPH_BACKEND=remote` 指向本地回环桩：节点/ schema /统计读取被转发（读到的不是本地索引）；引擎侧只收到 bearer 与令牌派生的 `X-Agentmem-Subject`，主体不进查询串；写节点与重建被 422 拒绝且既不触达引擎也不落正文；无令牌、端点主机未进白名单时进程在监听前退出；`validate` 侧缺 URL / 令牌变量名非法的故障关闭 |
-| 安全 | `S01`–`S24` | 6 个 scope 的权限矩阵（正反向）、公开 `/healthz`、401 + `WWW-Authenticate`、未知令牌、`health:read` 不足、全 scope 令牌；请求体与查询串 `subject` 伪造；私有文档 ACL（owner 可读 / 他人统一 404）；`Origin: null`、跨站未授权/白名单放行；405 在鉴权之后；错误体不回显凭据；`S21` 开启鉴权时控制台仍公开可读；`S22`–`S24` MCP 写开关 + 工具级 scope（写入成功、只读令牌被拒且不落盘、缺 `graph:write` 被拒） |
+| 安全 | `S01`–`S27` | 7 个 scope 的权限矩阵（正反向）、公开 `/healthz`、401 + `WWW-Authenticate`、未知令牌、`health:read` 不足、全 scope 令牌；请求体与查询串 `subject` 伪造；私有文档 ACL（owner 可读 / 他人统一 404）；`Origin: null`、跨站未授权/白名单放行；405 在鉴权之后；错误体不回显凭据；`S21` 开启鉴权时控制台仍公开可读；`S22`–`S24` MCP 写开关 + 工具级 scope（写入成功、只读令牌被拒且不落盘、缺 `graph:write` 被拒）；`S25` `/mcp` 在分发前先鉴权；`S26`/`S27` REST 图写需要 `graph:write`、reindex 需要 `migrate:run` |
 | 限流 | `R01` | 独立低限额档位，突发请求触发 429 及固定错误体 |
 | 跨进程 | `X01`–`X05` | 服务停止后 CLI 仍能看到 HTTP 写入的概念、路由审计、计算留痕；快照合法；OKF 正文落盘 |
 | Web | `W01`–`W06` | 自带 CSP、无外链 CDN、API 文档镜像 23 条 method+path、13 语言与 8 个离线测试文件、`bun test`、`W06` 试调用元数据与 `sessionStorage` 令牌约定 |
@@ -58,8 +58,9 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 
 ## 实现要点
 
-- 七个服务档位顺序启停：`base`（鉴权关闭、高限额）、`console-off`
-  （`AGENTMEM_CONSOLE_ENABLED=false`，纯 API 姿态）、`ontology`（种子本体文档）、
+- 八个服务档位顺序启停：`base`（鉴权关闭、高限额）、`console-off`
+  （`AGENTMEM_CONSOLE_ENABLED=false`，纯 API 姿态）、`mcp-cap`
+  （`AGENTMEM_MCP_MAX_SESSIONS=1`，验证会话容量上限与释放）、`ontology`（种子本体文档）、
   `graph-off`（`AGENTMEM_GRAPH_ENABLED=false`）、`remote`（远程只读引擎 + 本地回环桩，
   多 scoped 令牌）、`auth`（多 scoped 令牌）、`rate`（低限额）。CLI 写入放在服务启动前，
   因为离线快照在进程启动时加载一次、退出时写回，运行中并发写入会被覆盖；`T05` 例外，
@@ -74,8 +75,10 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 - 远程引擎桩（`engine_stub.py`）每次请求只往日志写方法、路径、id、是否带 bearer
   （不写令牌值）、转发的 subject，以及 subject 是否出现在查询串；因此“身份只走头部”、
   “写请求没有触达引擎”这两条不变量是被观测到的，而不是被假设的。
-- 全量（含门禁）为 185 条：`PASS=185 FAIL=0 SKIP=0`；`--no-gates` 时为 179 条并记一条
-  `SKIP G00`。
+- 用例编号是 `--filter` 与本文矩阵的公开句柄，启动时先扫描脚本自身的 `begin_case`
+  字面量；出现重复编号直接以退出码 2 拒绝运行，避免一个编号静默代表两组用例。
+- 全量（含门禁）为 220 条：`PASS=220 FAIL=0 SKIP=0`；`--no-gates` 时为 212 行
+  （`PASS=211` + 一条 `SKIP G00`）。
 
 ## 排错
 

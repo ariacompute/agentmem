@@ -51,13 +51,21 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Environment preflight ---------------------------------------------------
-for tool in go curl python3 sed grep awk sha256sum timeout; do
+for tool in go curl python3 sed grep awk sort uniq sha256sum timeout; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "error: missing required tool $tool" >&2
     exit 2
   fi
 done
 cd "$REPO" || { echo "error: cannot enter repository root" >&2; exit 2; }
+
+# A case ID is the public handle used by --filter and the documented matrix, so two
+# cases may never share one: a duplicate would silently report the wrong group.
+dup_ids="$(grep -o 'begin_case [A-Z][0-9][0-9]' "$REPO/scripts/e2e.sh" | awk '{print $2}' | sort | uniq -d)"
+if [[ -n "$dup_ids" ]]; then
+  echo "error: duplicate case IDs: $(echo "$dup_ids" | tr '\n' ' ')" >&2
+  exit 2
+fi
 for f in go.mod Makefile .env.example testdata/eval.jsonl testdata/bundle/index.md \
          web/index.html web/src/lib/api-content.js internal/webui/dist/index.html; do
   if [[ ! -f "$f" ]]; then echo "error: missing $f" >&2; exit 2; fi
@@ -404,14 +412,14 @@ trap 'exit 143' TERM
 PORTS="$(python3 -c '
 import socket
 socks = []
-for _ in range(9):
+for _ in range(10):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
     socks.append(s)
 print(" ".join(str(s.getsockname()[1]) for s in socks))
 ')" || { echo "error: cannot allocate local ports" >&2; exit 2; }
 read -r PORT_BASE PORT_AUTH PORT_RATE PORT_SIDE PORT_CONSOLE PORT_GRAPH_OFF \
-  PORT_ONTOLOGY PORT_REMOTE PORT_ENGINE <<< "$PORTS"
+  PORT_ONTOLOGY PORT_REMOTE PORT_ENGINE PORT_MCP_CAP <<< "$PORTS"
 
 BASE_ENV="$WORK/base.env"
 AUTH_ENV="$WORK/auth.env"
@@ -457,6 +465,7 @@ TOK_MIGRATE="e2e-migrate-$STAMP"
 TOK_AUDIT="e2e-audit-$STAMP"
 TOK_COMPUTE="e2e-compute-$STAMP"
 TOK_HEALTH="e2e-health-$STAMP"
+TOK_GRAPH="e2e-graph-$STAMP"
 
 AUTH_JSON='['
 AUTH_JSON+='{"token_sha256":"'"$(digest "$TOK_ALL")"'","subject":"alice","scopes":["health:read","knowledge:read","knowledge:write","migrate:run","audit:read","compute:run"]},'
@@ -465,7 +474,8 @@ AUTH_JSON+='{"token_sha256":"'"$(digest "$TOK_WRITE")"'","subject":"carol","scop
 AUTH_JSON+='{"token_sha256":"'"$(digest "$TOK_MIGRATE")"'","subject":"dave","scopes":["migrate:run"]},'
 AUTH_JSON+='{"token_sha256":"'"$(digest "$TOK_AUDIT")"'","subject":"erin","scopes":["audit:read"]},'
 AUTH_JSON+='{"token_sha256":"'"$(digest "$TOK_COMPUTE")"'","subject":"frank","scopes":["compute:run"]},'
-AUTH_JSON+='{"token_sha256":"'"$(digest "$TOK_HEALTH")"'","subject":"grace","scopes":["health:read"]}'
+AUTH_JSON+='{"token_sha256":"'"$(digest "$TOK_HEALTH")"'","subject":"grace","scopes":["health:read"]},'
+AUTH_JSON+='{"token_sha256":"'"$(digest "$TOK_GRAPH")"'","subject":"nina","scopes":["graph:write"]}'
 AUTH_JSON+=']'
 
 PROD_JSON='[{"token_sha256":"'"$(digest "e2e-prod-$STAMP")"'","subject":"prod","scopes":["knowledge:read"]}]'
@@ -507,6 +517,12 @@ make_env "$SIDECAR_MULTI_ENV" "$PORT_BASE" 100000 1000000 \
 # time, so GET / and /assets/* must answer JSON 404 while the API keeps working.
 CONSOLE_ENV="$WORK/console-off.env"
 make_env "$CONSOLE_ENV" "$PORT_CONSOLE" 100000 1000000 'AGENTMEM_CONSOLE_ENABLED=false'
+
+# One-session MCP profile: the transport must refuse the second initialize with the
+# documented capacity error and keep the live session usable, then free the slot on
+# DELETE. The default cap (128) cannot be reached from a fast acceptance run.
+MCP_CAP_ENV="$WORK/mcp-cap.env"
+make_env "$MCP_CAP_ENV" "$PORT_MCP_CAP" 100000 1000000 'AGENTMEM_MCP_MAX_SESSIONS=1'
 
 # Typed ontology profile: the schema document is seeded into the bundle copy, so
 # a mismatched declared relation must be rejected end to end.
@@ -1170,6 +1186,33 @@ a_cli_err 'mcp: provide --token, or --subject with --scopes'
 if [[ -s "$CLI_OUT" ]]; then ck 1 'stdout must stay empty when the command refuses to start'; else ck 0 ''; fi
 end_case
 
+begin_case C45 "mcp over stdio writes nothing for a notification and types an unknown method"
+printf '%s\n' \
+'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}' \
+'{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+'{"jsonrpc":"2.0","id":2,"method":"resources/list"}' \
+| "$BIN" mcp "${ENVARG[@]}" --subject e2e --scopes knowledge:read >"$CLI_OUT" 2>"$CLI_ERR"
+CLI_RC=$?
+a_rc 0
+# Two frames for three inputs: a notification must produce no line at all.
+eq "$(wc -l < "$CLI_OUT" | tr -d ' ')" 2 'stdio frame count'
+a_cli_out '"protocolVersion":"2024-11-05"'
+a_cli_out 'method not found'
+a_cli_out '-32601'
+end_case
+
+begin_case C46 "mcp over stdio answers a batch on one line"
+printf '%s\n' \
+'[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","id":2,"method":"tools/list"}]' \
+| "$BIN" mcp "${ENVARG[@]}" --subject e2e --scopes knowledge:read >"$CLI_OUT" 2>"$CLI_ERR"
+CLI_RC=$?
+a_rc 0
+eq "$(wc -l < "$CLI_OUT" | tr -d ' ')" 1 'one frame per batch'
+a_cli_out '{"jsonrpc":"2.0","id":1,"result":{}}'
+a_cli_out '"id":2'
+a_cli_out 'search_terms'
+end_case
+
 section "3. All HTTP API routes (auth-disabled profile)"
 # ===========================================================================
 if start_server base "$BASE_ENV" "$PORT_BASE"; then
@@ -1646,6 +1689,131 @@ if start_server base "$BASE_ENV" "$PORT_BASE"; then
   a_json_eq error 'document not found or access denied'
   end_case
 
+  begin_case H69 "MCP malformed JSON answers a parse error"
+  http_req POST /mcp '{'
+  a_status 400
+  a_json_eq jsonrpc 2.0
+  a_json_eq error.code -32700
+  a_json_eq error.message 'parse error'
+  end_case
+
+  begin_case H70 "MCP unknown method answers method not found"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":25,"method":"resources/list"}'
+  a_status 200
+  a_json_eq error.code -32601
+  a_json_eq error.message 'method not found'
+  a_json_absent result
+  end_case
+
+  begin_case H71 "MCP invalid request is rejected before any session lookup"
+  http_req POST /mcp '{"jsonrpc":"1.0","id":26,"method":"ping"}'
+  a_status 200
+  a_json_eq error.code -32600
+  a_json_eq error.message 'invalid request'
+  http_req POST /mcp '{"jsonrpc":"2.0","id":27}'
+  a_status 200
+  a_json_eq error.code -32600
+  a_json_eq error.message 'invalid request'
+  end_case
+
+  begin_case H72 "an unsupported MCP-Protocol-Version header is refused"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":28,"method":"ping"}' 'MCP-Protocol-Version: 1999-01-01'
+  a_status 400
+  a_json_eq error.code -32600
+  a_json_eq error.message 'unsupported protocol version'
+  end_case
+
+  begin_case H73 "a MCP batch answers every request in order"
+  http_req POST /mcp '[{"jsonrpc":"2.0","id":29,"method":"ping"},{"jsonrpc":"2.0","id":30,"method":"tools/list"}]'
+  a_status 200
+  a_json_len_min '' 2
+  a_json_eq 0.id 29
+  a_json_eq 0.result '{}'
+  a_json_eq 1.id 30
+  a_json_len_min 1.result.tools 13
+  end_case
+
+  python3 -c 'import json; print(json.dumps([{"jsonrpc": "2.0", "id": i, "method": "ping"} for i in range(33)]))' > "$WORK/batch.json"
+  begin_case H74 "an oversized MCP batch is rejected as invalid"
+  http_req POST /mcp "@$WORK/batch.json"
+  a_status 400
+  a_json_eq error.code -32600
+  a_json_eq error.message 'invalid request'
+  end_case
+
+  begin_case H75 "an unsupported HTTP method on /mcp answers 405 with Allow"
+  http_req PUT /mcp '{}'
+  a_status 405
+  a_header Allow 'GET, POST, DELETE'
+  a_json_eq error 'method not allowed'
+  end_case
+
+  begin_case H76 "MCP stream and close without a session answer session not found"
+  http_req GET /mcp ''
+  a_status 404
+  a_json_eq error.code -32004
+  a_json_eq error.message 'session not found'
+  http_req DELETE /mcp ''
+  a_status 404
+  a_json_eq error.code -32004
+  a_json_eq error.message 'session not found'
+  end_case
+
+  begin_case H77 "MCP tools/call validates arguments before touching knowledge"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"read_knowledge","arguments":{}}}'
+  a_status 200
+  a_json_eq error.code -32602
+  a_json_eq error.message 'concept_id is required'
+  a_json_absent result
+  end_case
+
+  begin_case H78 "the decisions audit filters by concept_id"
+  http_req GET '/v1/decisions?concept_id=e2e%2Fhttp-doc&limit=100' ''
+  a_status 200
+  a_json_len_min '' 1
+  a_json_eq 0.concept_id "$HTTP_DOC"
+  http_req GET '/v1/decisions?concept_id=e2e%2Fno-such-concept' ''
+  a_status 200
+  a_json_eq '' '[]'
+  end_case
+
+  begin_case H79 "the computation audit filters by concept_id"
+  http_req GET '/v1/computations?concept_id=computations%2Frevenue-postgres&limit=100' ''
+  a_status 200
+  a_json_len_min '' 1
+  a_json_eq 0.concept_id "$COMPUTE_ID"
+  http_req GET '/v1/computations?concept_id=computations%2Fno-such-concept' ''
+  a_status 200
+  a_json_eq '' '[]'
+  end_case
+
+  begin_case H80 "graph reads reject missing or out-of-range inputs"
+  http_req POST /v1/graph/answerability '{}'
+  a_status 400
+  a_json_eq error 'question is required'
+  http_req POST /v1/graph/retrieve '{"query":"   "}'
+  a_status 400
+  a_json_eq error 'query is empty'
+  http_req POST /v1/graph/retrieve '{"query":"x","top_k":101}'
+  a_status 400
+  a_json_eq error 'top_k is out of range'
+  http_req GET '/v1/graph/neighbors?depth=1' ''
+  a_status 400
+  a_json_eq error 'from is required'
+  end_case
+
+  begin_case H81 "graph routing keeps unknown paths, methods and directions typed"
+  http_req GET /v1/graph/nope ''
+  a_status 404
+  a_json_eq error 'not found'
+  http_req POST /v1/graph/search '{}'
+  a_status 405
+  a_json_eq error 'method not allowed'
+  http_req GET '/v1/graph/neighbors?from=e2e%2Fgraph-a&direction=sideways' ''
+  a_status 400
+  a_json_eq error 'direction must be out, in or both'
+  end_case
+
 else
   fail_case H00 "HTTP case group" "service failed to start: $(head -c 200 "$WORK/serve-base.log" | tr '\n' ' ')"
 fi
@@ -1655,7 +1823,7 @@ stop_server
 section "3b. API-only deployment (AGENTMEM_CONSOLE_ENABLED=false)"
 # ===========================================================================
 if start_server console-off "$CONSOLE_ENV" "$PORT_CONSOLE"; then
-  begin_case H40 "console disabled serves JSON 404 while the API keeps working"
+  begin_case H68 "console disabled serves JSON 404 while the API keeps working"
   has "$(head -c 500 "$WORK/serve-console-off.log")" 'console=disabled' 'startup log'
   http_req GET / ''
   a_status 404
@@ -1671,7 +1839,35 @@ if start_server console-off "$CONSOLE_ENV" "$PORT_CONSOLE"; then
   a_status 200
   end_case
 else
-  fail_case H40 "API-only profile" "service failed to start: $(head -c 200 "$WORK/serve-console-off.log" | tr '\n' ' ')"
+  fail_case H68 "API-only profile" "service failed to start: $(head -c 200 "$WORK/serve-console-off.log" | tr '\n' ' ')"
+fi
+stop_server
+
+# ===========================================================================
+section "3b2. MCP session capacity (AGENTMEM_MCP_MAX_SESSIONS=1)"
+# ===========================================================================
+if start_server mcp-cap "$MCP_CAP_ENV" "$PORT_MCP_CAP"; then
+  begin_case H82 "a full session table refuses a new session and keeps the live one"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
+  a_status 200
+  CAP_SESSION="$(header_value Mcp-Session-Id)"
+  eq "$([[ -n "$CAP_SESSION" ]] && echo issued || echo missing)" issued 'first session header'
+  http_req POST /mcp '{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
+  a_status 200
+  a_json_eq error.code -32004
+  a_json_eq error.message 'session capacity reached'
+  a_json_absent result
+  eq "$(header_value Mcp-Session-Id)" '' 'the refused initialize must not issue a session'
+  http_req POST /mcp '{"jsonrpc":"2.0","id":3,"method":"ping"}' "Mcp-Session-Id: $CAP_SESSION" 'MCP-Protocol-Version: 2025-06-18'
+  a_status 200
+  http_req DELETE /mcp '' "Mcp-Session-Id: $CAP_SESSION"
+  a_status 204
+  http_req POST /mcp '{"jsonrpc":"2.0","id":4,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
+  a_status 200
+  eq "$([[ -n "$(header_value Mcp-Session-Id)" ]] && echo issued || echo missing)" issued 'capacity released after close'
+  end_case
+else
+  fail_case H82 "MCP session capacity profile" "service failed to start: $(head -c 200 "$WORK/serve-mcp-cap.log" | tr '\n' ' ')"
 fi
 stop_server
 
@@ -2107,6 +2303,33 @@ if start_server auth "$AUTH_ENV" "$PORT_AUTH"; then
   a_status 200
   a_json_eq error.code -32003
   a_json_eq error.message forbidden
+  end_case
+
+  begin_case S25 "the MCP transport authenticates before it dispatches"
+  http_req POST /mcp '{"jsonrpc":"2.0","id":41,"method":"initialize"}'
+  a_status 401
+  a_json_eq error 'authentication required'
+  a_header WWW-Authenticate 'Bearer realm="agentmem"'
+  end_case
+
+  begin_case S26 "graph:write writes a node but cannot read knowledge"
+  http_req PUT /v1/graph/node \
+    '{"concept_id":"e2e/graph-scoped","node_type":"metric","label":"Scoped"}' \
+    "Authorization: Bearer $TOK_GRAPH"
+  a_status 200
+  a_json_has content_hash
+  http_req GET /v1/concepts '' "Authorization: Bearer $TOK_GRAPH"
+  a_status 403
+  a_json_eq error 'permission denied'
+  end_case
+
+  begin_case S27 "reindex follows migrate:run rather than graph:write"
+  http_req POST /v1/graph/index '{}' "Authorization: Bearer $TOK_GRAPH"
+  a_status 403
+  a_json_eq error 'permission denied'
+  http_req POST /v1/graph/index '{}' "Authorization: Bearer $TOK_MIGRATE"
+  a_status 200
+  a_json_has nodes
   end_case
 else
   fail_case S00 "auth case group" "service failed to start: $(head -c 200 "$WORK/serve-auth.log" | tr '\n' ' ')"

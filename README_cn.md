@@ -69,7 +69,7 @@ agentmem 只回答 Agent 的一个问题：*这份知识的哪一份副本才算
 - 🧭 **规则先于 System One** —— 概率选择永远不能覆盖确定性的权威判断；只有真正模糊的任务才交给模型。
 - 🔒 **失败关闭而非失败放行** —— 路由超时或报错一律回落到主干正文，且不存在关闭该行为的开关。
 - 🧪 **离线测试是硬约束** —— `go test ./...` 无需 Postgres、网络或凭据即可通过，每个外部依赖都有 fake。
-- ✅ **用户视角验收** —— `make e2e` 离线驱动真实二进制与 HTTP API，覆盖 12 条 CLI 命令、23 条路由、图读写、类型化本体、HTTP 与 stdio 两条 MCP 传输、远程只读引擎、鉴权、配置故障关闭与 Web 控制台。
+- ✅ **用户视角验收** —— `make e2e` 离线驱动真实二进制与 HTTP API，覆盖 12 条 CLI 命令、23 条路由、图读写、类型化本体、HTTP 与 stdio 两条 MCP 传输（含 JSON-RPC 错误码与会话上限）、远程只读引擎、鉴权与图 scope 矩阵、配置故障关闭与 Web 控制台。
 - 🧩 **显式引擎注册表** —— 插件由 `plugin.yaml` 声明，`sdk_boundary` 由机器校验；刻意不使用 Go `.so` 动态插件。
 - 🕸️ **图靠声明而非推断** —— 概念既是文档也是节点：类型化关系与本体写在 frontmatter，PostgreSQL 只存可丢弃的邻接索引，未知类型与断链只告警不拒绝；读路径用 RRF 融合文本与邻域排序，并在证据不足时给出覆盖率缺口而不是硬答。
 - 🪶 **零依赖控制台** —— `web/` 是原生 ES module，单色、13 语言、无运行时框架、无 CDN 资源。
@@ -533,7 +533,7 @@ make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
 ./scripts/e2e.sh --filter '^H' --keep  # 只报告 HTTP 组；保留临时目录
 ```
 
-覆盖范围：全部 10 个 CLI 命令与 9 条 HTTP 路由的端到端流程，外加 scope 权限矩阵、ACL、限流、配置故障关闭、Web 控制台静态检查、`bigquery` / `dbt` / `looker` 三个 runtime 经参考 sidecar 的真实执行、关闭控制台的纯 API 姿态，以及跨进程状态；最后串联 `go vet` / `go test` / `make validate` / `make check-trust-store` 等既有门禁。
+覆盖范围：全部 12 个 CLI 命令与 23 条 HTTP 路由的端到端流程，外加 scope 权限矩阵、ACL、限流、配置故障关闭、HTTP 与 stdio 两条 MCP 传输（JSON-RPC 错误码、批处理与会话容量）、Web 控制台静态检查、`bigquery` / `dbt` / `looker` 三个 runtime 经参考 sidecar 的真实执行、关闭控制台的纯 API 姿态，以及跨进程状态；最后串联 `go vet` / `go test` / `go build` / `make validate` / `make check-boundaries` / `make eval` / `make check-trust-store` 等既有门禁，并包含一条证明覆盖率门禁会拒绝未达标 profile 的用例。
 
 全程离线（`GOPROXY=off`、文件版 fake 存储、无 Postgres / 网络 / 凭据）；可选工具 `bun`、`openssl` 缺失时明确记为 `SKIP`，绝不静默通过。完整用例矩阵、退出码与排错方式见 [docs/e2e.md](./docs/e2e.md)。
 
