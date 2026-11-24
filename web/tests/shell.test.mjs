@@ -319,6 +319,44 @@ describe('console shell', () => {
     )
   })
 
+  it('shows the target theme on the toggle in every language', async () => {
+    const { LANGUAGES } = await import('../src/lib/languages.js')
+    const { setLang } = await import('../src/lib/i18n.js')
+    const { setTheme } = await import('../src/lib/theme.js')
+    const { shellCopy } = await import('../src/lib/copy/shell-copy.js')
+
+    const labelOf = (code, actionKey) => {
+      const toggle = findByAttr(app, 'aria-label', shellCopy[code][actionKey])
+      assert.ok(toggle, `${code}: theme toggle is missing`)
+      const label = toggle.children.find((child) => child._classes.has('label'))
+      assert.ok(label, `${code}: theme label is missing`)
+      return label.textContent
+    }
+
+    setTheme('dark', false)
+    for (const [code] of LANGUAGES) {
+      setLang(code)
+      assert.equal(
+        labelOf(code, 'themeToLight'),
+        shellCopy[code].themeLight,
+        `${code}: dark theme must offer Light`,
+      )
+    }
+
+    setTheme('light', false)
+    for (const [code] of LANGUAGES) {
+      setLang(code)
+      assert.equal(
+        labelOf(code, 'themeToDark'),
+        shellCopy[code].themeDark,
+        `${code}: light theme must offer Dark`,
+      )
+    }
+
+    setTheme('dark', false)
+    setLang('en')
+  })
+
   it('switches language to Arabic and mirrors RTL', () => {
     const trigger = findByAttr(app, 'aria-label', 'Language')
     assert.ok(trigger, 'language switcher is missing')

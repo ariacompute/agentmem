@@ -83,7 +83,7 @@ function buildThemeButton() {
   btn.setAttribute('aria-label', action)
   btn.title = `${t('shell', 'themeLabel')} · ${action}`
   btn.appendChild(el('span', 'theme-glyph', toDark ? '☾' : '☀'))
-  btn.appendChild(el('span', 'label', t('shell', toDark ? 'themeLight' : 'themeDark')))
+  btn.appendChild(el('span', 'label', t('shell', toDark ? 'themeDark' : 'themeLight')))
   btn.addEventListener('click', toggleTheme)
   return btn
 }
