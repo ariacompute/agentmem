@@ -252,8 +252,10 @@ The repository ships `docker-compose.yml` (PostgreSQL + agentmem) and a multi-st
    AGENTMEM_MODE=production
    AGENTMEM_PG_DSN=postgres://agentmem:<POSTGRES_PASSWORD>@postgres:5432/agentmem?sslmode=require
    AGENTMEM_AUTH_ENABLED=true
-   AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 hex>","subject":"console","scopes":["knowledge:read","knowledge:write"]}]'
+   AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 hex>","subject":"console","scopes":["knowledge:read","knowledge:write","audit:read"]}]'
    ```
+
+   `audit:read` is required by `GET /v1/decisions`; without it the console's Recent routing decisions card reports that a bearer token is needed. Store only the SHA-256 digest in `.env`, then paste the matching raw token into the API docs workbench so the status view can authenticate.
 
 3. Build and start:
 
@@ -268,6 +270,7 @@ The repository ships `docker-compose.yml` (PostgreSQL + agentmem) and a multi-st
    ```bash
    docker compose ps
    curl -i http://127.0.0.1:8080/healthz
+   curl -i -H "Authorization: Bearer <raw token>" 'http://127.0.0.1:8080/v1/decisions?limit=20'
    go run ./cmd/agentmem validate --env .env
    ```
 
@@ -503,13 +506,33 @@ Full protocol, error codes and client setup: [`docs/mcp.md`](./docs/mcp.md).
 
 ### Test the MCP server
 
-stdio — one JSON-RPC frame per line on stdin, and only protocol frames on `stdout`:
+stdio — one JSON-RPC frame per line on stdin, and only protocol frames on `stdout`. Every `mcp` process needs an identity before it starts: with `AGENTMEM_AUTH_ENABLED=true` you must supply a bearer token whose SHA-256 digest is listed in `AGENTMEM_AUTH_TOKENS`; the `--subject` + `--scopes` fallback is accepted only when auth is disabled. See [`docs/security.md`](./docs/security.md) for token digest setup.
+
+Both examples below use `--env .env.example` (dev mode, no Postgres) so they run offline; drop that flag to use your own `.env`.
+
+With authentication enabled, register a digest for your token and pass the token at startup:
+
+```bash
+TOKEN='local-test-token'
+DIGEST=$(printf %s "$TOKEN" | sha256sum | cut -d' ' -f1)
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | AGENTMEM_AUTH_ENABLED=true \
+    AGENTMEM_AUTH_TOKENS="[{\"token_sha256\":\"$DIGEST\",\"subject\":\"alice\",\"scopes\":[\"knowledge:read\"]}]" \
+    AGENTMEM_MCP_TOKEN="$TOKEN" \
+    go run ./cmd/agentmem mcp --env .env.example
+```
+
+`AGENTMEM_MCP_TOKEN` is read from the process environment only (it is never stored in `.env`); `--token-env NAME` reads any other variable, and `--token <value>` passes it directly. A missing token with auth enabled is a hard startup error (`exit 1`) and nothing is written to `stdout`. If your `.env` already lists the digest, just set `AGENTMEM_MCP_TOKEN` and drop the injected `AGENTMEM_AUTH_*` variables.
+
+For a token-free local test, leave auth off and declare the subject instead:
 
 ```bash
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-  | go run ./cmd/agentmem mcp --subject alice --scopes knowledge:read
+  | go run ./cmd/agentmem mcp --env .env.example --subject alice --scopes knowledge:read
 ```
 
 Streamable HTTP — start `go run ./cmd/agentmem serve` in one terminal, then send requests from another. The `curl -N` event stream blocks until you stop it or close the session, so run that line in a separate terminal:
@@ -518,6 +541,7 @@ Streamable HTTP — start `go run ./cmd/agentmem serve` in one terminal, then se
 # 1. initialize: copy Mcp-Session-Id from the response headers
 curl -i -sS http://127.0.0.1:8080/mcp \
   -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <token>' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
 
 # 2. call a read tool with that session and the negotiated version
@@ -525,14 +549,15 @@ curl -sS http://127.0.0.1:8080/mcp \
   -H 'Content-Type: application/json' \
   -H 'Mcp-Session-Id: <session-id>' \
   -H 'MCP-Protocol-Version: 2025-06-18' \
+  -H 'Authorization: Bearer <token>' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_terms","arguments":{"query":"churn","limit":5}}}'
 
 # 3. in another terminal, open the event stream; then close the session
-curl -N -sS -H 'Mcp-Session-Id: <session-id>' http://127.0.0.1:8080/mcp
-curl -i -sS -X DELETE -H 'Mcp-Session-Id: <session-id>' http://127.0.0.1:8080/mcp
+curl -N -sS -H 'Mcp-Session-Id: <session-id>' -H 'Authorization: Bearer <token>' http://127.0.0.1:8080/mcp
+curl -i -sS -X DELETE -H 'Mcp-Session-Id: <session-id>' -H 'Authorization: Bearer <token>' http://127.0.0.1:8080/mcp
 ```
 
-With `AGENTMEM_AUTH_ENABLED=true`, add `Authorization: Bearer <token>` to every `/mcp` call; write tools additionally need `AGENTMEM_MCP_WRITE=true` and the tool's own scope (`put_knowledge` needs `knowledge:write`). The offline acceptance suite covers these paths end to end (`C43`–`C46`, `H51`–`H82`, `S22`–`S25`):
+With `AGENTMEM_AUTH_ENABLED=true`, the `Authorization: Bearer <token>` header is required on every `/mcp` call (omit it when auth is off); write tools additionally need `AGENTMEM_MCP_WRITE=true` and the tool's own scope (`put_knowledge` needs `knowledge:write`). The offline acceptance suite covers these paths end to end (`C43`–`C46`, `H51`–`H82`, `S22`–`S25`):
 
 ```bash
 make e2e E2E_ARGS='--filter ^H'  # HTTP group, including MCP sessions, tools, errors and capacity

@@ -252,8 +252,10 @@ go run ./cmd/agentmem validate --env .env
    AGENTMEM_MODE=production
    AGENTMEM_PG_DSN=postgres://agentmem:<POSTGRES_PASSWORD>@postgres:5432/agentmem?sslmode=require
    AGENTMEM_AUTH_ENABLED=true
-   AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 位十六进制>","subject":"console","scopes":["knowledge:read","knowledge:write"]}]'
+   AGENTMEM_AUTH_TOKENS='[{"token_sha256":"<64 位十六进制>","subject":"console","scopes":["knowledge:read","knowledge:write","audit:read"]}]'
    ```
+
+   `audit:read` 是 `GET /v1/decisions` 所需权限；缺少它时，控制台的“最近路由决策”卡片会提示需要 Bearer 令牌。`.env` 只保存令牌的 SHA-256 摘要；随后在 API 文档工作台中粘贴对应的明文令牌，状态页才能完成鉴权。
 
 3. 构建并启动：
 
@@ -268,6 +270,7 @@ go run ./cmd/agentmem validate --env .env
    ```bash
    docker compose ps
    curl -i http://127.0.0.1:8080/healthz
+   curl -i -H "Authorization: Bearer <明文令牌>" 'http://127.0.0.1:8080/v1/decisions?limit=20'
    go run ./cmd/agentmem validate --env .env
    ```
 
@@ -503,13 +506,33 @@ bun x impeccable detect http://localhost:5173 --quiet
 
 ### 本地测试 MCP
 
-stdio —— 在 stdin 上每行写一个 JSON-RPC 请求，`stdout` 只输出协议帧：
+stdio —— 在 stdin 上每行写一个 JSON-RPC 请求，`stdout` 只输出协议帧。每个 `mcp` 进程启动前都必须确定身份：`AGENTMEM_AUTH_ENABLED=true` 时必须提供 bearer 令牌，且其 SHA-256 摘要已登记在 `AGENTMEM_AUTH_TOKENS` 中；`--subject` + `--scopes` 仅在鉴权关闭时才允许作为回退。令牌摘要的配置见 [`docs/security.md`](./docs/security.md)。
+
+下面两个例子都用 `--env .env.example`（dev 模式、无 Postgres），因此可完全离线运行；去掉该参数即使用你自己的 `.env`。
+
+鉴权开启时，先为令牌登记摘要，再在启动时传入令牌：
+
+```bash
+TOKEN='local-test-token'
+DIGEST=$(printf %s "$TOKEN" | sha256sum | cut -d' ' -f1)
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | AGENTMEM_AUTH_ENABLED=true \
+    AGENTMEM_AUTH_TOKENS="[{\"token_sha256\":\"$DIGEST\",\"subject\":\"alice\",\"scopes\":[\"knowledge:read\"]}]" \
+    AGENTMEM_MCP_TOKEN="$TOKEN" \
+    go run ./cmd/agentmem mcp --env .env.example
+```
+
+`AGENTMEM_MCP_TOKEN` 只从进程环境变量读取（绝不会写入 `.env`）；`--token-env NAME` 可改读其他变量名，`--token <值>` 则直接传入。鉴权开启却缺令牌会直接拒绝启动（退出码 `1`），且 `stdout` 不输出任何内容。若你的 `.env` 已经登记了摘要，只需设置 `AGENTMEM_MCP_TOKEN`，无需再注入 `AGENTMEM_AUTH_*` 变量。
+
+若只想免令牌做本地测试，保持鉴权关闭并声明主体即可：
 
 ```bash
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-  | go run ./cmd/agentmem mcp --subject alice --scopes knowledge:read
+  | go run ./cmd/agentmem mcp --env .env.example --subject alice --scopes knowledge:read
 ```
 
 Streamable HTTP —— 在一个终端运行 `go run ./cmd/agentmem serve`，再从另一个终端发请求。`curl -N` 事件流会一直阻塞，直到你中断它或关闭会话，因此该行请放到单独的终端执行：
@@ -518,6 +541,7 @@ Streamable HTTP —— 在一个终端运行 `go run ./cmd/agentmem serve`，再
 # 1. initialize：从响应头复制 Mcp-Session-Id
 curl -i -sS http://127.0.0.1:8080/mcp \
   -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <token>' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
 
 # 2. 带上会话与协商版本调用只读工具
@@ -525,14 +549,15 @@ curl -sS http://127.0.0.1:8080/mcp \
   -H 'Content-Type: application/json' \
   -H 'Mcp-Session-Id: <session-id>' \
   -H 'MCP-Protocol-Version: 2025-06-18' \
+  -H 'Authorization: Bearer <token>' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_terms","arguments":{"query":"churn","limit":5}}}'
 
 # 3. 在另一个终端打开事件流，随后关闭会话
-curl -N -sS -H 'Mcp-Session-Id: <session-id>' http://127.0.0.1:8080/mcp
-curl -i -sS -X DELETE -H 'Mcp-Session-Id: <session-id>' http://127.0.0.1:8080/mcp
+curl -N -sS -H 'Mcp-Session-Id: <session-id>' -H 'Authorization: Bearer <token>' http://127.0.0.1:8080/mcp
+curl -i -sS -X DELETE -H 'Mcp-Session-Id: <session-id>' -H 'Authorization: Bearer <token>' http://127.0.0.1:8080/mcp
 ```
 
-开启 `AGENTMEM_AUTH_ENABLED=true` 后，每次调用 `/mcp` 都要带 `Authorization: Bearer <token>`；写工具还需要 `AGENTMEM_MCP_WRITE=true` 及对应 scope（`put_knowledge` 需要 `knowledge:write`）。离线验收套件已端到端覆盖这些路径（`C43`–`C46`、`H51`–`H82`、`S22`–`S25`）：
+开启 `AGENTMEM_AUTH_ENABLED=true` 后，每次调用 `/mcp` 都必须带 `Authorization: Bearer <token>`（鉴权关闭时省略该头）；写工具还需要 `AGENTMEM_MCP_WRITE=true` 及对应 scope（`put_knowledge` 需要 `knowledge:write`）。离线验收套件已端到端覆盖这些路径（`C43`–`C46`、`H51`–`H82`、`S22`–`S25`）：
 
 ```bash
 make e2e E2E_ARGS='--filter ^H'  # HTTP 组，包含 MCP 会话、工具、错误与容量用例
