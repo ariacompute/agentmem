@@ -25,6 +25,7 @@ export const SHELL_KEYS = [
   'footerBuild',
   'themeLight',
   'themeDark',
+  'decisionsAuth',
 ]
 
 const rows = {
@@ -50,6 +51,7 @@ const rows = {
     'console build',
     'Light',
     'Dark',
+    'Recent decisions need a bearer token',
   ],
   zh: [
     'OKF+Git 权威正文 · PostgreSQL/GORM 结构化数据 · 智能路由',
@@ -73,6 +75,7 @@ const rows = {
     '控制台构建',
     '浅色',
     '深色',
+    '最近决策需要 Bearer 令牌',
   ],
   'zh-TW': [
     'OKF+Git 權威正文 · PostgreSQL/GORM 結構化資料 · 智慧路由',
@@ -96,6 +99,7 @@ const rows = {
     '控制台建置',
     '淺色',
     '深色',
+    '最近決策需要 Bearer 權杖',
   ],
   es: [
     'Cuerpos canónicos OKF+Git · estado estructurado PostgreSQL/GORM · enrutado inteligente',
@@ -119,6 +123,7 @@ const rows = {
     'compilación de la consola',
     'Claro',
     'Oscuro',
+    'Las decisiones recientes requieren un token bearer',
   ],
   fr: [
     'Corps canoniques OKF+Git · état structuré PostgreSQL/GORM · routage intelligent',
@@ -142,6 +147,7 @@ const rows = {
     'build de la console',
     'Clair',
     'Sombre',
+    'Les décisions récentes nécessitent un jeton bearer',
   ],
   de: [
     'OKF+Git kanonische Inhalte · strukturierter Zustand PostgreSQL/GORM · intelligentes Routing',
@@ -165,6 +171,7 @@ const rows = {
     'Konsolen-Build',
     'Hell',
     'Dunkel',
+    'Für letzte Routing-Entscheidungen ist ein Bearer-Token erforderlich',
   ],
   it: [
     'Corpi canonici OKF+Git · stato strutturato PostgreSQL/GORM · routing intelligente',
@@ -188,6 +195,7 @@ const rows = {
     'build della console',
     'Chiaro',
     'Scuro',
+    'Le decisioni recenti richiedono un token bearer',
   ],
   ru: [
     'Канонические тела OKF+Git · структурированное состояние PostgreSQL/GORM · интеллектуальная маршрутизация',
@@ -211,6 +219,7 @@ const rows = {
     'сборка консоли',
     'Светлая',
     'Тёмная',
+    'Для последних решений маршрутизации требуется bearer-токен',
   ],
   ja: [
     'OKF+Git の正本文書 · PostgreSQL/GORM の構造化状態 · スマートルーティング',
@@ -234,6 +243,7 @@ const rows = {
     'コンソールビルド',
     'ライト',
     'ダーク',
+    '最近の判定には Bearer トークンが必要です',
   ],
   ko: [
     'OKF+Git 정식 본문 · PostgreSQL/GORM 구조화 상태 · 스마트 라우팅',
@@ -257,6 +267,7 @@ const rows = {
     '콘솔 빌드',
     '라이트',
     '다크',
+    '최근 라우팅 결정에는 Bearer 토큰이 필요합니다',
   ],
   pt: [
     'Corpos canónicos OKF+Git · estado estruturado PostgreSQL/GORM · encaminhamento inteligente',
@@ -280,6 +291,7 @@ const rows = {
     'build da consola',
     'Claro',
     'Escuro',
+    'As decisões recentes exigem um token bearer',
   ],
   ar: [
     'النصوص المرجعية OKF+Git · الحالة الهيكلية PostgreSQL/GORM · التوجيه الذكي',
@@ -303,6 +315,7 @@ const rows = {
     'بناء لوحة التحكم',
     'فاتح',
     'داكن',
+    'تتطلب قرارات التوجيه الأخيرة رمز bearer',
   ],
   hi: [
     'OKF+Git प्रामाणिक दस्तावेज़ · PostgreSQL/GORM संरचित स्थिति · स्मार्ट राउटिंग',
@@ -326,6 +339,7 @@ const rows = {
     'कंसोल बिल्ड',
     'लाइट',
     'डार्क',
+    'हाल के राउटिंग निर्णयों के लिए bearer टोकन आवश्यक है',
   ],
 }
 

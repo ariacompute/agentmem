@@ -17,12 +17,19 @@ import {
   statsRequest,
 } from './lib/api-graph.js'
 import { renderStatus } from './views/status.js'
+import { loadStatusSnapshot } from './views/status-loader.js'
 import { cleanupDocs, renderDocs } from './views/docs.js'
 import { initialGraphState, renderGraph } from './views/graph.js'
 
 const root = document.getElementById('app')
 
-const statusState = { health: {}, decisions: [], error: '', loaded: false }
+const statusState = {
+  health: {},
+  decisions: [],
+  healthError: '',
+  decisionsError: '',
+  loaded: false,
+}
 // `drafts` keeps unsent requests alive across the shell's full re-render; the
 // token never enters this state, it stays in sessionStorage.
 const docsState = { open: {}, drafts: {} }
@@ -197,25 +204,16 @@ function render() {
 
 async function loadStatus() {
   try {
-    // /healthz is public; the audit trail is not. When the operator has entered
-    // a token in the docs workbench, the status view reuses it so an
-    // authenticated deployment does not show a permanent 401.
-    const token = readToken()
-    const authorized = token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
-    const [healthRes, decisionsRes] = await Promise.all([
-      fetch('/healthz'),
-      fetch('/v1/decisions?limit=20', authorized),
-    ])
-    if (!healthRes.ok || !decisionsRes.ok) throw new Error(t('shell', 'badStatus'))
-    statusState.health = await healthRes.json()
-    statusState.decisions = (await decisionsRes.json()) || []
-    statusState.error = ''
+    // The docs workbench token is reused for the private decisions probe. The
+    // loader keeps a 401/403 there from masking the public /healthz result.
+    Object.assign(statusState, await loadStatusSnapshot(fetch, readToken()))
   } catch (err) {
     statusState.health = {}
     statusState.decisions = []
-    statusState.error = t('shell', 'apiError') + err.message
+    statusState.healthError = t('shell', 'apiError') + err.message
+    statusState.decisionsError = ''
+    statusState.loaded = true
   }
-  statusState.loaded = true
   if (view === 'status') render()
 }
 

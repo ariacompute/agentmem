@@ -6,7 +6,7 @@ import { t } from '../lib/i18n.js'
 
 export function renderStatus(host, state) {
   const health = section(t('shell', 'healthTitle'))
-  if (state.error) health.appendChild(el('p', 'notice', state.error))
+  if (state.healthError) health.appendChild(el('p', 'notice', state.healthError))
   const entries = Object.entries(state.health || {})
   if (!state.loaded) {
     health.appendChild(el('p', 'empty', t('shell', 'loading')))
@@ -21,7 +21,9 @@ export function renderStatus(host, state) {
   const heading = el('h2', 'card-title', t('shell', 'decisionsTitle'))
   heading.appendChild(el('span', 'count', String((state.decisions || []).length)))
   decisions.appendChild(heading)
-  if ((state.decisions || []).length === 0) {
+  if (state.decisionsError) {
+    decisions.appendChild(el('p', 'notice', state.decisionsError))
+  } else if ((state.decisions || []).length === 0) {
     decisions.appendChild(el('p', 'empty', t('shell', 'noDecisions')))
   } else {
     for (const d of state.decisions) {
