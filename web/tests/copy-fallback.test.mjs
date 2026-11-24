@@ -19,6 +19,15 @@ describe('copy fallback', () => {
     }
   })
 
+  it('drops the build-note keys from every language', () => {
+    for (const [name, copy] of Object.entries(PROSE)) {
+      for (const [code, table] of Object.entries(copy)) {
+        assert.equal(table.footerBuild, undefined, `${name}.${code}.footerBuild`)
+        assert.equal(table.versionNote, undefined, `${name}.${code}.versionNote`)
+      }
+    }
+  })
+
   it('gives all 13 languages their own translation of every key', () => {
     for (const [name, copy] of Object.entries(PROSE)) {
       for (const [code] of LANGUAGES) {

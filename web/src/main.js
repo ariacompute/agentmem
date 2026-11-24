@@ -95,7 +95,6 @@ function buildTopbar() {
   const brand = el('div', 'brand')
   brand.appendChild(el('span', 'brand-mark', 'a'))
   brand.appendChild(el('span', 'brand-name', 'agentmem'))
-  brand.appendChild(chip(t('shell', 'footerBuild')))
   inner.appendChild(brand)
 
   const tabs = el('nav', 'tabs')
@@ -142,7 +141,6 @@ function buildPageHead() {
       : view === 'graph'
         ? t('graph', 'headTitle')
         : t('api', 'pageTitle')
-  const note = view === 'status' ? t('shell', 'footerBuild') : t('api', 'versionNote')
   const sub =
     view === 'status'
       ? t('shell', 'statusHeadSub')
@@ -150,7 +148,6 @@ function buildPageHead() {
         ? t('graph', 'headSub')
         : t('api', 'pageSub')
   row.appendChild(el('h1', null, title))
-  row.appendChild(chip(note))
   head.appendChild(row)
   head.appendChild(el('p', 'page-sub', sub))
   return head
@@ -165,7 +162,6 @@ function buildFooter() {
   meta.appendChild(el('span', null, t('shell', 'footerSource')))
   meta.appendChild(chip(getLang()))
   meta.appendChild(chip(t('shell', theme === 'light' ? 'themeLight' : 'themeDark')))
-  meta.appendChild(chip(t('shell', 'footerBuild')))
   inner.appendChild(meta)
   footer.appendChild(inner)
   return footer

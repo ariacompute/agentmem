@@ -8,7 +8,6 @@
 export const API_KEYS = [
   'pageTitle',
   'pageSub',
-  'versionNote',
   'indexTitle',
   'sectionOverview',
   'sectionEndpoints',
@@ -93,7 +92,6 @@ const rows = {
   en: [
     'API documentation',
     'Every endpoint agentmem answers, and the conventions behind them.',
-    'Ships with this console build',
     'On this page',
     'Overview and conventions',
     'HTTP endpoints',
@@ -171,7 +169,6 @@ const rows = {
   zh: [
     'API 文档',
     'agentmem 提供的全部接口，以及调用前需要知道的约定。',
-    '随本控制台构建一起提供',
     '本页目录',
     '概览与通用约定',
     'HTTP 端点',
@@ -249,7 +246,6 @@ const rows = {
   'zh-TW': [
     'API 文件',
     'agentmem 提供的所有介面，以及呼叫前需要知道的約定。',
-    '隨本控制台建置一併提供',
     '本頁目錄',
     '概覽與通用約定',
     'HTTP 端點',
@@ -327,7 +323,6 @@ const rows = {
   es: [
     'Documentación de la API',
     'Todos los endpoints que atiende agentmem y las convenciones que los rigen.',
-    'Incluida en esta compilación de la consola',
     'En esta página',
     'Resumen y convenciones',
     'Endpoints HTTP',
@@ -405,7 +400,6 @@ const rows = {
   fr: [
     'Documentation de l’API',
     'Tous les endpoints servis par agentmem et les conventions associées.',
-    'Livrée avec cette build de la console',
     'Sur cette page',
     'Vue d’ensemble et conventions',
     'Endpoints HTTP',
@@ -483,7 +477,6 @@ const rows = {
   de: [
     'API-Dokumentation',
     'Alle Endpunkte von agentmem und die dahinter liegenden Konventionen.',
-    'Teil dieses Konsolen-Builds',
     'Auf dieser Seite',
     'Überblick und Konventionen',
     'HTTP-Endpunkte',
@@ -561,7 +554,6 @@ const rows = {
   it: [
     'Documentazione API',
     'Tutti gli endpoint serviti da agentmem e le relative convenzioni.',
-    'Inclusa in questa build della console',
     'In questa pagina',
     'Panoramica e convenzioni',
     'Endpoint HTTP',
@@ -639,7 +631,6 @@ const rows = {
   ru: [
     'Документация API',
     'Все endpoints, которые обслуживает agentmem, и связанные с ними соглашения.',
-    'Поставляется вместе с этой сборкой консоли',
     'На этой странице',
     'Обзор и соглашения',
     'HTTP-эндпоинты',
@@ -717,7 +708,6 @@ const rows = {
   ja: [
     'API ドキュメント',
     'agentmem が応答するすべてのエンドポイントと、その前提となる規約。',
-    'このコンソールビルドに同梱',
     'このページの内容',
     '概要と共通規約',
     'HTTP エンドポイント',
@@ -795,7 +785,6 @@ const rows = {
   ko: [
     'API 문서',
     'agentmem이 응답하는 모든 엔드포인트와 그 전제가 되는 규약.',
-    '이 콘솔 빌드에 포함됨',
     '이 페이지에서',
     '개요와 공통 규약',
     'HTTP 엔드포인트',
@@ -873,7 +862,6 @@ const rows = {
   pt: [
     'Documentação da API',
     'Todos os endpoints respondidos pelo agentmem e as convenções por trás deles.',
-    'Incluída nesta build da consola',
     'Nesta página',
     'Visão geral e convenções',
     'Endpoints HTTP',
@@ -951,7 +939,6 @@ const rows = {
   ar: [
     'وثائق واجهة API',
     'كل النقاط التي يجيب عليها agentmem والاتفاقيات المرتبطة بها.',
-    'مضمّنة مع بناء لوحة التحكم هذا',
     'في هذه الصفحة',
     'نظرة عامة والاتفاقيات',
     'نقاط HTTP',
@@ -1029,7 +1016,6 @@ const rows = {
   hi: [
     'API दस्तावेज़',
     'agentmem द्वारा उत्तर दिए जाने वाले सभी एंडपॉइंट और उनसे जुड़ी परंपराएँ।',
-    'इस कंसोल बिल्ड के साथ उपलब्ध',
     'इस पृष्ठ पर',
     'सारांश और सामान्य नियम',
     'HTTP एंडपॉइंट',

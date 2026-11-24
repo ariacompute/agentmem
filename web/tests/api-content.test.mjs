@@ -84,7 +84,6 @@ describe('api-content endpoints', () => {
       'colCode',
       'pageTitle',
       'pageSub',
-      'versionNote',
       'indexTitle',
     ]
     for (const code of LANG_CODES) {
