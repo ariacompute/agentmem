@@ -236,19 +236,18 @@ func TestSaveToReportsFilesystemErrors(t *testing.T) {
 		t.Fatal("a parent that is a regular file must fail")
 	}
 
-	// Root holds CAP_DAC_OVERRIDE, so a 0o500 directory stays writable and this
-	// assertion cannot hold; skip it rather than fail on correct code.
-	if os.Geteuid() == 0 {
-		t.Log("root bypasses DAC checks (CAP_DAC_OVERRIDE); skipping the read-only assertion")
-		return
+	previousWrite, previousRename := writeFile, renameFile
+	t.Cleanup(func() { writeFile, renameFile = previousWrite, previousRename })
+
+	writeFile = func(string, []byte, os.FileMode) error { return errors.New("write refused") }
+	if err := store.SaveTo(filepath.Join(dir, "snapshot.json")); err == nil {
+		t.Fatal("a failing snapshot write must be reported")
 	}
-	readOnly := filepath.Join(dir, "readonly")
-	if err := os.Mkdir(readOnly, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(readOnly, 0o700) })
-	if err := store.SaveTo(filepath.Join(readOnly, "snapshot.json")); err == nil {
-		t.Fatal("a read-only directory must fail the write")
+	writeFile = previousWrite
+
+	renameFile = func(string, string) error { return errors.New("rename refused") }
+	if err := store.SaveTo(filepath.Join(dir, "snapshot.json")); err == nil {
+		t.Fatal("a failing snapshot rename must be reported")
 	}
 }
 

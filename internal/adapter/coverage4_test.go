@@ -3,7 +3,6 @@ package adapter
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -67,19 +66,7 @@ func TestOKFAdapterQueryListError(t *testing.T) {
 	}
 }
 
-// requireDACEnforcement skips a test that asserts on kernel permission checks.
-// Root holds CAP_DAC_OVERRIDE, so a 0o000 file stays readable and the
-// assertion cannot hold; a root CI container would otherwise fail on correct
-// code.
-func requireDACEnforcement(t *testing.T) {
-	t.Helper()
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses DAC checks (CAP_DAC_OVERRIDE)")
-	}
-}
-
 func TestOKFAdapterToleratesUnreadableConcept(t *testing.T) {
-	requireDACEnforcement(t)
 	b := newTestBundle(t)
 	if _, err := b.Put("team/readable", &okf.Document{Type: "Concept", Title: "Revenue", Body: "x"}); err != nil {
 		t.Fatal(err)
@@ -87,14 +74,14 @@ func TestOKFAdapterToleratesUnreadableConcept(t *testing.T) {
 	if _, err := b.Put("team/broken", &okf.Document{Type: "Concept", Title: "Revenue", Body: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	p, err := b.Path("team/broken")
-	if err != nil {
-		t.Fatal(err)
+	previous := bundleGet
+	bundleGet = func(b *okf.Bundle, id string) (*okf.Document, error) {
+		if id == "team/broken" {
+			return nil, errors.New("unreadable")
+		}
+		return b.Get(id)
 	}
-	if err := os.Chmod(p, 0o000); err != nil {
-		t.Skipf("cannot chmod on this platform: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(p, 0o600) })
+	t.Cleanup(func() { bundleGet = previous })
 	hits, err := NewOKFAdapter(b).Query(context.Background(), Query{Text: "revenue"})
 	if err != nil {
 		t.Fatalf("query: %v", err)

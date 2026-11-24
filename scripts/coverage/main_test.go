@@ -62,6 +62,35 @@ func TestRunFailsBelowThreshold(t *testing.T) {
 	}
 }
 
+func TestRunReportsRootEnvironment(t *testing.T) {
+	stubPackages(t, []string{"agentmem/internal/a"}, nil)
+	profile := writeTemp(t, "cover.out", "mode: atomic\nagentmem/internal/a/a.go:1.1,2.2 1 0\nagentmem/internal/a/a.go:3.3,4.4 1 1\n")
+	previous := geteuid
+	t.Cleanup(func() { geteuid = previous })
+
+	t.Run("root", func(t *testing.T) {
+		geteuid = func() int { return 0 }
+		var errOut strings.Builder
+		if code := run([]string{"-profile", profile}, io.Discard, &errOut); code != exitFail {
+			t.Fatalf("code = %d", code)
+		}
+		if !strings.Contains(errOut.String(), "running as root") ||
+			!strings.Contains(errOut.String(), "below-threshold package under root is unexpected") {
+			t.Fatalf("stderr = %s", errOut.String())
+		}
+	})
+	t.Run("non-root", func(t *testing.T) {
+		geteuid = func() int { return 1000 }
+		var errOut strings.Builder
+		if code := run([]string{"-profile", profile}, io.Discard, &errOut); code != exitFail {
+			t.Fatalf("code = %d", code)
+		}
+		if strings.Contains(errOut.String(), "running as root") {
+			t.Fatalf("non-root stderr = %s", errOut.String())
+		}
+	})
+}
+
 func TestRunHonoursCustomMinimum(t *testing.T) {
 	stubPackages(t, []string{"agentmem/internal/a"}, nil)
 	profile := writeTemp(t, "cover.out", "mode: atomic\nagentmem/internal/a/a.go:1.1,2.2 1 1\nagentmem/internal/a/a.go:3.3,4.4 1 0\n")
@@ -333,6 +362,9 @@ func TestSeamDefaultsReachTheRealProcess(t *testing.T) {
 	}
 	if args := osArgs(); len(args) != len(os.Args)-1 {
 		t.Fatalf("default osArgs = %v", args)
+	}
+	if euid := geteuid(); euid < 0 {
+		t.Fatalf("default geteuid = %d", euid)
 	}
 }
 

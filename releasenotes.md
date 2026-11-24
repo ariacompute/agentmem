@@ -130,11 +130,10 @@ and a rule-first smart router.
   `go test ./...` with no database, network or credentials. Helpers such as
   `safepath.Clean`, `nodeFromYAML` and the commit-key derivation in `vcs`
   replaced duplicated path/rel logic, and defensive branches that cannot fail
-  were deleted instead of left untested. The router package holds 99.6%
-  statement coverage; its two remaining statements are provably unreachable.
-  Permission assertions that manufacture a denial with `os.Chmod` skip
-  themselves when running as root, where `CAP_DAC_OVERRIDE` makes the negative
-  case unprovable and a root container would otherwise fail on correct code.
+  were deleted instead of left untested. Every package holds 100% statement
+  coverage, enforced by `make cover`. Permission failures are injected through
+  seams instead of `os.Chmod`, so the gate behaves the same for root and
+  non-root processes.
 - **Continuous real-Postgres verification**: the `postgres-integration` job runs
   on a daily schedule as well as on manual dispatch, against an ephemeral
   `pgvector/pgvector:pg16` service container. GORM, the versioned migrations,

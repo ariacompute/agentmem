@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,17 +15,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage"
 )
-
-// requireDACEnforcement skips a test that asserts on kernel permission checks.
-// Root holds CAP_DAC_OVERRIDE, so a directory chmod-ed to 0o500 stays writable
-// and the negative assertion cannot hold; a root CI container would otherwise
-// fail on correct code.
-func requireDACEnforcement(t *testing.T) {
-	t.Helper()
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses DAC checks (CAP_DAC_OVERRIDE)")
-	}
-}
 
 func TestNewGitRejectsRootBelowRegularFile(t *testing.T) {
 	dir := t.TempDir()
@@ -84,20 +74,19 @@ func TestCommitReportsFilesystemFailures(t *testing.T) {
 }
 
 func TestCommitReportsStagingFailure(t *testing.T) {
-	requireDACEnforcement(t)
 	g, err := NewGit(t.TempDir(), "a", "a@b")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// go-git builds the status of the whole worktree before staging; a
-	// directory it cannot read makes staging fail after the file was written.
-	hidden := filepath.Join(g.root, "hidden")
-	if err := os.MkdirAll(hidden, 0o000); err != nil {
-		t.Fatal(err)
+	previous := stageFile
+	stageFile = func(*git.Worktree, string) (plumbing.Hash, error) {
+		return plumbing.ZeroHash, errors.New("stage refused")
 	}
-	t.Cleanup(func() { _ = os.Chmod(hidden, 0o700) })
+	t.Cleanup(func() { stageFile = previous })
 	if _, err := g.Commit(context.Background(), "m", map[string][]byte{"a.md": []byte("x")}); err == nil {
-		t.Fatal("an unreadable worktree directory must fail staging")
+		t.Fatal("a failing stage must be reported")
+	} else if !strings.Contains(err.Error(), "vcs: stage a.md:") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -328,19 +317,34 @@ func setBranch(t *testing.T, g *GitRepository, hash plumbing.Hash) {
 	}
 }
 
-func TestCommitReportsUnwritableDirectory(t *testing.T) {
-	requireDACEnforcement(t)
-	g, err := NewGit(t.TempDir(), "a", "a@b")
-	if err != nil {
-		t.Fatal(err)
+func TestCommitReportsInjectedFilesystemFailures(t *testing.T) {
+	ctx := context.Background()
+	newRepo := func(t *testing.T) *GitRepository {
+		t.Helper()
+		g, err := NewGit(t.TempDir(), "a", "a@b")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g
 	}
-	if err := os.Chmod(g.root, 0o500); err != nil {
-		t.Skipf("cannot chmod: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(g.root, 0o700) })
-	if _, err := g.Commit(context.Background(), "m", map[string][]byte{"sub/a.md": []byte("x")}); err == nil {
-		t.Fatal("a read-only repository must fail the directory creation")
-	}
+	t.Run("mkdir", func(t *testing.T) {
+		g := newRepo(t)
+		previous := mkdirAll
+		mkdirAll = func(string, os.FileMode) error { return errors.New("mkdir refused") }
+		t.Cleanup(func() { mkdirAll = previous })
+		if _, err := g.Commit(ctx, "m", map[string][]byte{"sub/a.md": []byte("x")}); err == nil {
+			t.Fatal("a failing directory creation must be reported")
+		}
+	})
+	t.Run("write", func(t *testing.T) {
+		g := newRepo(t)
+		previous := writeFile
+		writeFile = func(string, []byte, os.FileMode) error { return errors.New("write refused") }
+		t.Cleanup(func() { writeFile = previous })
+		if _, err := g.Commit(ctx, "m", map[string][]byte{"a.md": []byte("x")}); err == nil {
+			t.Fatal("a failing write must be reported")
+		}
+	})
 }
 
 // unreadableObject is a blob whose contents cannot be streamed.

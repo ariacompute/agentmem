@@ -28,6 +28,12 @@ func NewOKFStore(b *okf.Bundle, r vcs.Repository, m meta.MetaStore, acl ACLDefau
 	return &OKFStore{Bundle: b, Repo: r, Meta: m, ACL: acl}
 }
 
+// bundlePut keeps the canonical-body write failure testable without relying on
+// DAC permission checks, which root bypasses via CAP_DAC_OVERRIDE.
+var bundlePut = func(b *okf.Bundle, id string, d *okf.Document) (string, error) {
+	return b.Put(id, d)
+}
+
 // PutResult is the outcome of a canonical write.
 type PutResult struct {
 	ConceptID   string `json:"concept_id"`
@@ -96,7 +102,7 @@ func (s *OKFStore) Put(ctx context.Context, id string, d *okf.Document) (PutResu
 	if existing, err := s.Meta.GetConcept(ctx, clean); err == nil && existing.ContentHash == hash && existing.Status != "deprecated" {
 		return PutResult{ConceptID: clean, ContentHash: hash, CommitSHA: existing.CommitSHA, Unchanged: true}, nil
 	}
-	if _, err := s.Bundle.Put(clean, d); err != nil {
+	if _, err := bundlePut(s.Bundle, clean, d); err != nil {
 		return PutResult{}, err
 	}
 	files, err := s.commitFiles(clean)

@@ -92,6 +92,13 @@ const (
 // budget can be exercised without materialising a 100k-entry bundle.
 var maxBundleEntries = 100000
 
+// Enumeration seams keep walk/read failures testable without relying on DAC
+// permission checks, which root bypasses via CAP_DAC_OVERRIDE.
+var (
+	readDir = os.ReadDir
+	walkDir = fs.WalkDir
+)
+
 // ReadResource reads a non-Markdown bundle resource (for example a sanctioned
 // .sql file) referenced by an Attested Computation. It applies its own path
 // safety checks because Bundle.Path always appends .md and is reserved for
@@ -195,7 +202,7 @@ func (b *Bundle) List() ([]string, error) {
 	scanned := 0
 	// Walking a filesystem rooted at the bundle keeps every path relative, so
 	// ids are derived from the walk itself instead of from a second Rel.
-	err := fs.WalkDir(os.DirFS(b.Root), ".", func(p string, d fs.DirEntry, err error) error {
+	err := walkDir(os.DirFS(b.Root), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -264,7 +271,7 @@ func (b *Bundle) RebuildIndex(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(dir)
+	entries, err := readDir(dir)
 	if err != nil {
 		return err
 	}

@@ -38,6 +38,7 @@ var (
 	}
 	osExit                 = os.Exit
 	osArgs                 = func() []string { return os.Args[1:] }
+	geteuid                = os.Geteuid
 	stdoutWriter io.Writer = os.Stdout
 	stderrWriter io.Writer = os.Stderr
 )
@@ -92,6 +93,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
+	root := geteuid() == 0
+	if root {
+		fmt.Fprintln(stderr, "coverage: running as root; DAC-dependent assertions use injected seams, so permission skips should not affect this result (see docs/testing.md)")
+	}
 	excludes, err := readExclusions(*excludePath)
 	if err != nil {
 		fmt.Fprintf(stderr, "coverage: %v\n", err)
@@ -119,6 +124,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	if len(result.problems) > 0 {
+		if root {
+			fmt.Fprintln(stderr, "coverage: a below-threshold package under root is unexpected; inspect the uncovered statements in the profile before attributing it to missing tests")
+		}
 		return exitFail
 	}
 	return exitPass

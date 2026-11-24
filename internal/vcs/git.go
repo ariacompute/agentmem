@@ -21,6 +21,14 @@ type GitRepository struct {
 	author object.Signature
 }
 
+// Filesystem and staging seams keep the failure paths testable without DAC
+// permission checks, which root bypasses via CAP_DAC_OVERRIDE.
+var (
+	mkdirAll  = os.MkdirAll
+	writeFile = os.WriteFile
+	stageFile = func(w *git.Worktree, name string) (plumbing.Hash, error) { return w.Add(name) }
+)
+
 // NewGit opens or initializes a repository rooted at the OKF bundle.
 func NewGit(root, authorName, authorEmail string) (*GitRepository, error) {
 	if root == "" {
@@ -77,15 +85,15 @@ func (g *GitRepository) Commit(ctx context.Context, message string, files map[st
 		if err != nil {
 			return "", fmt.Errorf("vcs: path escapes repository %q: %w", name, err)
 		}
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		if err := mkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(p, files[name], 0o600); err != nil {
+		if err := writeFile(p, files[name], 0o600); err != nil {
 			return "", err
 		}
 		// Stage exactly the validated name instead of the caller's spelling, so
 		// go-git cannot re-join a name that resolved elsewhere.
-		if _, err := w.Add(clean); err != nil {
+		if _, err := stageFile(w, clean); err != nil {
 			return "", fmt.Errorf("vcs: stage %s: %w", name, err)
 		}
 	}

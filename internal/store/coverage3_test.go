@@ -42,26 +42,15 @@ func TestPutRejectsInvalidACLDefaults(t *testing.T) {
 	}
 }
 
-// requireDACEnforcement skips a test that asserts on kernel permission checks.
-// Root holds CAP_DAC_OVERRIDE, so a directory chmod-ed to 0o500 stays writable
-// and the negative assertion cannot hold; a root CI container would otherwise
-// fail on correct code.
-func requireDACEnforcement(t *testing.T) {
-	t.Helper()
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses DAC checks (CAP_DAC_OVERRIDE)")
-	}
-}
-
 func TestPutSurfacesBundleWriteFailure(t *testing.T) {
-	requireDACEnforcement(t)
-	s, root := newStore(t, "public")
-	if err := os.Chmod(root, 0o500); err != nil {
-		t.Skipf("cannot chmod: %v", err)
+	s, _ := newStore(t, "public")
+	previous := bundlePut
+	bundlePut = func(*okf.Bundle, string, *okf.Document) (string, error) {
+		return "", errors.New("body write refused")
 	}
-	t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
+	t.Cleanup(func() { bundlePut = previous })
 	if _, err := s.Put(context.Background(), "team/a", doc("d")); err == nil {
-		t.Fatal("an unwritable bundle must fail the write")
+		t.Fatal("a failing bundle write must be reported")
 	}
 }
 

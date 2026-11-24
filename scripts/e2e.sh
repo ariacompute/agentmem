@@ -2017,6 +2017,9 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         query = parse_qs(url.query)
         if url.path == "/v1/graph/node":
+            if (query.get("id") or [""])[0] == "e2e/boom":
+                self._reply({"error": "internal detail with DSN postgres://u:p@db/x"}, 500)
+                return
             self._reply({
                 "concept_id": (query.get("id") or [""])[0],
                 "node_type": "remote_node", "label": "Remote Node",
@@ -2117,6 +2120,36 @@ if start_engine; then
     a_status 200
     a_json_eq nodes 7
     a_json_eq edges 3
+    end_case
+
+    hc E10 "neighbourhood reads are proxied to the engine" GET '/v1/graph/neighbors?from=e2e%2Fremote&depth=2&direction=out' '' 200 "${ENGINE_AUTH[@]}"
+    a_json_eq root e2e/remote
+    a_json_len_min nodes 0
+    a_json_eq truncated false
+    end_case
+
+    hc E11 "shortest-path reads are proxied to the engine" GET '/v1/graph/path?from=e2e%2Fremote&to=e2e%2Ftarget&max_depth=3' '' 200 "${ENGINE_AUTH[@]}"
+    a_json_eq from e2e/remote
+    a_json_eq to e2e/target
+    a_json_eq found false
+    end_case
+
+    hc E12 "search hits come from the engine" GET '/v1/graph/search?q=remote' '' 200 "${ENGINE_AUTH[@]}"
+    a_json_eq 0.concept_id e2e/remote
+    a_json_eq 0.node_type remote_node
+    end_case
+
+    hc E13 "answerability is proxied as a POST" POST /v1/graph/answerability \
+      '{"question":"how much"}' 200 "${ENGINE_AUTH[@]}"
+    a_json_eq verdict insufficient
+    a_json_len_min gaps 0
+    end_case
+
+    hc E14 "engine error text is redacted at the boundary" GET '/v1/graph/node?id=e2e%2Fboom' '' 500 "${ENGINE_AUTH[@]}"
+    a_json_eq error 'internal error'
+    a_body_hasnt DSN
+    a_body_hasnt postgres
+    a_body_hasnt 127.0.0.1
     end_case
 
     begin_case E04 "the engine sees the bearer and the token-derived subject only"

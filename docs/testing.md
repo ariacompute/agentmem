@@ -42,6 +42,16 @@ go run ./scripts/coverage -profile coverage.out -exclude exceptions.txt
 
 `make cover` 会先跑全量测试再执行门禁；CI 的 `go` job 在 `go test` 之后调用它。
 
+### 运行前提
+
+- **不要求非 root**：root 容器持有 `CAP_DAC_OVERRIDE`，`chmod` 制造的拒绝场景不会生效；
+  原先依赖 DAC 的断言已全部改为包内可注入接缝（见第 5 节），root 与非 root 下门禁口径一致。
+- `scripts/coverage` 检测到 `geteuid() == 0` 时会在 stderr 打印一条 root 提示，说明结果不受
+  权限跳过影响；若仍有包低于阈值，应先按 profile 中 `count == 0` 的条目核对未覆盖语句
+  （`go tool cover -func` 亦可），不要直接归因于「缺少测试」。退出码仍为 0/1/2。
+- 非 root 沙箱若 `.git` 属主为 root，`go list` 的 VCS stamping 会失败；此时用
+  `GOFLAGS=-buildvcs=false make cover` 绕开这一沙箱工件，它不是仓库缺陷。
+
 ## 3. 数据库层用替身
 
 `internal/meta` 的生产存储是 PostgreSQL + GORM，但离线测试不启动数据库：
@@ -76,8 +86,14 @@ go run ./scripts/coverage -profile coverage.out -exclude exceptions.txt
 | `newRequest` | `internal/router/systemone.go` | 请求构造失败分支 |
 | `parseURL` | `internal/graph/remote.go` | 已被 `netsafe` 校验后的解析失败分支 |
 | `nodeFrom` | `internal/graph/writer.go` | 已通过 `SetGraph` 后的转换失败分支 |
+| `mkdirAll` / `writeFile` / `stageFile` | `internal/vcs/git.go` | `Commit` 的目录创建、写入与 staging 失败分支 |
+| `readDir` / `walkDir` | `internal/okf/bundle.go` | 索引重建的目录读取与 `List` 的遍历失败分支 |
+| `bundlePut` | `internal/store/okfstore.go` | 正文写入失败分支 |
+| `bundleGet` | `internal/adapter/okf.go` | 不可读概念被跳过的容错分支 |
+| `writeFile` / `renameFile` | `internal/meta/file_fake.go` | 快照写入与改名失败分支 |
+| `geteuid` | `scripts/coverage/main.go` | root 提示的开关（默认取真实进程身份） |
 
-既有接缝（`assemble`、`assembleService`、`buildAuth`、`mcpStdin`、`osExit` 等）保持原样。
+既有接缝（`assemble`、`assembleService`、`buildAuth`、`mcpStdin`、`osExit`、`okf.createTemp` 等）保持原样。
 
 **删除的死代码**
 

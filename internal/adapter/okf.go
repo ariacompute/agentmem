@@ -16,6 +16,10 @@ type OKFAdapter struct {
 
 func NewOKFAdapter(b *okf.Bundle) *OKFAdapter { return &OKFAdapter{bundle: b} }
 
+// bundleGet keeps the "tolerate an unreadable concept" branch testable without
+// relying on DAC permission checks, which root bypasses via CAP_DAC_OVERRIDE.
+var bundleGet = func(b *okf.Bundle, id string) (*okf.Document, error) { return b.Get(id) }
+
 func (a *OKFAdapter) Name() string { return "okf" }
 func (a *OKFAdapter) Capabilities() Capabilities {
 	return Capabilities{Put: false, Query: true, Delete: false}
@@ -49,7 +53,7 @@ func (a *OKFAdapter) Query(ctx context.Context, q Query) ([]Hit, error) {
 	queryTokens := tokenSet(q.Text)
 	var hits []Hit
 	for _, id := range ids {
-		d, err := a.bundle.Get(id)
+		d, err := bundleGet(a.bundle, id)
 		if err != nil {
 			continue // tolerate unreadable concepts
 		}

@@ -33,6 +33,13 @@ func NewFileFakeStore(path string) (*FakeStore, error) {
 	return f, nil
 }
 
+// Filesystem seams keep the write and rename failures testable without relying
+// on DAC permission checks, which root bypasses via CAP_DAC_OVERRIDE.
+var (
+	writeFile  = os.WriteFile
+	renameFile = os.Rename
+)
+
 // SaveTo atomically persists the current snapshot.
 func (f *FakeStore) SaveTo(path string) error {
 	if path == "" {
@@ -46,8 +53,8 @@ func (f *FakeStore) SaveTo(path string) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := writeFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return renameFile(tmp, path)
 }
