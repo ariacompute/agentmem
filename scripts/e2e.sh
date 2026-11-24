@@ -1137,7 +1137,7 @@ run_cli graph answerable "${ENVARG[@]}" --subject system --q "cli graph"
 a_rc 0
 a_cli_json_has coverage
 a_cli_json_has verdict
-run_cli graph reindex
+run_cli graph reindex "${ENVARG[@]}"
 a_rc 0
 a_cli_json_has nodes
 a_cli_json_has edges
@@ -2456,7 +2456,7 @@ web_langs="$(cat "$REPO/web/src/lib/languages.js")"
 has "$web_langs" 'zh-TW' 'Traditional Chinese'
 has "$web_langs" 'hi' 'Hindi'
 web_tests="$(ls "$REPO"/web/tests/*.test.mjs 2>/dev/null | wc -l)"
-eq "$web_tests" 9 'offline test file count'
+eq "$web_tests" 10 'offline test file count'
 end_case
 
 begin_case W06 "docs page provides interactive try-it"

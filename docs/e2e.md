@@ -51,7 +51,7 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
 | 安全 | `S01`–`S27` | 7 个 scope 的权限矩阵（正反向）、公开 `/healthz`、401 + `WWW-Authenticate`、未知令牌、`health:read` 不足、全 scope 令牌；请求体与查询串 `subject` 伪造；私有文档 ACL（owner 可读 / 他人统一 404）；`Origin: null`、跨站未授权/白名单放行；405 在鉴权之后；错误体不回显凭据；`S21` 开启鉴权时控制台仍公开可读；`S22`–`S24` MCP 写开关 + 工具级 scope（写入成功、只读令牌被拒且不落盘、缺 `graph:write` 被拒）；`S25` `/mcp` 在分发前先鉴权；`S26`/`S27` REST 图写需要 `graph:write`、reindex 需要 `migrate:run` |
 | 限流 | `R01` | 独立低限额档位，突发请求触发 429 及固定错误体 |
 | 跨进程 | `X01`–`X05` | 服务停止后 CLI 仍能看到 HTTP 写入的概念、路由审计、计算留痕；快照合法；OKF 正文落盘 |
-| Web | `W01`–`W06` | 自带 CSP、无外链 CDN、API 文档镜像 23 条 method+path、13 语言与 8 个离线测试文件、`bun test`、`W06` 试调用元数据与 `sessionStorage` 令牌约定 |
+| Web | `W01`–`W06` | 自带 CSP、无外链 CDN、API 文档镜像 23 条 method+path、13 语言与 10 个离线测试文件、`bun test`、`W06` 试调用元数据与 `sessionStorage` 令牌约定 |
 | 门禁 | `G02`–`G10` | `go vet`、`go test ./... -count=1`、`go build ./...`、`make validate`、`make check-boundaries`、`make eval`、`make check-trust-store`；`G09` 用一份故意 50% 的 profile 证明覆盖率门禁会失败，`G10` 证明 `make cover` 同时接在 `Makefile` 与 CI |
 
 不含真实浏览器 UI 自动化。`make web-audit` 不在脚本内执行（impeccable 在 CI 的 `web` job 中按 lockfile 固定版本运行），但 `W02` 之类静态检查仍在离线套件内。
@@ -77,8 +77,8 @@ make e2e E2E_ARGS='--no-gates'            # 只跑黑盒用例
   “写请求没有触达引擎”这两条不变量是被观测到的，而不是被假设的。
 - 用例编号是 `--filter` 与本文矩阵的公开句柄，启动时先扫描脚本自身的 `begin_case`
   字面量；出现重复编号直接以退出码 2 拒绝运行，避免一个编号静默代表两组用例。
-- 全量（含门禁）为 220 条：`PASS=220 FAIL=0 SKIP=0`；`--no-gates` 时为 212 行
-  （`PASS=211` + 一条 `SKIP G00`）。
+- 全量（含门禁）为 225 条：`PASS=225 FAIL=0 SKIP=0`；`--no-gates` 时为 217 行
+  （`PASS=216` + 一条 `SKIP G00`；未安装 `bun` 时另有 `SKIP W05`）。
 
 ## 排错
 
