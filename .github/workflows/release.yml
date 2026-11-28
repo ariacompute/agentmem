@@ -235,7 +235,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           # Only the release archives. With no filter this step also fetches
           # every other artifact in the run (notably the image job's
