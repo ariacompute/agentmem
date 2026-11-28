@@ -593,7 +593,10 @@ agentmem ships a user-perspective black-box acceptance suite that drives the com
 
 ```bash
 make e2e                               # full run, including existing gates
-make e2e E2E_ARGS='--no-gates'         # black-box cases only
+make e2e E2E_ARGS='--no-gates'         # skip go vet / go test / go build / make validate /
+                                       #   check-boundaries / eval / check-trust-store;
+                                       #   still proves the coverage gate rejects a 50%
+                                       #   profile and that make cover is wired into make and CI
 ./scripts/e2e.sh --filter '^H' --keep  # HTTP cases only; keep the temp workspace
 ```
 

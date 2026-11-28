@@ -106,6 +106,12 @@ type MCPConfig struct {
 	Write        bool `json:"write" yaml:"write"`
 	SessionTTLMS int  `json:"session_ttl_ms" yaml:"session_ttl_ms"`
 	MaxSessions  int  `json:"max_sessions" yaml:"max_sessions"`
+	// TokenInEnvFile records that the loaded .env declares AGENTMEM_MCP_TOKEN,
+	// whose value is deliberately ignored (the stdio transport reads it from the
+	// process environment only). It is detected state, never configured, and it
+	// exists so `agentmem mcp` can explain the refusal instead of just demanding
+	// a token. The value itself never reaches Config.
+	TokenInEnvFile bool `json:"-" yaml:"-"`
 }
 
 // DefaultMCP is the safe default: no write tools, 30-minute idle sessions and

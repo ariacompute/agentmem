@@ -41,8 +41,40 @@ func TestResolveMCPPrincipalWithToken(t *testing.T) {
 		t.Fatal("an unknown token must be rejected")
 	}
 	// With authentication enabled the declared fallback is refused.
-	if _, err := resolveMCPPrincipal(cfg, authenticator, "", "", "alice", "knowledge:read"); err == nil {
-		t.Fatal("declared fallback must not bypass authentication")
+	_, err = resolveMCPPrincipal(cfg, authenticator, "", "", "alice", "knowledge:read")
+	if err == nil || !strings.Contains(err.Error(), "requires --token") {
+		t.Fatalf("declared fallback must not bypass authentication: %v", err)
+	}
+	if strings.Contains(err.Error(), ".env sets") {
+		t.Fatalf("the .env hint must stay off when the file declares no token: %v", err)
+	}
+}
+
+func TestResolveMCPPrincipalExplainsTokenInDotEnv(t *testing.T) {
+	cfg := authEnabledConfig("s3cret")
+	authenticator, err := buildAuth(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A token pasted into .env is deliberately ignored; the refusal says so
+	// instead of only demanding a token the operator believes they configured.
+	cfg.MCP.TokenInEnvFile = true
+	_, err = resolveMCPPrincipal(cfg, authenticator, "", "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "requires --token") || !strings.Contains(err.Error(), ".env sets AGENTMEM_MCP_TOKEN") {
+		t.Fatalf("auth-enabled refusal = %v", err)
+	}
+
+	// The same confusion reaches the other refusal when authentication is off.
+	open := config.Default()
+	open.MCP.TokenInEnvFile = true
+	openAuth, err := buildAuth(open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTMEM_MCP_TOKEN", "")
+	_, err = resolveMCPPrincipal(open, openAuth, "", "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "provide --token") || !strings.Contains(err.Error(), ".env sets AGENTMEM_MCP_TOKEN") {
+		t.Fatalf("auth-disabled refusal = %v", err)
 	}
 }
 

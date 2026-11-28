@@ -593,7 +593,10 @@ agentmem 内置一套用户视角黑盒验收套件：驱动编译后的真实�
 
 ```bash
 make e2e                               # 完整运行（含既有门禁）
-make e2e E2E_ARGS='--no-gates'         # 只跑黑盒用例
+make e2e E2E_ARGS='--no-gates'         # 跳过 go vet / go test / go build / make validate /
+                                       #   check-boundaries / eval / check-trust-store；
+                                       #   仍会验证覆盖率门禁会拒绝 50% 的 profile，
+                                       #   且 make cover 仍接在 Makefile 与 CI 上
 ./scripts/e2e.sh --filter '^H' --keep  # 只报告 HTTP 组；保留临时目录
 ```
 

@@ -57,7 +57,9 @@ jobs:
         run: go run ./cmd/agentmem eval --dataset testdata/eval.jsonl --k 5
       # Black-box acceptance: builds the real binary and drives the CLI plus a
       # real HTTP service as a user would. Fully offline (GOPROXY=off) and
-      # self-cleaning; --no-gates only skips the gates already run above.
+      # self-cleaning; --no-gates only skips the gates already run above, while
+      # G09/G10 (which prove the coverage gate still rejects a bad profile and is
+      # still wired into make and CI) run on every invocation.
       - name: Black-box acceptance (offline)
         run: make e2e E2E_ARGS='--no-gates'
 

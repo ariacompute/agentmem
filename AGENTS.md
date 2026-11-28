@@ -155,6 +155,7 @@ just for this check.
 
 ```bash
 make test        # go test ./... -count=1
+make cover       # per-package 100% statement coverage gate
 make vet         # go vet ./...
 make build       # single binary
 make e2e         # black-box acceptance: real binary, CLI + HTTP, fully offline

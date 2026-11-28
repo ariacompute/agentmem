@@ -193,7 +193,9 @@ var envSpecs = []struct {
 	// Read directly by the stdio MCP transport (`agentmem mcp`), which resolves
 	// it into a bearer token without ever storing it in Config. It is declared
 	// so the closed whitelist also covers process-environment keys; a value in
-	// a .env file is deliberately ignored (no credentials in files).
+	// a .env file is deliberately ignored (no credentials in files), and Load
+	// only records that the file declared it (MCP.TokenInEnvFile) so the CLI can
+	// explain the refusal.
 	{"AGENTMEM_MCP_TOKEN", func(*Config, string) error { return nil }},
 	// Read directly by the optional Postgres integration test; declared so the
 	// closed whitelist also covers process-environment keys.
@@ -250,6 +252,10 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	cfg := Default()
+	// A token in a .env file is deliberately ignored (see the AGENTMEM_MCP_TOKEN
+	// entry in envSpecs). Remember that the operator tried, so the stdio
+	// transport can say why it refuses to start; the value itself is dropped.
+	cfg.MCP.TokenInEnvFile = strings.TrimSpace(fileValues["AGENTMEM_MCP_TOKEN"]) != ""
 	keys := make([]string, 0, len(values))
 	for k := range values {
 		keys = append(keys, k)

@@ -129,7 +129,7 @@
 - [x] 规格同步：`requirements.md` 升为 v0.2.0；§7 补控制台静态路由，§8 首条改为二进制内嵌托管并新增控制台开关与 try-it 条目，§10 删除「非 `postgres` 计算执行器」与「交互式 Try it」两条已被实现打破的非目标，并把「完整管理台」收窄为写入 / RBAC 管理与多租户运维面板。`task.md` 补记阶段 14。
 - [x] 控制台开关：新增 `AGENTMEM_CONSOLE_ENABLED`（默认 `true`，进闭白名单与 `.env.example`）；`cmdServe` 仅在该值为真时装配 `webui.New`，关闭时 `handlers.Options.Console` 保持真正的 nil（避免 typed-nil），`GET /`、`/assets/*` 与未知静态路径统一返回 JSON 404，`/healthz` 与 9 条 API 路由不变。
 - [x] 真实 Postgres 持续覆盖：`postgres-integration` 由纯 `workflow_dispatch` 改为每日 `schedule` 定时触发并保留手动派发，让 GORM + 迁移 + `computation_runs` + 向量 `Scanner/Valuer` 这条唯一无持续验证的生产存储路径每天被真实 pgvector 验证一次。
-- [x] root 环境测试稳定：`internal/okf`、`internal/vcs`、`internal/store`、`internal/meta`、`internal/adapter` 五个包内依赖 `os.Chmod` 制造拒绝场景的断言在 `os.Geteuid() == 0` 时跳过（root 持有 `CAP_DAC_OVERRIDE`，权限检查被绕过），非 root 覆盖不变。
+- [x] root 环境测试稳定（该机制已由阶段 20 的整体接缝改造取代并删除）：`internal/okf`、`internal/vcs`、`internal/store`、`internal/meta`、`internal/adapter` 五个包内依赖 `os.Chmod` 制造拒绝场景的断言在 `os.Geteuid() == 0` 时跳过（root 持有 `CAP_DAC_OVERRIDE`，权限检查被绕过），非 root 覆盖不变。
 - [x] sidecar 示例：`examples/compute-sidecars/sidecar.py` 单文件参考实现，`stdio` 对应 `bridge: cli`、`http` 对应 `bridge: http`，按 `runtime` 分派 `bigquery` / `dbt` / `looker` / `python`，`AGENTMEM_SIDECAR_OFFLINE=1` 返回确定性表，任何分支都只回 `columns` / `rows` / `body_digest`；`examples/compute-sidecars/README.md` 说明配置、凭据最小权限与上线检查清单。
 - [x] sidecar 契约测试：`internal/compute/sidecar_contract_test.go` 表驱动覆盖四个出向 runtime 的 `runtime` / `body_kind` / 参数透传、digest 正确与不符、未知字段拒绝、`postgres` 不得声明为 sidecar；`scripts/e2e.sh` 新增 `C33`–`C35`（bigquery / dbt / looker 经示例 sidecar 真实执行）与 `H40`（控制台关闭后的对外表现）。
 - [x] 文档同步：`.env.example`、`AGENTS.md`、`docs/security.md`、`docs/compute-sidecar.md`、`docs/e2e.md`、`README.md`、`README_cn.md` 记录开关、定时门禁与 sidecar 示例；`releasenotes*` 属历史发布记录，不改写。
@@ -184,10 +184,22 @@
 - [x] 文档：新增 `docs/testing.md`（口径、命令、排除策略、替身理由、接缝清单），同步 `docs/e2e.md`、`AGENTS.md`、`requirements.md`、中英 README 与三份发布说明。
 - [x] 验收：`make cover` 全 29 个包 100%（7672/7672 语句）；`go build ./...`、`go vet ./...`、`go test ./...`、`make check-boundaries`、`make e2e`（201 条）全绿。
 
+## 阶段 20 · 门禁自证与文档同步（v5 评估闭环）
+
+目标：把 v5 评估报告里剩余的 4 项 P3 与 1 项 nit 收敛掉——门禁不再有「自身从不被执行」的路径，Web 资产计数不再靠魔数，中英发布说明与命令速查回到同一事实。
+
+- [x] 覆盖率门禁与运行身份解耦：`internal/vcs/git.go`、`internal/okf/bundle.go`、`internal/store/okfstore.go`、`internal/adapter/okf.go`、`internal/meta/file_fake.go` 引入包级可注入接缝（`mkdirAll` / `writeFile` / `stageFile` / `readDir` / `walkDir` / `bundlePut` / `bundleGet` / `renameFile`），默认指向生产实现；「文件写失败」分支不再依赖 DAC，root 与非 root 下均为 28/28 包 100%（本轮终态 7684/7684 语句）。阶段 15 的 `os.Geteuid() == 0` 跳过断言已整体删除，`scripts/coverage` 在 root 下只补一条提示，`docs/testing.md` 登记接缝清单。
+- [x] e2e 门禁自证：`scripts/e2e.sh` 的 `G09`/`G10` 移出 `NO_GATES` 的 `else` 分支（两者都是秒级检查），CI 的 `make e2e E2E_ARGS='--no-gates'` 从此也会执行它们——此前摘掉 `make cover` 不会有任何检查报红。
+- [x] 去魔数：`W04` 的 Web 离线测试文件数由 `eq 10` 改为下限断言 `ge 10`（新增 `ge` 助手），新增测试文件不再需要同步改脚本；误删仍由 `W05` 的真实 `bun test` 兜住。
+- [x] nit：`agentmem mcp` 在缺身份时，若 `.env` 声明了 `AGENTMEM_MCP_TOKEN`，两条报错都追加「该值被故意忽略，请改从进程环境导出」。实现为 `config.MCPConfig.TokenInEnvFile`（`json:"-"`，由 `Load` 从文件值置位，进程环境导出的令牌不置位），值本身仍不进 `Config`。
+- [x] 文档同步：三份发布说明（英 / 中 / emoji）的「离线可测性」段落统一为「每包 100% + 接缝注入，root 与非 root 一致」；`docs/e2e.md` 的 `--no-gates` 口径与计数（225 / `--no-gates` 219 行 = `PASS=218` + `SKIP G00`）更新；`docs/testing.md`、中英 README 与 `ci.yml` 注释同步；`task.md` 验收块与 `AGENTS.md` 命令速查补 `make cover`。
+- [x] 验收：`go test ./...`、`go vet ./...`、`go build ./...`、`make cover`（全包 100%）、`make e2e`（225 条）与 `make e2e E2E_ARGS='--no-gates'`（219 行）全绿。
+
 ## 验收
 
 ```bash
 go test ./... -count=1
+make cover
 go vet ./...
 go build -o bin/agentmem ./cmd/agentmem
 go run ./cmd/agentmem validate --env .env.example

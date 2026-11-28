@@ -116,4 +116,5 @@ go run ./scripts/coverage -profile coverage.out -exclude exceptions.txt
 | 覆盖率门禁 | `scripts/coverage` | 包级 100%、缺包检测、排除策略 |
 
 `make e2e` 的 `G09` 用一份故意不达标的 profile 证明门禁会失败，`G10` 证明
-`make cover` 同时接在 `Makefile` 与 CI 上。
+`make cover` 同时接在 `Makefile` 与 CI 上。两者在 `--no-gates` 下同样执行——它们证明的
+正是「门禁仍在」，若随慢门禁一起跳过，摘掉 `make cover` 后 CI 会保持全绿。

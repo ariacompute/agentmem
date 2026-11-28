@@ -62,6 +62,31 @@ func TestMCPTokenKeyIsKnownButIgnored(t *testing.T) {
 	if cfg.MCP.Write {
 		t.Fatal("a token must not flip the write switch")
 	}
+	// Only the fact that the file declared the key is kept, so `agentmem mcp`
+	// can explain why the value is ignored; the value itself is dropped.
+	if !cfg.MCP.TokenInEnvFile {
+		t.Fatal("a .env token must be recorded as ignored")
+	}
+
+	// An empty placeholder is not a declaration, and a process-environment token
+	// never sets the file flag.
+	empty := writeEnv(t, "AGENTMEM_MCP_TOKEN=\n")
+	cfg, err = Load(empty)
+	if err != nil {
+		t.Fatalf("an empty token placeholder must load: %v", err)
+	}
+	if cfg.MCP.TokenInEnvFile {
+		t.Fatal("an empty .env token must not count as a declaration")
+	}
+	t.Setenv("AGENTMEM_MCP_TOKEN", "from-env")
+	plain := writeEnv(t, "AGENTMEM_MCP_WRITE=false\n")
+	cfg, err = Load(plain)
+	if err != nil {
+		t.Fatalf("load = %v", err)
+	}
+	if cfg.MCP.TokenInEnvFile {
+		t.Fatal("a process-environment token is not a .env declaration")
+	}
 }
 
 func TestMCPWriteMustBeBoolean(t *testing.T) {

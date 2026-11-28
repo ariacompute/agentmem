@@ -8,7 +8,7 @@
 #
 # Usage:
 #   scripts/e2e.sh                     # full run (including existing quality gates)
-#   scripts/e2e.sh --no-gates          # black-box cases only, skip slow gates
+#   scripts/e2e.sh --no-gates          # skip the slow G02-G08 gates; G09/G10 still run
 #   scripts/e2e.sh --filter '^H'       # report only the HTTP group
 #   scripts/e2e.sh --keep              # keep the temporary directory
 #   make e2e                           # repository gate entry point
@@ -27,7 +27,8 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/e2e.sh [--no-gates] [--keep] [--filter REGEX] [--help]
 
-  --no-gates       skip go vet / go test / make gates (binary build always runs)
+  --no-gates       skip go vet / go test / make gates (binary build always runs);
+                   G09/G10, which prove the coverage gate itself, still run
   --keep           keep the temporary working directory for troubleshooting
   --filter REGEX   report only cases whose ID matches this regex (e.g. '^H', '^(C|S)')
   --help           show this help
@@ -177,6 +178,9 @@ ck() {
 }
 
 eq() { if [[ "$1" == "$2" ]]; then ck 0 ""; else ck 1 "$3: expected '$2', got '$1'"; fi; }
+# A lower bound keeps asset counts from becoming a magic number that every
+# added file has to bump; the suite itself still proves the files work.
+ge() { if [[ "$1" -ge "$2" ]]; then ck 0 ""; else ck 1 "$3: expected at least '$2', got '$1'"; fi; }
 has() { if [[ "$1" == *"$2"* ]]; then ck 0 ""; else ck 1 "$3: does not contain '$2'"; fi; }
 hasnt() { if [[ "$1" != *"$2"* ]]; then ck 0 ""; else ck 1 "$3: should not contain '$2'"; fi; }
 
@@ -2456,7 +2460,7 @@ web_langs="$(cat "$REPO/web/src/lib/languages.js")"
 has "$web_langs" 'zh-TW' 'Traditional Chinese'
 has "$web_langs" 'hi' 'Hindi'
 web_tests="$(ls "$REPO"/web/tests/*.test.mjs 2>/dev/null | wc -l)"
-eq "$web_tests" 10 'offline test file count'
+ge "$web_tests" 10 'offline test file count'
 end_case
 
 begin_case W06 "docs page provides interactive try-it"
@@ -2509,20 +2513,25 @@ else
   else
     skip_case G08 "make check-trust-store" "openssl not installed"
   fi
-
-  begin_case G09 "the coverage gate rejects a profile below 100%"
-  printf 'mode: atomic\nagentmem/internal/mcp/protocol.go:1.1,2.2 1 1\nagentmem/internal/mcp/protocol.go:3.3,4.4 1 0\n' >"$WORK/incomplete.out"
-  gate_rc=0
-  go run ./scripts/coverage -profile "$WORK/incomplete.out" >"$WORK/gate-G09.log" 2>&1 || gate_rc=$?
-  ck $(( gate_rc == 1 ? 0 : 1 )) "exit code $gate_rc (want 1)"
-  has "$(cat "$WORK/gate-G09.log")" '50.0% < 100.0%' 'below-threshold report'
-  end_case
-
-  begin_case G10 "the coverage gate is wired into make and CI"
-  has "$(cat "$REPO/Makefile")" 'cover:' 'make cover target'
-  has "$(cat "$REPO/.github/workflows/ci.yml")" 'make cover' 'CI step'
-  end_case
 fi
+
+# G09/G10 prove the coverage gate itself: that it rejects a bad profile and that
+# it is still wired into make and CI. They must never be skipped with
+# --no-gates, otherwise removing `make cover` would leave CI green (the only
+# check able to notice would be the one that no longer runs). Both are
+# second-scale checks, so they run on every invocation.
+begin_case G09 "the coverage gate rejects a profile below 100%"
+printf 'mode: atomic\nagentmem/internal/mcp/protocol.go:1.1,2.2 1 1\nagentmem/internal/mcp/protocol.go:3.3,4.4 1 0\n' >"$WORK/incomplete.out"
+gate_rc=0
+go run ./scripts/coverage -profile "$WORK/incomplete.out" >"$WORK/gate-G09.log" 2>&1 || gate_rc=$?
+ck $(( gate_rc == 1 ? 0 : 1 )) "exit code $gate_rc (want 1)"
+has "$(cat "$WORK/gate-G09.log")" '50.0% < 100.0%' 'below-threshold report'
+end_case
+
+begin_case G10 "the coverage gate is wired into make and CI"
+has "$(cat "$REPO/Makefile")" 'cover:' 'make cover target'
+has "$(cat "$REPO/.github/workflows/ci.yml")" 'make cover' 'CI step'
+end_case
 
 # ===========================================================================
 section "Summary"

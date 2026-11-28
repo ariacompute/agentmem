@@ -84,12 +84,12 @@ func resolveMCPPrincipal(cfg *config.Config, authenticator *auth.Authenticator, 
 		return principal, nil
 	}
 	if cfg.Auth.Enabled {
-		return auth.Principal{}, errors.New("mcp: AGENTMEM_AUTH_ENABLED=true requires --token, --token-env or AGENTMEM_MCP_TOKEN")
+		return auth.Principal{}, errors.New("mcp: AGENTMEM_AUTH_ENABLED=true requires --token, --token-env or AGENTMEM_MCP_TOKEN" + tokenInEnvFileHint(cfg))
 	}
 	subject = strings.TrimSpace(subject)
 	scopes = strings.TrimSpace(scopes)
 	if subject == "" || scopes == "" {
-		return auth.Principal{}, errors.New("mcp: provide --token, or --subject with --scopes")
+		return auth.Principal{}, errors.New("mcp: provide --token, or --subject with --scopes" + tokenInEnvFileHint(cfg))
 	}
 	perms := make([]auth.Permission, 0, 4)
 	for _, raw := range strings.Split(scopes, ",") {
@@ -104,6 +104,17 @@ func resolveMCPPrincipal(cfg *config.Config, authenticator *auth.Authenticator, 
 		perms = append(perms, perm)
 	}
 	return auth.DeclaredPrincipal(subject, perms)
+}
+
+// tokenInEnvFileHint explains the most common self-inflicted failure: a token
+// pasted into .env, which is deliberately ignored because credentials never
+// live in files. Without this sentence the operator only reads "a token is
+// required" while looking at the token they just configured.
+func tokenInEnvFileHint(cfg *config.Config) string {
+	if !cfg.MCP.TokenInEnvFile {
+		return ""
+	}
+	return " (.env sets AGENTMEM_MCP_TOKEN, but a token in a file is deliberately ignored; export it in the process environment instead)"
 }
 
 // runMCPStdio reads one JSON-RPC payload per line and writes one response per
